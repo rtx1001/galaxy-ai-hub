@@ -1,0 +1,59 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+*.bak
+*.broken-*
+
+# Build caches and generated portable runtime files
+src-tauri/target
+src-tauri/target-*
+.codex-cargo-target
+codex-cargo-target-temp
+llama_temp
+*.zip
+assistant-runtime
+src-tauri/assistant-runtime
+_backups
+
+# Local secrets, personal settings, and machine-specific state
+config
+*.backup.json
+*.token
+*.secret
+*.key
+*.pem
+
+# Bundled/downloaded engines and heavy model/runtime files
+bin
+src-tauri/engine
+*.gguf
+*.safetensors
+*.ckpt
+*.bin
+*.onnx
+*.pt
+*.pth
+*.pyd
+*.dll
+*.exe
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

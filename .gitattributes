@@ -1,0 +1,29 @@
+* text=auto working-tree-encoding=UTF-8
+
+*.rs text working-tree-encoding=UTF-8 eol=lf
+*.ts text working-tree-encoding=UTF-8 eol=lf
+*.tsx text working-tree-encoding=UTF-8 eol=lf
+*.js text working-tree-encoding=UTF-8 eol=lf
+*.json text working-tree-encoding=UTF-8 eol=lf
+*.toml text working-tree-encoding=UTF-8 eol=lf
+*.md text working-tree-encoding=UTF-8 eol=lf
+*.html text working-tree-encoding=UTF-8 eol=lf
+*.css text working-tree-encoding=UTF-8 eol=lf
+*.yml text working-tree-encoding=UTF-8 eol=lf
+*.yaml text working-tree-encoding=UTF-8 eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.wav binary
+*.mp3 binary
+*.gguf binary
+*.safetensors binary
+*.bin binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.pyd binary

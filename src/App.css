@@ -1,0 +1,304 @@
+@import "tailwindcss" source(none);
+@source "./**/*.{ts,tsx,css}";
+@source "../index.html";
+
+@theme {
+  --font-sans: "Inter", "Segoe UI", sans-serif;
+  --font-title: "Outfit", "Segoe UI", sans-serif;
+}
+
+@layer utilities {
+  .font-title {
+    font-family: var(--font-title);
+  }
+  
+  .glass-panel {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-2xl;
+  }
+  
+  .glass-input {
+    @apply bg-white/5 border border-white/10 focus:border-indigo-500/50 focus:bg-white/10 focus:ring-1 focus:ring-indigo-500/50 backdrop-blur-md outline-none transition-all duration-300;
+  }
+  
+  .premium-gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400;
+  }
+  
+  .hover-glow {
+    @apply transition-all duration-300 hover:shadow-[0_0_20px_rgba(99,102,241,0.4)];
+  }
+}
+
+html,
+#root {
+  min-height: 100%;
+  min-width: 480px;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-width: 480px;
+  font-family: var(--font-sans);
+  color: #f1f5f9;
+  background: #131314;
+}
+
+select,
+option {
+  background: #1e1f24;
+  color: #f1f5f9;
+}
+
+/* Fluid animations */
+.chat-bubble-enter {
+  animation: slideUpFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Custom Webkit Scrollbar for Premium Feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.profile-voice-list::-webkit-scrollbar {
+  width: 16px;
+}
+
+.profile-voice-list::-webkit-scrollbar-thumb {
+  min-height: 64px;
+  background-color: rgba(255, 255, 255, 0.34);
+  border: 4px solid transparent;
+  background-clip: padding-box;
+}
+
+.profile-voice-list {
+  scrollbar-width: auto;
+  scrollbar-color: rgba(255, 255, 255, 0.34) transparent;
+  scroll-behavior: smooth;
+}
+
+.panel-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+.panel-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.dropdown-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+.dropdown-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.approval-prompt-textarea {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--accent-color) 42%, transparent) transparent;
+  scroll-behavior: smooth;
+}
+
+.automation-time-scroll {
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+.automation-time-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.approval-prompt-textarea::-webkit-scrollbar {
+  width: 10px;
+}
+
+.approval-prompt-textarea::-webkit-scrollbar-track {
+  margin: 10px 0;
+  background: transparent;
+}
+
+.approval-prompt-textarea::-webkit-scrollbar-thumb {
+  min-height: 48px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--accent-color) 42%, transparent);
+  background-clip: padding-box;
+}
+
+.approval-prompt-textarea::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--accent-color) 62%, transparent);
+}
+
+.conversation-scroll {
+  contain: layout paint style;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+.chat-message-row {
+  content-visibility: auto;
+  contain-intrinsic-size: 180px;
+}
+
+.chat-bubble {
+  contain: paint;
+}
+
+.chat-bubble,
+.chat-content {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-bubble pre,
+.chat-bubble code,
+.chat-bubble a,
+.chat-bubble td,
+.chat-bubble th {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-bubble pre {
+  max-width: 100%;
+}
+
+.chat-bubble table {
+  max-width: 100%;
+}
+
+details > summary .details-chevron {
+  transition: transform 180ms ease;
+}
+
+details[open] > summary .details-chevron {
+  transform: rotate(180deg);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.startup-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+  color: #e3e3e3;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(242, 202, 44, 0.14), transparent 28%),
+    linear-gradient(180deg, #131314 0%, #17181a 44%, #101113 100%);
+}
+
+.startup-card {
+  width: min(360px, calc(100vw - 48px));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  background: rgba(30, 31, 32, 0.92);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+  padding: 28px 24px 24px;
+  text-align: center;
+}
+
+.startup-logo {
+  width: 68px;
+  height: 68px;
+  border-radius: 18px;
+  margin: 0 auto 18px;
+  display: grid;
+  place-items: center;
+  background: #101113;
+  border: 1px solid rgba(242, 202, 44, 0.28);
+  box-shadow: 0 0 34px rgba(242, 202, 44, 0.16);
+}
+
+.startup-logo img {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+.startup-kicker {
+  color: #f2ca2c;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.startup-title {
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.startup-message {
+  margin-top: 8px;
+  color: #c4c7c5;
+  font-size: 13px;
+}
+
+.startup-bar {
+  position: relative;
+  overflow: hidden;
+  height: 3px;
+  margin-top: 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.startup-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 38%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, #f2ca2c, transparent);
+  animation: startup-scan 1.25s ease-in-out infinite;
+}
+
+@keyframes startup-scan {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(270%); }
+}
