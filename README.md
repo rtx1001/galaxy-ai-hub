@@ -11,7 +11,7 @@ The goal is simple: make a personal AI that feels natural to talk to, can use lo
 - Chat with local GGUF language models through a desktop app.
 - Use character profiles with avatar, personality, voice, memory, and behavior settings.
 - Switch between user profiles and assistant profiles.
-- Speak replies with local OmniVoice voice synthesis.
+- Speak replies with local voice synthesis.
 - Play both sides of a conversation when auto speech is enabled.
 - Generate images locally through the app's Image Studio flow.
 - Send and receive Telegram messages through the same assistant logic.
@@ -39,7 +39,7 @@ The design target is closer to a personal AI workstation than a normal chatbot w
 - **Frontend:** React 19, TypeScript, Vite
 - **Backend:** Rust
 - **Local LLM:** llama.cpp-compatible GGUF models
-- **Voice:** OmniVoice local runtime
+- **Voice:** local voice synthesis runtime
 - **Image generation:** local image runtime managed by the app
 - **Integrations:** Telegram, Google-related tooling, local workspace folders
 
@@ -61,7 +61,7 @@ The repo intentionally ignores large or private local files:
 
 - downloaded LLM models
 - image generation models
-- OmniVoice model files
+- voice model files
 - generated images/audio
 - local app settings
 - Google tokens
@@ -71,6 +71,90 @@ The repo intentionally ignores large or private local files:
 - bundled engine binaries
 
 This keeps the repository light and avoids leaking personal credentials.
+
+## First-Time Setup Plan
+
+The app is meant to become simple for new users: install the app, choose a PC tier, then let Galaxy AI Hub download the right companion parts step by step.
+
+Planned first-run flow:
+
+1. **Choose PC tier:** light, balanced, or high-end.
+2. **Download an LLM:** the assistant brain.
+3. **Download voice files:** local speech and one-shot voice cloning support.
+4. **Download image files:** local image generation.
+5. **Pick or create a character:** avatar, name, personality, and voice.
+6. **Start chatting:** no manual folder digging unless the user wants advanced control.
+
+Until that installer flow is finished, models are added manually.
+
+## Adding LLM Models
+
+Galaxy AI Hub uses llama.cpp-compatible GGUF models. Put model folders under your configured model directory, for example:
+
+```text
+C:\Users\<you>\AppData\Roaming\Jan\data\llamacpp\models
+```
+
+A simple model folder should look like this:
+
+```text
+models/
+  gemma-4-E2B-it-Q6_K/
+    model.gguf
+    mmproj.gguf          optional, only for multimodal models
+    model.yml
+```
+
+Example `model.yml`:
+
+```yml
+embedding: false
+mmproj_path: llamacpp/models/gemma-4-E2B-it-Q6_K/mmproj.gguf
+model_path: llamacpp/models/gemma-4-E2B-it-Q6_K/model.gguf
+name: gemma-4-E2B-it-Q6_K
+size_bytes: 8065300448
+```
+
+Recommended starting models:
+
+- **Light PCs:** Gemma 4 E2B GGUF
+- **Balanced PCs:** Gemma 4 E4B GGUF
+- **Qwen alternative:** Qwen2.5 or Qwen3 GGUF instruct models
+- **Coding-focused option:** Qwen2.5 Coder GGUF
+
+Useful model links:
+
+- [Gemma 4 E2B GGUF on Hugging Face](https://huggingface.co/DuoNeural/Gemma-4-E2B-GGUF)
+- [Gemma 4 models collection on Hugging Face](https://huggingface.co/collections/unsloth/gemma-4)
+- [Official Qwen llama.cpp / GGUF guide](https://qwen.readthedocs.io/en/latest/run_locally/llama.cpp.html)
+- [Qwen2.5 1.5B Instruct GGUF](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF)
+- [Qwen3 4B GGUF](https://huggingface.co/Qwen/Qwen3-4B-GGUF)
+
+For most users, start with a Q4, Q5, or Q6 quant. Q4 is smaller and lighter. Q5/Q6 usually sound smarter if your PC has enough RAM/VRAM.
+
+## One-Shot Voice Clones
+
+The voice system can use short reference samples to speak with a selected character voice.
+
+Good sample rules:
+
+- Use a clean voice clip around 8 seconds.
+- One speaker only.
+- No background music.
+- No heavy echo or noise.
+- Trim at natural word endings.
+- Use normalized volume.
+- Mono 22050 Hz works well for the current sample pipeline.
+
+In the app:
+
+1. Open the character profile.
+2. Choose a voice folder.
+3. Pick or preview a voice sample.
+4. Save the character.
+5. Use the speaker button or enable auto speech.
+
+The app prepares samples so they are easier for the local voice runtime to reuse.
 
 ## Development
 
@@ -106,7 +190,7 @@ npm run check:encoding
 
 ## Notes
 
-This project cares a lot about Unicode text handling because the assistant is expected to speak and reason naturally across languages such as Vietnamese, English, Thai, and more.
+This project cares a lot about Unicode text handling because the assistant is expected to speak and reason naturally across languages such as Vietnamese, English, and more.
 
 Heavy runtime files are expected to be downloaded or prepared separately. Future installer work should make that setup much easier for new users.
 
@@ -122,4 +206,3 @@ Main areas still being improved:
 - local image generation quality
 - voice/runtime memory management
 - cleaner release packaging
-
