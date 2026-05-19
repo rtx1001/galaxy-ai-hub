@@ -135,7 +135,21 @@ fn brain_files(tier: &str) -> Vec<SetupFile> {
     )]
 }
 
-fn voice_files() -> Vec<SetupFile> {
+fn voice_files(tier: &str) -> Vec<SetupFile> {
+    let (base_file, tokenizer_file, quant_label, size_hint) = match tier {
+        "light" => (
+            "omnivoice-base-Q4_K_M.gguf",
+            "omnivoice-tokenizer-Q4_K_M.gguf",
+            "Q4",
+            "about 650 MB",
+        ),
+        _ => (
+            "omnivoice-base-Q8_0.gguf",
+            "omnivoice-tokenizer-Q8_0.gguf",
+            "Q8",
+            "about 1.2 GB",
+        ),
+    };
     let root = app_root_dir()
         .join("assistant-runtime")
         .join("voice-tts")
@@ -143,26 +157,36 @@ fn voice_files() -> Vec<SetupFile> {
         .join("omnivoice.cpp");
     vec![
         setup_file(
-            "Voice base Q8",
+            &format!("Voice base {}", quant_label),
             "Serveurperso/OmniVoice-GGUF",
-            "omnivoice-base-Q8_0.gguf",
-            root.join("omnivoice-base-Q8_0.gguf"),
-            "about 1.2 GB",
+            base_file,
+            root.join(base_file),
+            size_hint,
         ),
         setup_file(
-            "Voice tokenizer Q8",
+            &format!("Voice tokenizer {}", quant_label),
             "Serveurperso/OmniVoice-GGUF",
-            "omnivoice-tokenizer-Q8_0.gguf",
-            root.join("omnivoice-tokenizer-Q8_0.gguf"),
+            tokenizer_file,
+            root.join(tokenizer_file),
             "about 30 MB",
         ),
     ]
 }
 
 fn image_files(tier: &str) -> Vec<SetupFile> {
-    let image_quant = match tier {
-        "light" => ("v23/Qwen-Rapid-NSFW-v23_Q4_K.gguf", "about 12.2 GB"),
-        _ => ("v23/Qwen-Rapid-NSFW-v23_Q4_K.gguf", "about 12.2 GB"),
+    let (image_file, image_size, encoder_file, encoder_size) = match tier {
+        "light" => (
+            "v23/Qwen-Rapid-NSFW-v23_Q3_K.gguf",
+            "about 9.7 GB",
+            "Qwen2.5-VL-7B-Instruct.Q3_K_M.gguf",
+            "about 3.8 GB",
+        ),
+        _ => (
+            "v23/Qwen-Rapid-NSFW-v23_Q4_K.gguf",
+            "about 12.2 GB",
+            "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
+            "about 4.4 GB",
+        ),
     };
     let root = app_root_dir()
         .join("assistant-runtime")
@@ -173,17 +197,21 @@ fn image_files(tier: &str) -> Vec<SetupFile> {
         setup_file(
             "Qwen Image Edit",
             "Novice25/Qwen-Image-Edit-Rapid-AIO-GGUF",
-            image_quant.0,
-            root.join("Qwen-Rapid-NSFW-v23_Q4_K.gguf"),
-            image_quant.1,
+            image_file,
+            root.join(
+                Path::new(image_file)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("Qwen-Rapid-NSFW-v23_Q4_K.gguf"),
+            ),
+            image_size,
         ),
         setup_file(
             "Image text encoder",
             "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
-            "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
-            root.join("text_encoders")
-                .join("Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf"),
-            "about 4.4 GB",
+            encoder_file,
+            root.join("text_encoders").join(encoder_file),
+            encoder_size,
         ),
         setup_file(
             "Image projector",
@@ -343,7 +371,7 @@ pub fn get_setup_catalog(tier: String) -> SetupCatalog {
         _ => "balanced".to_string(),
     };
     let brain = brain_files(&tier);
-    let voice = voice_files();
+    let voice = voice_files(&tier);
     let image = image_files(&tier);
     SetupCatalog {
         tier: tier.clone(),
@@ -387,7 +415,7 @@ pub async fn install_setup_bundle(app: tauri::AppHandle, tier: String) -> Result
     tauri::async_runtime::spawn_blocking(move || -> Result<SetupInstallResult, String> {
         let mut all_files = Vec::new();
         all_files.extend(brain_files(&install_tier));
-        all_files.extend(voice_files());
+        all_files.extend(voice_files(&install_tier));
         all_files.extend(image_files(&install_tier));
         let file_count = all_files.len();
         emit_progress(

@@ -167,8 +167,16 @@ struct WhisperStdout {
 const VOICE_RUNTIME_SCRIPT: &str = include_str!("../python/voice_runtime.py");
 const PREPARED_VOICE_SAMPLE_VERSION: &str = "v4-mono22050-normfade-8s";
 const PREPARED_VOICE_SAMPLE_RATE: u32 = 22_050;
-const DEFAULT_QWEN_IMAGE_MODEL: &str = "Qwen-Rapid-NSFW-v23_Q4_K.gguf";
-const DEFAULT_QWEN_IMAGE_LLM: &str = "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf";
+const DEFAULT_QWEN_IMAGE_MODELS: &[&str] = &[
+    "Qwen-Rapid-NSFW-v23_Q4_K.gguf",
+    "Qwen-Rapid-NSFW-v23_Q3_K.gguf",
+    "Qwen-Rapid-NSFW-v23_Q2_K.gguf",
+];
+const DEFAULT_QWEN_IMAGE_LLMS: &[&str] = &[
+    "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
+    "Qwen2.5-VL-7B-Instruct.Q3_K_M.gguf",
+    "Qwen2.5-VL-7B-Instruct.Q2_K.gguf",
+];
 const DEFAULT_QWEN_IMAGE_VISION: &str = "Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf";
 const DEFAULT_QWEN_IMAGE_VAE: &str = "qwen_image_vae.safetensors";
 
@@ -744,9 +752,15 @@ fn sdcpp_cli_path() -> PathBuf {
 
 fn qwen_image_paths() -> Option<(PathBuf, PathBuf, PathBuf, PathBuf)> {
     let root = sdcpp_qwen_edit_dir();
-    let diffusion = root.join(DEFAULT_QWEN_IMAGE_MODEL);
+    let diffusion = DEFAULT_QWEN_IMAGE_MODELS
+        .iter()
+        .map(|name| root.join(name))
+        .find(|path| path.exists())?;
     let vae = root.join("vae").join(DEFAULT_QWEN_IMAGE_VAE);
-    let llm = root.join("text_encoders").join(DEFAULT_QWEN_IMAGE_LLM);
+    let llm = DEFAULT_QWEN_IMAGE_LLMS
+        .iter()
+        .map(|name| root.join("text_encoders").join(name))
+        .find(|path| path.exists())?;
     let vision = root.join("text_encoders").join(DEFAULT_QWEN_IMAGE_VISION);
     if sdcpp_cli_path().exists()
         && diffusion.exists()
