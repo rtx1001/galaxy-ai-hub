@@ -21,7 +21,16 @@ src-tauri/target-*
 codex-cargo-target-temp
 llama_temp
 *.zip
-assistant-runtime
+assistant-runtime/*
+!assistant-runtime/voice/
+assistant-runtime/voice/*
+!assistant-runtime/voice/voice_samples/
+!assistant-runtime/voice/voice_samples/*.wav
+assistant-runtime/voice/voice_samples/celeb_*.wav
+assistant-runtime/voice/voice_samples/host_*.wav
+assistant-runtime/voice/voice_samples/utuber_*.wav
+assistant-runtime/voice/voice_samples/en_Trump.wav
+assistant-runtime/voice/voice_samples/en_David_Attenborough.wav
 src-tauri/assistant-runtime
 _backups
 
