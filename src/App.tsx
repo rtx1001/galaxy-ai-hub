@@ -438,7 +438,7 @@ const SETUP_PARTS: SetupPart[] = [
     purpose: "Main chat, reasoning, memory, and tool use.",
     light: "Gemma 4 E2B GGUF Q4/Q5",
     balanced: "Gemma 4 E4B GGUF Q5/Q6",
-    high: "Gemma 4 E4B or larger Qwen/Gemma GGUF",
+    high: "Gemma 4 E4B GGUF Q8",
     note: "The app always gives the LLM first priority.",
   },
   {
@@ -458,7 +458,7 @@ const SETUP_PARTS: SetupPart[] = [
     purpose: "Text-to-image and image editing from chat.",
     light: "Qwen Image Edit Q3 at smaller resolutions",
     balanced: "Qwen Image Edit Q4 at 1024px",
-    high: "Qwen Image Edit Q4 at 1024-1536px",
+    high: "Qwen Image Edit Q5 at 1024-1536px",
     note: "Image files stay outside Git and will be downloaded by setup.",
   },
 ];

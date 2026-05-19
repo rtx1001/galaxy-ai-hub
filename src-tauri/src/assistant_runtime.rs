@@ -168,11 +168,17 @@ const VOICE_RUNTIME_SCRIPT: &str = include_str!("../python/voice_runtime.py");
 const PREPARED_VOICE_SAMPLE_VERSION: &str = "v4-mono22050-normfade-8s";
 const PREPARED_VOICE_SAMPLE_RATE: u32 = 22_050;
 const DEFAULT_QWEN_IMAGE_MODELS: &[&str] = &[
+    "Qwen-Rapid-NSFW-v23_Q8_0.gguf",
+    "Qwen-Rapid-NSFW-v23_Q6_K.gguf",
+    "Qwen-Rapid-NSFW-v23_Q5_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q4_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q3_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q2_K.gguf",
 ];
 const DEFAULT_QWEN_IMAGE_LLMS: &[&str] = &[
+    "Qwen2.5-VL-7B-Instruct.Q8_0.gguf",
+    "Qwen2.5-VL-7B-Instruct.Q6_K.gguf",
+    "Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf",
     "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
     "Qwen2.5-VL-7B-Instruct.Q3_K_M.gguf",
     "Qwen2.5-VL-7B-Instruct.Q2_K.gguf",

@@ -84,11 +84,11 @@ fn brain_choice(tier: &str) -> BrainChoice {
             size_hint: "about 3.5 GB",
         },
         "high" => BrainChoice {
-            folder_name: "gemma-4-E4B-it-Q6_K",
-            model_name: "Gemma 4 E4B Q6_K",
+            folder_name: "gemma-4-E4B-it-Q8_0",
+            model_name: "Gemma 4 E4B Q8_0",
             repo: "unsloth/gemma-4-E4B-it-GGUF",
-            file: "gemma-4-E4B-it-Q6_K.gguf",
-            size_hint: "about 6.3 GB",
+            file: "gemma-4-E4B-it-Q8_0.gguf",
+            size_hint: "about 8.2 GB",
         },
         _ => BrainChoice {
             folder_name: "gemma-4-E4B-it-Q5_K_M",
@@ -180,6 +180,12 @@ fn image_files(tier: &str) -> Vec<SetupFile> {
             "about 9.7 GB",
             "Qwen2.5-VL-7B-Instruct.Q3_K_M.gguf",
             "about 3.8 GB",
+        ),
+        "high" => (
+            "v23/Qwen-Rapid-NSFW-v23_Q5_K.gguf",
+            "about 14.5 GB",
+            "Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf",
+            "about 5.2 GB",
         ),
         _ => (
             "v23/Qwen-Rapid-NSFW-v23_Q4_K.gguf",
