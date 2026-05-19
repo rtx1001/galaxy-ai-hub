@@ -37,6 +37,8 @@ _backups
 
 # Local secrets, personal settings, and machine-specific state
 config
+characters/*
+!characters/README.md
 *.backup.json
 *.token
 *.secret

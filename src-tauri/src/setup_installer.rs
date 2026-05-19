@@ -281,6 +281,14 @@ fn files_installed(files: &[SetupFile]) -> bool {
     files.iter().all(file_installed)
 }
 
+fn brain_metadata_installed(tier: &str) -> bool {
+    let model_yml = brain_model_folder_for_tier(tier).join("model.yml");
+    model_yml
+        .metadata()
+        .map(|meta| meta.len() > 32)
+        .unwrap_or(false)
+}
+
 fn write_brain_model_yml(tier: &str) -> Result<(), String> {
     let folder = brain_model_folder_for_tier(tier);
     let model = folder.join("model.gguf");
@@ -446,7 +454,7 @@ pub fn get_setup_catalog(tier: String) -> SetupCatalog {
             SetupPartCatalog {
                 key: "brain".to_string(),
                 title: "Brain".to_string(),
-                installed: files_installed(&brain),
+                installed: files_installed(&brain) && brain_metadata_installed(&tier),
                 files: brain,
             },
             SetupPartCatalog {

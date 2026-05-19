@@ -54,6 +54,14 @@ export function SetupScreen({
   onChooseFiles,
   onInstall,
 }: SetupScreenProps) {
+  const hasInstalledParts = Boolean(setupCatalog?.parts.some((part) => part.installed));
+  const hasMissingParts = Boolean(setupCatalog?.parts.some((part) => !part.installed));
+  const installButtonLabel = setupInstalling
+    ? "Installing..."
+    : hasInstalledParts && hasMissingParts
+      ? "Repair missing files"
+      : "Install recommended setup";
+
   return (
     <div
       className="setup-screen"
@@ -199,7 +207,7 @@ export function SetupScreen({
               onClick={onInstall}
               disabled={setupInstalling}
             >
-              {setupInstalling ? "Installing..." : "Install recommended setup"}
+              {installButtonLabel}
             </button>
           </div>
         </div>

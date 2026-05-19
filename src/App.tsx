@@ -1,15 +1,12 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import brandLogo from "./assets/logo-gah.svg";
 import { ChatContentPart, ChatMessage, ChatSessions, EngineInfo, ModelLoadStatus, VoiceSetupStatus, ActionProposal, FilePreviewResult } from "./types";
-import { MicIcon, SendIcon, StopIcon, ImageIcon, FolderIcon, SpeakerIcon, EraserIcon, PlusIcon, CloseIcon, ChevronDownIcon, ChevronUpIcon, PlayIcon, CameraIcon, BrainIcon, EyeIcon, GearIcon, MenuIcon, TrashIcon, BrushIcon, RefreshIcon, RepeatIcon, SaveIcon, DownloadIcon } from "./components/Icons";
-import { IconButton, SliderField, NumberStepper, AvatarImage } from "./components/UI";
-import { FilePreviewCard, ToolResultCards, ImageProposalCard, ActionProposalCard } from "./components/ToolCards";
-import { FormattedMessageText } from "./components/ChatBubble";
-import { HeartbeatMonitor } from "./components/HeartbeatMonitor";
+import { MicIcon, SendIcon, StopIcon, ImageIcon, FolderIcon, SpeakerIcon, EraserIcon, CloseIcon, ChevronDownIcon, ChevronUpIcon, PlayIcon, CameraIcon, BrainIcon, EyeIcon, GearIcon, MenuIcon, TrashIcon, BrushIcon, RepeatIcon, SaveIcon, DownloadIcon } from "./components/Icons";
+import { IconButton, NumberStepper, AvatarImage } from "./components/UI";
 import { ResourceHeader } from "./components/ResourceHeader";
 import { SetupScreen } from "./components/SetupScreen";
 import { StartupScreen, SettingsLoadErrorScreen } from "./components/AppScreens";
@@ -18,7 +15,14 @@ import { ToolActivitySection } from "./components/ToolActivitySection";
 import { ProfilePickerSection } from "./components/ProfilePickerSection";
 import { WorkspaceSection } from "./components/WorkspaceSection";
 import { AutomationSection } from "./components/AutomationSection";
-import { clampNumber, getVietnameseLunarDate } from "./utils";
+import { BrainSection } from "./components/BrainSection";
+import { CalendarSection } from "./components/CalendarSection";
+import { TelegramSection } from "./components/TelegramSection";
+import { GoogleSection } from "./components/GoogleSection";
+import { SamplingSection } from "./components/SamplingSection";
+import { ConversationPane } from "./components/ConversationPane";
+import { FreshChatConfirmModal, GoogleEventModals, ImageViewerOverlay } from "./components/AppOverlays";
+import { clampNumber } from "./utils";
 import {
   AgentReactResult,
   AppSettings,
@@ -81,13 +85,10 @@ import {
   formatShellResult,
   getAutomationDueAt,
   getDefaultLocalContext,
-  getLunarLabel,
   googleEventMatchesDate,
-  googleEventTimeLabel,
   includesAnyPhrase,
   isExplicitApprovalText,
   isGpuFitError,
-  monthTitle,
   normalizeCalendarEventForDisplay,
   normalizeIntentText,
   parseAutomationSchedule,
@@ -282,7 +283,6 @@ function App() {
   const avatarTargetPersonalityIdRef = useRef<string | null>(null);
   const selectedVoiceRowRef = useRef<HTMLDivElement | null>(null);
   const selectedUserVoiceRowRef = useRef<HTMLDivElement | null>(null);
-  const imageViewerDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastComposerInputAtRef = useRef(0);
   const lastUiInteractionAtRef = useRef(0);
@@ -326,6 +326,14 @@ function App() {
     voiceSamples.find((sample) => sample.path === selectedUserVoicePath) ?? null;
   const selectedThemeSwatch =
     THEME_SWATCHS.find((swatch) => swatch.id === themeSwatchId) ?? THEME_SWATCHS[0];
+  const setupRepairPromptedRef = useRef(false);
+  const installedSetupTierFromModel = (path: string | null): SetupTier | null => {
+    const normalized = (path || "").replace(/\\/g, "/").toLowerCase();
+    if (normalized.includes("gemma-4-e2b")) return "light";
+    if (normalized.includes("gemma-4-e4b-it-q8")) return "high";
+    if (normalized.includes("gemma-4-e4b")) return "balanced";
+    return null;
+  };
 
   useEffect(() => {
     activeTaskTypeRef.current = activeTaskType;
@@ -355,14 +363,14 @@ function App() {
 
   useEffect(() => {
     if (!settingsLoaded) return;
-    const tier = setupTierOverride ?? setupTierFromSystem(systemInfo);
+    const tier = setupTierOverride ?? installedSetupTierFromModel(selectedModelPath) ?? setupTierFromSystem(systemInfo);
     invoke<SetupCatalog>("get_setup_catalog", { tier })
       .then(setSetupCatalog)
       .catch((error) => {
         console.error("Setup catalog error:", error);
         setSetupNotice(error instanceof Error ? error.message : String(error));
       });
-  }, [settingsLoaded, setupTierOverride, systemInfo]);
+  }, [settingsLoaded, setupTierOverride, systemInfo, selectedModelPath]);
 
   const recommendedThreads = systemInfo
     ? clampNumber(Math.min(systemInfo.cpu_threads, 8), 2, Math.max(2, systemInfo.cpu_threads))
@@ -1936,7 +1944,6 @@ User location: ${localContext}`,
 
   const openImageViewer = (url: string, localPath?: string) => {
     if (!url) return;
-    imageViewerDragRef.current = null;
     setImageViewer({ url, localPath, zoom: 1, x: 0, y: 0 });
   };
 
@@ -4139,7 +4146,8 @@ ${personalityMemory.trim()}`
   const hardwareGpuLabel = systemInfo?.gpu_details.replace(/\s*\(([^)]+)\)\s*$/, " - $1") ?? "";
   const hardwareRamLabel = systemInfo ? `${(systemInfo.total_ram_mb / 1024).toFixed(1)} GB` : "Unknown";
   const detectedSetupTier = setupTierFromSystem(systemInfo);
-  const activeSetupTier = setupTierOverride ?? detectedSetupTier;
+  const activeSetupTier = setupTierOverride ?? installedSetupTierFromModel(selectedModelPath) ?? detectedSetupTier;
+  const setupHasMissingFiles = Boolean(setupCatalog?.parts.some((part) => !part.installed));
   const firstStartupSetupNeeded = setupScreenOpen || (!setupCompleted && !selectedModelPath);
   const activeSetupPartKey = setupProgress?.part_key || "";
   const conversationLogoClass = messages.length === 0
@@ -4160,6 +4168,16 @@ ${personalityMemory.trim()}`
     (voiceSetupStatus.state !== "idle" && !voiceSetupStatus.ready ? `Voice input: ${voiceSetupStatus.message || "preparing"}` : "") ||
     (engineStatus === "downloading" ? "Engine: preparing model runtime" : "") ||
     (selectedModelPath ? `Ready: ${currentModelName}` : "No model loaded");
+
+  useEffect(() => {
+    if (!settingsLoaded || !setupCompleted || setupScreenOpen || !setupCatalog || !setupHasMissingFiles || setupRepairPromptedRef.current) {
+      return;
+    }
+    setupRepairPromptedRef.current = true;
+    setSetupNotice("Some local AI files are missing. Galaxy can download only the missing parts and keep existing files.");
+    setSetupScreenOpen(true);
+  }, [settingsLoaded, setupCompleted, setupScreenOpen, setupCatalog, setupHasMissingFiles]);
+
   const topProgressPercent =
     brainStatus === "Loading" || brainStatus === "Error"
       ? Math.max(8, modelLoadStatus.progress)
@@ -4400,81 +4418,31 @@ ${personalityMemory.trim()}`
   };
 
   const brainSection = (
-    <section className="rounded-[20px] border border-[#282a2c] bg-[#1e1f20] p-2.5 shadow-sm">
-      <div className="flex h-9 items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-xs font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">AI Brain</div>
-        </div>
-        <button
-          type="button"
-          title="Choose GGUF models folder"
-          onClick={() => handleChooseModelFolder().catch((error) => console.error("Folder error:", error))}
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
-        >
-          <FolderIcon className="h-4.5 w-4.5" />
-        </button>
-      </div>
-      <div className="relative mt-2.5" data-dropdown-root>
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !modelMenuOpen;
-                  setUserProfileMenuOpen(false);
-                  setPersonalityMenuOpen(false);
-                  setQuickModelMenuOpen(false);
-                  setThemePickerOpen(false);
-                  setModelMenuOpen(next);
-                }}
-                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-[#282a2c] bg-[#131314] px-4 py-3 text-left text-sm text-[#e3e3e3] outline-none transition hover:bg-[#282a2c] focus:border-[var(--accent-color)]"
-              >
-          <span className="flex shrink-0 items-center gap-1.5">
-            <BrainIcon className={`h-5 w-5 ${brainStatus === "Ready" || brainStatus === "Thinking" ? "text-emerald-400" : brainStatus === "Loading" ? "animate-pulse text-[var(--accent-color)]" : brainStatus === "Error" ? "text-rose-400" : "text-[#c4c7c5]"}`} />
-            {currentModelEntry?.has_vision && <EyeIcon className="h-4 w-4 text-[var(--accent-color)]" />}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-left">
-            {selectedModelPath ? currentModelName : "No model selected"}
-          </span>
-          <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[#c4c7c5] transition ${modelMenuOpen ? "rotate-180" : ""}`} />
-        </button>
-
-        {modelMenuOpen && (
-          <div className="dropdown-scroll absolute left-0 right-0 top-full z-50 mt-2 max-h-80 overflow-y-auto rounded-2xl border border-[#282a2c] bg-[#131314] p-2 shadow-2xl">
-            {availableModels.length === 0 ? (
-              <div className="px-3 py-3 text-sm text-[#c4c7c5]">No model selected. Choose a GGUF folder first.</div>
-            ) : (
-              availableModels.map((model) => (
-                <button
-                  key={model.path}
-                  type="button"
-                  onClick={() => {
-                    setModelMenuOpen(false);
-                    setSelectedModelPath(model.path);
-                    loadModelPath(model.path).catch((error) => console.error("Model select error:", error));
-                  }}
-                  className={`w-full rounded-xl px-3 py-2 text-left transition ${selectedModelPath === model.path ? "bg-[var(--accent-soft)] ring-1 ring-[var(--accent-soft-strong)]" : "hover:bg-[#1e1f20]"}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <BrainIcon className={`h-4 w-4 shrink-0 ${selectedModelPath === model.path && (brainStatus === "Ready" || brainStatus === "Thinking") ? "text-emerald-400" : "text-[#c4c7c5]"}`} />
-                    {model.has_vision && <EyeIcon className="h-4 w-4 shrink-0 text-[var(--accent-color)]" />}
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold text-[#e3e3e3]">{model.name}</div>
-                      <div className="mt-0.5 truncate text-xs text-[#c4c7c5]">{model.relative_path}</div>
-                    </div>
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
-      <div className="mt-3 overflow-hidden rounded-2xl border border-[#282a2c] bg-[#131314] p-3">
-        <HeartbeatMonitor
-          accent={selectedThemeSwatch.accent}
-          soft={selectedThemeSwatch.soft}
-          mode={isAudioPlaying ? "voice" : waveformProcessing ? "image" : "idle"}
-        />
-      </div>
-    </section>
+    <BrainSection
+      brainStatus={brainStatus}
+      modelMenuOpen={modelMenuOpen}
+      availableModels={availableModels}
+      selectedModelPath={selectedModelPath}
+      currentModelName={currentModelName}
+      currentModelEntry={currentModelEntry}
+      theme={selectedThemeSwatch}
+      isAudioPlaying={isAudioPlaying}
+      waveformProcessing={waveformProcessing}
+      onChooseModelFolder={() => handleChooseModelFolder().catch((error) => console.error("Folder error:", error))}
+      onToggleModelMenu={() => {
+        const next = !modelMenuOpen;
+        setUserProfileMenuOpen(false);
+        setPersonalityMenuOpen(false);
+        setQuickModelMenuOpen(false);
+        setThemePickerOpen(false);
+        setModelMenuOpen(next);
+      }}
+      onSelectModel={(path) => {
+        setModelMenuOpen(false);
+        setSelectedModelPath(path);
+        loadModelPath(path).catch((error) => console.error("Model select error:", error));
+      }}
+    />
   );
 
   const workspaceSection = (
@@ -4543,316 +4511,66 @@ ${personalityMemory.trim()}`
         onCreate={createUserProfile}
       />
 
-      <details
-        className="overflow-hidden rounded-[20px] border border-[#282a2c] bg-[#1e1f20] shadow-sm"
+      <CalendarSection
         open={calendarOpen}
-        onToggle={(event) => setCalendarOpen(event.currentTarget.open)}
-      >
-        <summary className="grid h-12 cursor-pointer list-none grid-cols-[minmax(0,1fr)_16px] items-center gap-2 px-3 [&::-webkit-details-marker]:hidden">
-          <div className="text-xs font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">Calendar</div>
-          <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[#c4c7c5] transition ${calendarOpen ? "rotate-180" : ""}`} />
-        </summary>
-        <div className="space-y-2.5 border-t border-[#282a2c] p-3">
-          <div className="flex items-center justify-between">
-            <button type="button" onClick={() => setAutomationMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))} className="rounded-xl border border-[#282a2c] bg-[#131314] px-3 py-2 text-sm font-bold text-[#e3e3e3] transition hover:bg-[#282a2c]">{"\u2039"}</button>
-            <div className="text-center">
-              <div className="font-title text-xl font-bold text-[#e3e3e3]">{monthTitle(automationMonth)}</div>
-              <div className="text-[11px] text-[#9aa0a6]">{automationMonth.getFullYear()}</div>
-            </div>
-            <button type="button" onClick={() => setAutomationMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))} className="rounded-xl border border-[#282a2c] bg-[#131314] px-3 py-2 text-sm font-bold text-[#e3e3e3] transition hover:bg-[#282a2c]">{"\u203A"}</button>
-          </div>
-          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold uppercase tracking-[0.12em] text-[#9aa0a6]">
-            {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
-              <div key={`${day}-${index}`} className={index === 0 ? "text-rose-400" : ""}>{day}</div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1">
-            {automationMonthDays.map((date) => {
-              const key = toLocalDateKey(date);
-              const inMonth = date.getMonth() === automationMonth.getMonth();
-              const selected = key === selectedAutomationDate;
-              const today = key === toLocalDateKey(new Date());
-              const dayGoogleEvents = googleCalendarEvents.filter((event) => googleEventMatchesDate(event, key));
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => selectAutomationDate(date)}
-                  title={getVietnameseLunarDate(date)}
-                  className={`relative flex aspect-square w-full max-w-9 justify-self-center rounded-lg border px-1 text-center transition ${selected ? "border-[#e3e3e3] bg-[#e3e3e3] text-[#131314]" : today ? "border-[var(--accent-color)] bg-[#131314] text-[#e3e3e3] hover:bg-[#282a2c]" : "border-transparent bg-[#131314] text-[#e3e3e3] hover:border-[#282a2c] hover:bg-[#282a2c]"} ${!inMonth ? "opacity-35" : ""}`}
-                >
-                  <div className="flex min-w-0 flex-1 flex-col items-center justify-center">
-                    <div className={`text-sm font-bold leading-none ${date.getDay() === 0 && !selected ? "text-rose-400" : ""}`}>{date.getDate()}</div>
-                  </div>
-                  <div className="absolute bottom-1 flex min-h-1 justify-center gap-0.5">
-                    {dayGoogleEvents.slice(0, 3).map((event) => <span key={event.id} className="h-1.5 w-1.5 rounded-full bg-[var(--accent-color)]" />)}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          <div className="rounded-2xl border border-[#282a2c] bg-[#131314] p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-sm font-semibold text-[#e3e3e3]">{selectedAutomationLabel}</div>
-                <div className="mt-0.5 text-xs text-[#73777f]">Lunar {getLunarLabel(selectedAutomationDateObj) || "unavailable"}</div>
-              </div>
-            </div>
-            <div className="mt-3 space-y-2">
-              {selectedGoogleEvents.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[#3a3b3d] px-4 py-3 text-sm text-[#c4c7c5]">No events on this date.</div>
-              ) : (
-                <>
-                {selectedGoogleEvents.map((event) => (
-                  <div
-                    key={`google-${event.id}`}
-                    className="group relative cursor-pointer rounded-2xl p-3 ring-1 ring-[var(--accent-soft)] transition"
-                    style={{ backgroundColor: "color-mix(in srgb, var(--accent-color) 12%, #131314)" }}
-                    onClick={() => setSelectedGoogleEvent(normalizeCalendarEventForDisplay(event))}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-[#e3e3e3]">{event.title}</div>
-                        <div className="mt-0.5 truncate text-xs text-[var(--accent-color)]">Google Calendar - {googleEventTimeLabel(event)}</div>
-                        {event.location && <div className="mt-1 truncate text-xs text-[#c4c7c5]">{event.location}</div>}
-                      </div>
-                      <div className="rounded-full bg-[var(--accent-soft)] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--accent-color)]">Google</div>
-                    </div>
-                    <button
-                      type="button"
-                      title="Delete event"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openDeleteGoogleEventConfirm(event);
-                      }}
-                      className="absolute bottom-2 right-2 rounded-lg p-1 text-[var(--accent-color)] opacity-40 transition hover:bg-rose-500/10 hover:text-rose-400 group-hover:opacity-100"
-                    >
-                      <TrashIcon className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </details>
+        month={automationMonth}
+        monthDays={automationMonthDays}
+        selectedDate={selectedAutomationDate}
+        selectedDateObj={selectedAutomationDateObj}
+        selectedLabel={selectedAutomationLabel}
+        googleEvents={googleCalendarEvents}
+        selectedGoogleEvents={selectedGoogleEvents}
+        onToggle={setCalendarOpen}
+        onMonthChange={setAutomationMonth}
+        onSelectDate={selectAutomationDate}
+        onSelectGoogleEvent={setSelectedGoogleEvent}
+        onDeleteGoogleEvent={openDeleteGoogleEventConfirm}
+      />
       {automationSection}
       {workspaceSection}
       {imageStudioSection}
 
-      <section className="overflow-hidden rounded-[20px] border border-[#282a2c] bg-[#1e1f20] shadow-sm">
-        <details
-          open={telegramPanelOpen}
-          onToggle={(event) => setTelegramPanelOpen(event.currentTarget.open)}
-        >
-          <summary className="grid h-12 cursor-pointer list-none grid-cols-[minmax(0,1fr)_86px_16px] items-center gap-1 px-3 [&::-webkit-details-marker]:hidden">
-            <div className="text-xs font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">Telegram</div>
-            <div className="flex min-w-0 items-center justify-start gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[#c4c7c5]">
-              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${telegramRunning ? "bg-[#79d06f]" : "bg-[#3a3b3d]"}`} />
-              <span className="min-w-0 truncate">{telegramRunning ? "Online" : "Offline"}</span>
-            </div>
-            <ChevronDownIcon className="details-chevron h-4 w-4 shrink-0 text-[#c4c7c5]" />
-          </summary>
-          <div className="space-y-2.5 border-t border-[#282a2c] px-3 py-3">
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <input
-                  value={telegramBotToken}
-                  onChange={(event) => setTelegramBotToken(event.target.value)}
-                  className="min-w-0 flex-1 rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]"
-                  placeholder="Paste Telegram bot token"
-                  type="password"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleTestTelegram().catch((error) => console.error("Telegram error:", error))}
-                  className="rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm font-semibold text-[#e3e3e3] transition hover:bg-[#282a2c]"
-                >
-                  Test
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="max-w-[92px] shrink-0 truncate px-1 text-sm font-bold" style={{ color: "var(--accent-color)" }}>
-                  {userName.trim() || "Owner"}
-                </span>
-                <input
-                  value={telegramOwnerId}
-                  onChange={(event) => setTelegramOwnerId(event.target.value)}
-                  className="min-w-0 flex-1 rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]"
-                  placeholder="Owner Telegram ID"
-                />
-              </div>
-            </div>
-            <div className="rounded-2xl bg-[#131314] p-2 ring-1 ring-[#282a2c]">
-              <div className="mb-2 flex items-center justify-between gap-2 px-1">
-                <div className="text-xs font-bold uppercase tracking-[0.14em] text-[#c4c7c5]">
-                  {telegramGuests.length ? `${telegramGuests.length} guests` : "Guests"}
-                </div>
-                <IconButton
-                  title="Add guest"
-                  size="sm"
-                  onClick={() => setTelegramGuestDraft((draft) => draft ?? { id: "", name: "" })}
-                >
-                  <PlusIcon className="h-4 w-4" />
-                </IconButton>
-              </div>
-              <div className="panel-scroll max-h-[172px] space-y-1.5 overflow-y-auto">
-                {telegramGuestDraft && (
-                  <div className="rounded-xl bg-[#1e1f20] p-2 ring-1 ring-[#282a2c]">
-                    <input
-                      value={telegramGuestDraft.name}
-                      onChange={(event) => setTelegramGuestDraft((draft) => ({ ...(draft ?? { id: "", name: "" }), name: event.target.value }))}
-                      className="mb-1.5 w-full rounded-xl border border-[#282a2c] bg-[#0f1011] px-2 py-1.5 text-xs text-[#e3e3e3] outline-none focus:border-[var(--accent-color)]"
-                      placeholder="Guest name"
-                    />
-                    <div className="flex gap-1.5">
-                      <input
-                        value={telegramGuestDraft.id}
-                        onChange={(event) => setTelegramGuestDraft((draft) => ({ ...(draft ?? { id: "", name: "" }), id: event.target.value }))}
-                        className="min-w-0 flex-1 rounded-xl border border-[#282a2c] bg-[#0f1011] px-2 py-1.5 text-xs text-[#e3e3e3] outline-none focus:border-[var(--accent-color)]"
-                        placeholder="Telegram ID"
-                      />
-                      <IconButton title="Save guest" size="sm" onClick={addTelegramGuest}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
-                          <path d="M17 21v-8H7v8" />
-                          <path d="M7 3v5h8" />
-                        </svg>
-                      </IconButton>
-                      <IconButton title="Cancel" size="sm" onClick={() => setTelegramGuestDraft(null)}>
-                        <CloseIcon className="h-4 w-4" />
-                      </IconButton>
-                    </div>
-                  </div>
-                )}
-                {telegramGuests.length === 0 && !telegramGuestDraft ? (
-                  <div className="rounded-xl border border-dashed border-[#3a3b3d] px-3 py-2 text-xs leading-5 text-[#9aa0a6]">
-                    Group taggers are added here automatically. Guests can chat only.
-                  </div>
-                ) : (
-                  telegramGuests.map((guest) => (
-                    <div key={guest.id} className="flex min-h-[52px] items-center justify-between gap-2 rounded-xl bg-[#1e1f20] px-2.5 py-2 ring-1 ring-[#282a2c]">
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-bold text-[#e3e3e3]">{guest.name || guest.id}</div>
-                        <div className="mt-0.5 truncate text-[10px] text-[#9aa0a6]">{guest.id}</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeTelegramGuest(guest.id)}
-                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[#9aa0a6] transition hover:bg-rose-500/10 hover:text-rose-300"
-                        title="Remove guest"
-                      >
-                        <TrashIcon className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() =>
-                (telegramRunning ? handleStopTelegram() : handleStartTelegram()).catch((error) =>
-                  console.error(telegramRunning ? "Telegram stop error:" : "Telegram start error:", error),
-                )
-              }
-              className={`w-full rounded-2xl px-3 py-2.5 text-sm font-semibold transition disabled:opacity-50 ${
-                telegramRunning
-                  ? "border border-[#282a2c] bg-[#131314] text-[#e3e3e3] hover:bg-[#282a2c]"
-                  : "text-[#131314]"
-              }`}
-              style={!telegramRunning ? { backgroundColor: "var(--accent-color)" } : undefined}
-              disabled={!telegramRunning && !telegramBotToken.trim()}
-            >
-              {telegramRunning ? "Stop" : "Start"}
-            </button>
-            {telegramStatus && <div className="text-xs text-[#c4c7c5]">{telegramStatus}</div>}
-          </div>
-        </details>
-      </section>
-
-      <section className="overflow-hidden rounded-[20px] border border-[#282a2c] bg-[#1e1f20] shadow-sm">
-        <details
-          open={googlePanelOpen}
-          onToggle={(event) => setGooglePanelOpen(event.currentTarget.open)}
-        >
-          <summary className="grid h-12 cursor-pointer list-none grid-cols-[minmax(0,1fr)_86px_16px] items-center gap-1 px-3 [&::-webkit-details-marker]:hidden">
-            <div className="text-xs font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">Google</div>
-            <div className="flex min-w-0 items-center justify-start gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[#c4c7c5]">
-              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${googleStatus.connected ? "bg-[#79d06f]" : "bg-[#3a3b3d]"}`} />
-              <span className="min-w-0 truncate">{googleStatus.connected ? "Online" : "Offline"}</span>
-            </div>
-            <ChevronDownIcon className="details-chevron h-4 w-4 shrink-0 text-[#c4c7c5]" />
-          </summary>
-          <div className="space-y-3 border-t border-[#282a2c] px-3 py-3">
-            <div className="px-1 text-xs leading-5 text-[#c4c7c5]">
-              <div className="font-semibold text-[#e3e3e3]">
-                {googleStatus.connected ? `Connected${googleStatus.email ? `: ${googleStatus.email}` : ""}` : "Not connected"}
-              </div>
-              <div className="mt-0.5">{googleNotice || "Connect Google to show Calendar events in the app calendar."}</div>
-            </div>
-            <div className="rounded-2xl bg-[#131314] p-3 text-sm text-[#e3e3e3] ring-1 ring-[#282a2c]">
-              <div className="space-y-2">
-                <input
-                  value={googleClientId}
-                  onChange={(event) => setGoogleClientId(event.target.value)}
-                  className="w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]"
-                  placeholder="Google OAuth Client ID"
-                />
-                <input
-                  value={googleClientSecret}
-                  onChange={(event) => setGoogleClientSecret(event.target.value)}
-                  className="w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]"
-                  placeholder="Google OAuth Client Secret"
-                  type="password"
-                />
-                <input
-                  value={googleRedirectUri}
-                  onChange={(event) => setGoogleRedirectUri(event.target.value)}
-                  className="w-full rounded-xl border border-[#282a2c] bg-[#0f1011] px-3 py-2 text-xs text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]"
-                  placeholder="Local redirect address"
-                />
-                <a
-                  href="https://console.cloud.google.com/apis/credentials"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex w-full items-center justify-center rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm font-semibold text-[var(--accent-color)] transition hover:bg-[#282a2c]"
-                >
-                  Go to Google Cloud Console
-                </a>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() =>
-                (googleStatus.connected ? disconnectGoogle() : connectGoogle()).catch((error) =>
-                  console.error(googleStatus.connected ? "Google disconnect error:" : "Google connect error:", error),
-                )
-              }
-              disabled={googleBusy || (!googleStatus.connected && (!googleClientId.trim() || !googleClientSecret.trim()))}
-              className={`w-full rounded-2xl px-3 py-2.5 text-sm font-semibold transition disabled:opacity-50 ${
-                googleStatus.connected
-                  ? "border border-[#282a2c] bg-[#131314] text-[#e3e3e3] hover:bg-[#282a2c]"
-                  : "text-[#131314]"
-              }`}
-              style={!googleStatus.connected ? { backgroundColor: "var(--accent-color)" } : undefined}
-            >
-              {googleBusy ? (googleStatus.connected ? "Disconnecting..." : "Connecting...") : googleStatus.connected ? "Disconnect" : "Connect"}
-            </button>
-            {googleStatus.connected && (
-              <button
-                type="button"
-                onClick={() => refreshGoogleCalendarEvents().catch((error) => console.error("Google Calendar refresh error:", error))}
-                disabled={googleBusy}
-                className="w-full rounded-2xl border border-[#282a2c] bg-[#131314] px-3 py-2.5 text-sm font-semibold text-[#e3e3e3] transition hover:bg-[#282a2c] disabled:opacity-50"
-              >
-                Refresh Calendar Events
-              </button>
-            )}
-          </div>
-        </details>
-      </section>
+      <TelegramSection
+        open={telegramPanelOpen}
+        running={telegramRunning}
+        botToken={telegramBotToken}
+        ownerName={userName.trim() || "Owner"}
+        ownerId={telegramOwnerId}
+        status={telegramStatus}
+        guests={telegramGuests}
+        guestDraft={telegramGuestDraft}
+        onToggle={setTelegramPanelOpen}
+        onBotTokenChange={setTelegramBotToken}
+        onOwnerIdChange={setTelegramOwnerId}
+        onGuestDraftChange={setTelegramGuestDraft}
+        onSaveGuest={addTelegramGuest}
+        onRemoveGuest={removeTelegramGuest}
+        onTest={() => handleTestTelegram().catch((error) => console.error("Telegram error:", error))}
+        onStartStop={() =>
+          (telegramRunning ? handleStopTelegram() : handleStartTelegram()).catch((error) =>
+            console.error(telegramRunning ? "Telegram stop error:" : "Telegram start error:", error),
+          )
+        }
+      />
+      <GoogleSection
+        open={googlePanelOpen}
+        status={googleStatus}
+        notice={googleNotice}
+        busy={googleBusy}
+        clientId={googleClientId}
+        clientSecret={googleClientSecret}
+        redirectUri={googleRedirectUri}
+        onToggle={setGooglePanelOpen}
+        onClientIdChange={setGoogleClientId}
+        onClientSecretChange={setGoogleClientSecret}
+        onRedirectUriChange={setGoogleRedirectUri}
+        onConnectToggle={() =>
+          (googleStatus.connected ? disconnectGoogle() : connectGoogle()).catch((error) =>
+            console.error(googleStatus.connected ? "Google disconnect error:" : "Google connect error:", error),
+          )
+        }
+        onRefreshCalendar={() => refreshGoogleCalendarEvents().catch((error) => console.error("Google Calendar refresh error:", error))}
+      />
     </div>
   );
 
@@ -5376,87 +5094,23 @@ ${personalityMemory.trim()}`
 
       {toolActivitySection}
 
-      <details
-        className="overflow-hidden rounded-[20px] border border-[#282a2c] bg-[#1e1f20] shadow-sm"
+      <SamplingSection
         open={samplingOpen}
-        onToggle={(event) => setSamplingOpen(event.currentTarget.open)}
-      >
-        <summary className="flex h-12 cursor-pointer list-none items-center justify-between gap-3 px-3 [&::-webkit-details-marker]:hidden">
-          <div className="text-xs font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">Sampling</div>
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9aa0a6]">
-            <button
-              type="button"
-              title="Reset sampling"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                resetSamplingDefaults();
-              }}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314] text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-            >
-              <RefreshIcon className="h-4 w-4" />
-            </button>
-            <ChevronDownIcon className="details-chevron h-4 w-4 shrink-0 text-[#c4c7c5]" />
-          </div>
-        </summary>
-        <div className="border-t border-[#282a2c] px-3 py-3 space-y-4">
-          <SliderField
-            label="Temperature"
-            value={samplingTemperature}
-            min={0}
-            max={2}
-            step={0.1}
-            onChange={setSamplingTemperature}
-            helper="Lower is steadier. Higher is more random."
-          />
-          <SliderField
-            label="Top K"
-            value={topK}
-            min={0}
-            max={200}
-            step={1}
-            onChange={setTopK}
-            helper="Limits choices to the top tokens. 0 disables it."
-          />
-          <SliderField
-            label="Top P"
-            value={topP}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={setTopP}
-            helper="Keeps the most likely token group. 1 disables it."
-          />
-          <SliderField
-            label="Min P"
-            value={minP}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={setMinP}
-            helper="Drops very unlikely tokens. 0 disables it."
-          />
-          <SliderField
-            label="Repeat Last N"
-            value={repeatLastN}
-            min={-1}
-            max={4096}
-            step={1}
-            onChange={setRepeatLastN}
-            helper="How much recent text repeat penalty checks. -1 means full context."
-          />
-          <SliderField
-            label="Repeat Penalty"
-            value={repeatPenalty}
-            min={0.8}
-            max={2}
-            step={0.05}
-            onChange={setRepeatPenalty}
-            helper="Higher discourages repeated wording. 1 disables it."
-          />
-        </div>
-      </details>
-    </div>
+        temperature={samplingTemperature}
+        topK={topK}
+        topP={topP}
+        minP={minP}
+        repeatLastN={repeatLastN}
+        repeatPenalty={repeatPenalty}
+        onToggle={setSamplingOpen}
+        onReset={resetSamplingDefaults}
+        onTemperatureChange={setSamplingTemperature}
+        onTopKChange={setTopK}
+        onTopPChange={setTopP}
+        onMinPChange={setMinP}
+        onRepeatLastNChange={setRepeatLastN}
+        onRepeatPenaltyChange={setRepeatPenalty}
+      />    </div>
   );
 
   const handleInstallSetupBundle = async () => {
@@ -5576,55 +5230,25 @@ ${personalityMemory.trim()}`
         }}
       />
 
-      {freshChatConfirmOpen && (
-        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={() => setFreshChatConfirmOpen(false)}>
-          <div className="w-full max-w-md rounded-[28px] bg-[#1e1f20] p-6 shadow-2xl ring-1 ring-[#282a2c]" onClick={(e) => e.stopPropagation()}>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--accent-color)" }}>Clear Chat</div>
-            <h3 className="font-title text-xl text-[#e3e3e3]">Clear chat?</h3>
-            <p className="mt-2 text-sm leading-6 text-[#c4c7c5]">
-              This clears only the visible conversation and current attached image. It does not delete saved settings, personalities, Google login, folders, or long-term memory.
-            </p>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                title="Clear the visible chat only"
-                onClick={() => {
-                  setMessages([]);
-                  if (selectedPersonalityId) {
-                    chatSessionsRef.current = {
-                      ...chatSessionsRef.current,
-                      [selectedPersonalityId]: [],
-                    };
-                    setChatSessions((prev) => ({ ...prev, [selectedPersonalityId]: [] }));
-                  }
-                  setComposerText("");
-                  setImage(null);
-                  setImagePath(null);
-                  setComposerNotice("");
-                  setFreshChatConfirmOpen(false);
-                }}
-                className="rounded-2xl border px-5 py-2.5 text-sm font-semibold shadow-sm transition hover:brightness-110"
-                style={{
-                  borderColor: "color-mix(in srgb, var(--accent-color) 32%, transparent)",
-                  backgroundColor: "color-mix(in srgb, var(--accent-color) 18%, #131314 82%)",
-                  color: "color-mix(in srgb, var(--accent-color) 72%, white 28%)",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
-                }}
-              >
-                Clear Chat
-              </button>
-              <button
-                type="button"
-                title="Keep the current conversation"
-                onClick={() => setFreshChatConfirmOpen(false)}
-                className="rounded-2xl border border-[#282a2c] bg-[#1e1f20] px-4 py-2.5 text-sm font-semibold text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <FreshChatConfirmModal
+        open={freshChatConfirmOpen}
+        onClose={() => setFreshChatConfirmOpen(false)}
+        onClear={() => {
+          setMessages([]);
+          if (selectedPersonalityId) {
+            chatSessionsRef.current = {
+              ...chatSessionsRef.current,
+              [selectedPersonalityId]: [],
+            };
+            setChatSessions((prev) => ({ ...prev, [selectedPersonalityId]: [] }));
+          }
+          setComposerText("");
+          setImage(null);
+          setImagePath(null);
+          setComposerNotice("");
+          setFreshChatConfirmOpen(false);
+        }}
+      />
 
       {automationEditorOpen && (
         <div className="fixed inset-0 z-[86] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={() => setAutomationEditorOpen(false)}>
@@ -6153,297 +5777,50 @@ ${personalityMemory.trim()}`
             </div>
           )}
 
-          <section ref={conversationScrollRef} onScroll={handleChatScroll} className="conversation-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 relative">
-            {messages.length === 0 ? (
-              <div className="relative z-10 mx-auto flex h-full max-w-3xl flex-col items-center justify-center text-center">
-                <img src={brandLogo} alt="Galaxy AI Hub" className="mx-auto h-auto w-full max-w-[260px] object-contain" />
-                <h1 className="mt-8 font-title text-4xl tracking-tight text-[#f4f6f8] md:text-5xl">Start a conversation.</h1>
-                {systemInfo && (
-                  <div className="mt-8 w-full max-w-[740px] rounded-[22px] border border-[#282a2c] bg-[#1b1c1e] px-6 py-4 text-left shadow-[0_12px_40px_rgba(0,0,0,0.28)]">
-                    <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-4 sm:grid-cols-[112px_minmax(0,1fr)]">
-                      <button
-                        type="button"
-                        onClick={openPersonalityProfile}
-                        className="h-28 w-28 shrink-0 overflow-hidden rounded-[18px] bg-[#131314] text-left ring-1 ring-[#282a2c] transition hover:ring-[var(--accent-color)]"
-                        title="Open assistant profile"
-                      >
-                        <AvatarImage src={assistantAvatar} fallback={selectedPersonalityPreset?.name || "AI"} className="h-full w-full rounded-[18px]" />
-                      </button>
-                      <div className="min-w-0 self-center">
-                        <div className="text-[24px] font-semibold leading-none tracking-tight text-[#f4f6f8]">{selectedPersonalityPreset?.name || "Assistant"}</div>
-                        <div className="mt-1 text-[10px] font-bold uppercase leading-none tracking-[0.22em] text-[#c4c7c5]">Hardware Check</div>
-                        <dl className="mt-2 grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px] leading-4 sm:grid-cols-[82px_minmax(0,1fr)]">
-                          <dt className="font-semibold text-[#9aa0a6]">CPU</dt>
-                          <dd className="min-w-0 break-words text-[#e3e3e3]">{systemInfo.cpu_name}</dd>
-                          <dt className="font-semibold text-[#9aa0a6]">GPU ? VRAM</dt>
-                          <dd className="min-w-0 break-words text-[#e3e3e3]">{hardwareGpuLabel}</dd>
-                          <dt className="font-semibold text-[#9aa0a6]">RAM</dt>
-                          <dd className="min-w-0 break-words text-[#e3e3e3]">{hardwareRamLabel}</dd>
-                        </dl>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-5">
-                {messages.map((message, index) => {
-                  const messageText = extractMessageText(message.content);
-                  const canSpeak =
-                    Boolean(messageText) &&
-                    !(typeof message.content === "string" && message.content.startsWith("[Error"));
-                  const firstImagePartIndex = Array.isArray(message.content)
-                    ? message.content.findIndex((part) => part.type === "image_url" && Boolean(part.image_url.local_path))
-                    : -1;
-                  const firstImagePart = firstImagePartIndex >= 0 && Array.isArray(message.content)
-                    ? (message.content[firstImagePartIndex] as Extract<ChatContentPart, { type: "image_url" }>)
-                    : undefined;
-                  const firstImagePath = firstImagePart?.image_url.local_path;
-                  const firstImagePartKey = firstImagePartIndex >= 0 ? `${message.id}:${firstImagePartIndex}` : "";
-                  const firstImageCollapsed = firstImagePartKey ? Boolean(collapsedImageParts[firstImagePartKey]) : false;
-                  const hasImageContent = Array.isArray(message.content) && message.content.some((part) => part.type === "image_url");
-                  const isTypingIndicator =
-                    message.role === "assistant" &&
-                    message.content === "" &&
-                    index === messages.length - 1 &&
-                    isStreaming;
-                  const imageFolderTitle = "Open image folder";
-
-                  return (
-                    <div
-                      key={message.id}
-                      data-message-id={message.id}
-                      className={`chat-message-row flex items-start gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}
-                    >
-                      {message.role === "assistant" && (
-                        <div
-                          className="mt-1 h-10 w-10 shrink-0 overflow-hidden rounded-2xl bg-[#1e1f20] ring-1 ring-[#282a2c]"
-                          title={selectedPersonalityPreset?.name || "Assistant"}
-                        >
-                          <AvatarImage src={assistantAvatar} fallback={selectedPersonalityPreset?.name || "AI"} className="h-full w-full rounded-2xl" />
-                        </div>
-                      )}
-                      <div
-                        className={`chat-bubble min-w-0 max-w-[88%] overflow-hidden rounded-[28px] shadow-sm ring-1 ${hasImageContent ? "px-3 py-3" : isTypingIndicator ? "px-4 py-3" : "px-5 py-4"} ${
-                          message.role === "user"
-                            ? "text-[#e3e3e3]"
-                            : "bg-[#1e1f20] text-[#e3e3e3] ring-[#282a2c]"
-                        }`}
-                        style={message.role === "user" ? { backgroundColor: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent-soft-strong)" } : undefined}
-                      >
-                        {message.role === "assistant" && message.thinking && (
-                          <details className="mb-3 overflow-hidden rounded-2xl border border-[#282a2c] bg-[#131314] px-3 py-2 text-xs text-[#c4c7c5]">
-                            <summary className="cursor-pointer select-none font-semibold text-[var(--accent-color)]">
-                              Thinking process
-                            </summary>
-                            <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans leading-6">
-                              {message.thinking}
-                            </pre>
-                          </details>
-                        )}
-                        {Array.isArray(message.content) ? (
-                          <div className="space-y-3">
-                            {message.content.map((part, partIndex) =>
-                              part.type === "text" ? (
-                                <FormattedMessageText key={partIndex} text={part.text} compact={message.role === "user"} />
-                              ) : part.type === "image_url" ? (
-                                (() => {
-                                  const imagePartKey = `${message.id}:${partIndex}`;
-                                  const imageCollapsed = Boolean(collapsedImageParts[imagePartKey]);
-                                  const viewTitle = "View image";
-                                  return (
-                                    <div key={partIndex} className="relative overflow-visible">
-                                      <div className="hidden">
-                                        <button
-                                          type="button"
-                                          title={imageCollapsed ? "Expand image" : "Collapse image"}
-                                          onClick={() =>
-                                            setCollapsedImageParts((prev) => ({
-                                              ...prev,
-                                              [imagePartKey]: !prev[imagePartKey],
-                                            }))
-                                          }
-                                          className="flex h-8 w-8 items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314]/90 text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                                        >
-                                          {imageCollapsed ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronUpIcon className="h-3.5 w-3.5" />}
-                                        </button>
-                                      </div>
-                                      {imageCollapsed ? (
-                                        <div className="flex h-10 items-center rounded-[14px] border border-dashed border-[#3a3b3d] px-3 text-sm font-semibold text-[#c4c7c5]">
-                                          Image collapsed
-                                        </div>
-                                      ) : (
-                                        <>
-                                          {part.image_url.url ? (
-                                            <button
-                                              type="button"
-                                              title={viewTitle}
-                                              onClick={() => openImageViewer(part.image_url.url, part.image_url.local_path)}
-                                              className="block w-full overflow-hidden rounded-[14px] text-left"
-                                            >
-                                              <img
-                                                src={part.image_url.url}
-                                                alt="Chat visual"
-                                                className="max-h-[420px] w-full rounded-[14px] object-contain transition hover:brightness-110"
-                                              />
-                                            </button>
-                                          ) : (
-                                            <div className="flex h-52 items-center justify-center rounded-[14px] border border-[#282a2c] bg-[#131314]/35 text-sm text-[#9aa0a6]">
-                                              Reloading image...
-                                            </div>
-                                          )}
-                                        </>
-                                      )}
-                                    </div>
-                                  );
-                                })()
-                              ) : part.type === "image_proposal" ? (
-                                <ImageProposalCard
-                                  key={partIndex}
-                                  proposal={part.image_proposal}
-                                  disabled={isGeneratingImage}
-                                  language="en"
-                                  onCancel={() => dismissImageProposal(message.id, partIndex)}
-                                  onGenerate={(prompt) => {
-                                    dismissImageProposal(message.id, partIndex);
-                                    void handleGenerateImage(prompt, part.image_proposal.mode, part.image_proposal.mask_prompt);
-                                  }}
-                                />
-                              ) : part.type === "action_proposal" ? (
-                                <ActionProposalCard
-                                  key={partIndex}
-                                  proposal={part.action_proposal}
-                                  disabled={isApproving}
-                                  language="en"
-                                  onCancel={() => dismissChatPart(message.id, partIndex, "Action was cancelled.")}
-                                  onApprove={() => {
-                                    void approveActionProposal(message.id, partIndex, part.action_proposal);
-                                  }}
-                                />
-                              ) : part.type === "tool_result_cards" ? (
-                                 <ToolResultCards 
-                                   key={partIndex} 
-                                   cards={part.cards} 
-                                   language="en"
-                                   onDeleteCalendarEvent={(event) => {
-                                     openDeleteGoogleEventConfirm(event);
-                                   }}
-                                 />
-                              ) : (
-                                <FilePreviewCard
-                                  key={partIndex}
-                                  preview={part.file_preview}
-                                  linkedFolders={linkedFolders}
-                                  language="en"
-                                />
-                              ),
-                            )}
-                          </div>
-                        ) : isTypingIndicator ? (
-                          <span className="flex h-4 items-center gap-1">
-                            <span className="h-2 w-2 animate-bounce rounded-full bg-[#c4c7c5]" />
-                            <span className="h-2 w-2 animate-bounce rounded-full bg-[#c4c7c5] [animation-delay:120ms]" />
-                            <span className="h-2 w-2 animate-bounce rounded-full bg-[#c4c7c5] [animation-delay:240ms]" />
-                          </span>
-                        ) : (
-                          <FormattedMessageText text={message.content} compact={message.role === "user"} />
-                        )}
-
-                        {(firstImagePath || canSpeak) && (
-                          <div className="mt-2 flex items-center justify-between gap-3">
-                            {firstImagePath ? (
-                              <button
-                                type="button"
-                                title={imageFolderTitle}
-                                onClick={() => void revealImageLocation(firstImagePath)}
-                                className="flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                              >
-                                <FolderIcon className="h-4 w-4" />
-                              </button>
-                            ) : (
-                              <span className="h-8 w-8" />
-                            )}
-                            <div className="flex items-center gap-2">
-                              {firstImagePartKey && (
-                                <button
-                                  type="button"
-                                  title="Delete image message"
-                                  onClick={() => deleteImageFromChatMessage(message.id)}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] transition hover:bg-rose-500/10 hover:text-rose-300"
-                                >
-                                  <TrashIcon className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                              {firstImagePartKey && (
-                                <button
-                                  type="button"
-                                  title={firstImageCollapsed ? "Expand image" : "Collapse image"}
-                                  onClick={() =>
-                                    setCollapsedImageParts((prev) => ({
-                                      ...prev,
-                                      [firstImagePartKey]: !prev[firstImagePartKey],
-                                    }))
-                                  }
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                                >
-                                  {firstImageCollapsed ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronUpIcon className="h-3.5 w-3.5" />}
-                                </button>
-                              )}
-                              {canSpeak && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (speakingMessageId === message.id) {
-                                      voicePlaybackRequestRef.current += 1;
-                                      stopActiveAudio();
-                                      setSpeakingMessageId(null);
-                                      return;
-                                    }
-
-                                    ensureAudioPlaybackUnlocked()
-                                      .catch(() => null)
-                                      .finally(() => {
-                                        speakMessageText(message.id, messageText, message.role);
-                                      });
-                                  }}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] transition hover:bg-[#282a2c]"
-                                  title={speakingMessageId === message.id ? "Stop speech" : "Speak"}
-                                >
-                                  {speakingMessageId === message.id ? <StopIcon className="h-3.5 w-3.5" /> : <SpeakerIcon className="h-4 w-4" />}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      {message.role === "user" && (
-                        <button
-                          type="button"
-                          onClick={openUserProfile}
-                          className="mt-1 h-10 w-10 shrink-0 overflow-hidden rounded-2xl"
-                          style={{ backgroundColor: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent-soft-strong)" }}
-                          title="Edit user profile"
-                        >
-                          <AvatarImage src={userAvatar} fallback={userName || "You"} className="h-full w-full rounded-2xl" />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-                <div ref={conversationEndRef} className="h-6 shrink-0" />
-              </div>
-            )}
-            {showScrollBottom && (
-              <button
-                onClick={() => scrollToBottom()}
-                className="sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-[#3d3f42]/90 text-[var(--accent-color)] shadow-lg backdrop-blur-md transition hover:bg-[#4a4c50]/90 active:scale-95 border border-[#52555a]"
-                title="Scroll to bottom"
-              >
-                <ChevronDownIcon className="h-5 w-5" />
-              </button>
-            )}
-          </section>
-
+          <ConversationPane
+            scrollRef={conversationScrollRef}
+            endRef={conversationEndRef}
+            messages={messages}
+            brandLogo={brandLogo}
+            systemInfo={systemInfo}
+            assistantName={selectedPersonalityPreset?.name || "Assistant"}
+            assistantAvatar={assistantAvatar}
+            userName={userName}
+            userAvatar={userAvatar}
+            hardwareGpuLabel={hardwareGpuLabel}
+            hardwareRamLabel={hardwareRamLabel}
+            isStreaming={isStreaming}
+            isGeneratingImage={isGeneratingImage}
+            isApproving={isApproving}
+            collapsedImageParts={collapsedImageParts}
+            linkedFolders={linkedFolders}
+            speakingMessageId={speakingMessageId}
+            showScrollBottom={showScrollBottom}
+            onScroll={handleChatScroll}
+            onOpenPersonalityProfile={openPersonalityProfile}
+            onOpenUserProfile={openUserProfile}
+            onOpenImageViewer={openImageViewer}
+            onRevealImageLocation={(path) => void revealImageLocation(path)}
+            onDeleteImageMessage={deleteImageFromChatMessage}
+            onToggleImageCollapsed={(key) => setCollapsedImageParts((prev) => ({ ...prev, [key]: !prev[key] }))}
+            onDismissImageProposal={dismissImageProposal}
+            onGenerateImage={(prompt, mode, maskPrompt) => void handleGenerateImage(prompt, mode, maskPrompt)}
+            onDismissChatPart={dismissChatPart}
+            onApproveActionProposal={(messageId, partIndex, proposal) => void approveActionProposal(messageId, partIndex, proposal)}
+            onDeleteCalendarEvent={openDeleteGoogleEventConfirm}
+            onSpeakToggle={(messageId, text, role) => {
+              if (speakingMessageId === messageId) {
+                voicePlaybackRequestRef.current += 1;
+                stopActiveAudio();
+                setSpeakingMessageId(null);
+                return;
+              }
+              ensureAudioPlaybackUnlocked()
+                .catch(() => null)
+                .finally(() => speakMessageText(messageId, text, role));
+            }}
+            onScrollToBottom={() => scrollToBottom()}
+          />
           <footer className="shrink-0 border-t border-[#282a2c] bg-[#131314] px-4 py-4">
             <div className="mx-auto w-full max-w-5xl rounded-[30px] border border-[#282a2c] bg-[#1e1f20] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
               {pendingShellActions.length > 0 && (
@@ -6749,162 +6126,17 @@ ${personalityMemory.trim()}`
       </div>
     </div>
 
-    {imageViewer && (
-        <div
-          className="fixed inset-0 z-[320] flex items-center justify-center bg-black/82 p-4 backdrop-blur-sm"
-          onClick={() => setImageViewer(null)}
-        >
-          <div
-            className="h-full w-full overflow-hidden"
-            onClick={(event) => event.stopPropagation()}
-            onWheel={(event) => {
-              event.preventDefault();
-              const direction = event.deltaY > 0 ? -0.18 : 0.18;
-              setImageViewer((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      zoom: clampNumber(Number((prev.zoom + direction).toFixed(2)), 0.6, 6),
-                    }
-                  : prev,
-              );
-            }}
-          >
-            <img
-              src={imageViewer.url}
-              alt="Full size preview"
-              draggable={false}
-              className="h-full w-full cursor-grab select-none object-contain active:cursor-grabbing"
-              style={{
-                transform: `translate(${imageViewer.x}px, ${imageViewer.y}px) scale(${imageViewer.zoom})`,
-                transition: imageViewerDragRef.current ? "none" : "transform 120ms ease-out",
-              }}
-              onPointerDown={(event) => {
-                event.currentTarget.setPointerCapture(event.pointerId);
-                imageViewerDragRef.current = {
-                  pointerId: event.pointerId,
-                  startX: event.clientX,
-                  startY: event.clientY,
-                  originX: imageViewer.x,
-                  originY: imageViewer.y,
-                  moved: false,
-                };
-              }}
-              onPointerMove={(event) => {
-                const drag = imageViewerDragRef.current;
-                if (!drag || drag.pointerId !== event.pointerId) return;
-                const dx = event.clientX - drag.startX;
-                const dy = event.clientY - drag.startY;
-                if (Math.abs(dx) + Math.abs(dy) > 5) {
-                  drag.moved = true;
-                }
-                setImageViewer((prev) =>
-                  prev ? { ...prev, x: drag.originX + dx, y: drag.originY + dy } : prev,
-                );
-              }}
-              onPointerUp={(event) => {
-                const drag = imageViewerDragRef.current;
-                imageViewerDragRef.current = null;
-                if (!drag || drag.pointerId !== event.pointerId || !drag.moved) {
-                  setImageViewer(null);
-                }
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-    {selectedGoogleEvent && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={() => setSelectedGoogleEvent(null)}>
-          <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-[28px] bg-[#1e1f20] p-6 shadow-2xl ring-1 ring-[#282a2c]" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-title text-xl text-[#e3e3e3]">{selectedGoogleEvent.title || "Untitled Event"}</h3>
-            <div className="mt-4 space-y-4">
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9aa0a6]">Time</div>
-                <div className="mt-1 text-sm text-[#e3e3e3]">{googleEventTimeLabel(selectedGoogleEvent, true)}</div>
-              </div>
-              {selectedGoogleEvent.location && (
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9aa0a6]">Location</div>
-                  <div className="mt-1 text-sm text-[#e3e3e3]">{selectedGoogleEvent.location}</div>
-                </div>
-              )}
-              {selectedGoogleEvent.description && (
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9aa0a6]">Description</div>
-                  <div className="mt-1 whitespace-pre-wrap text-sm text-[#e3e3e3]">{selectedGoogleEvent.description}</div>
-                </div>
-              )}
-            </div>
-            <div className="mt-8 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  openDeleteGoogleEventConfirm(selectedGoogleEvent);
-                }}
-                className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-5 py-2.5 text-sm font-semibold text-rose-300 transition hover:bg-rose-500/20"
-              >
-                Delete Event
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedGoogleEvent(null)}
-                className="rounded-2xl border border-[#282a2c] bg-[#131314] px-5 py-2.5 text-sm font-semibold text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    {googleDeleteTarget && (
-        <div className="fixed inset-0 z-[310] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm" onClick={() => setGoogleDeleteTarget(null)}>
-          <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-[28px] bg-[#1e1f20] p-6 shadow-2xl ring-1 ring-[#282a2c]" onClick={(e) => e.stopPropagation()}>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-300">Delete Event</div>
-            <h3 className="mt-2 font-title text-xl text-[#e3e3e3]">{googleDeleteTarget.title || "Untitled Event"}</h3>
-            <div className="mt-4 space-y-4">
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9aa0a6]">Time</div>
-                <div className="mt-1 text-sm text-[#e3e3e3]">{googleEventTimeLabel(googleDeleteTarget, true)}</div>
-              </div>
-              {googleDeleteTarget.location && (
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9aa0a6]">Location</div>
-                  <div className="mt-1 text-sm text-[#e3e3e3]">{googleDeleteTarget.location}</div>
-                </div>
-              )}
-              {googleDeleteTarget.description && (
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9aa0a6]">Description</div>
-                  <div className="mt-1 whitespace-pre-wrap text-sm text-[#e3e3e3]">{googleDeleteTarget.description}</div>
-                </div>
-              )}
-            </div>
-            <div className="mt-8 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={async () => {
-                  const id = googleDeleteTarget.id;
-                  setGoogleDeleteTarget(null);
-                  if (id) {
-                    await deleteGoogleEvent(id).catch((error) => console.error("Google event delete error:", error));
-                  }
-                }}
-                className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-5 py-2.5 text-sm font-semibold text-rose-300 transition hover:bg-rose-500/20"
-              >
-                Delete Event
-              </button>
-              <button
-                type="button"
-                onClick={() => setGoogleDeleteTarget(null)}
-                className="rounded-2xl border border-[#282a2c] bg-[#131314] px-5 py-2.5 text-sm font-semibold text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+    <ImageViewerOverlay imageViewer={imageViewer} setImageViewer={setImageViewer} />
+    <GoogleEventModals
+      selectedEvent={selectedGoogleEvent}
+      deleteTarget={googleDeleteTarget}
+      onCloseSelected={() => setSelectedGoogleEvent(null)}
+      onRequestDelete={openDeleteGoogleEventConfirm}
+      onCloseDelete={() => setGoogleDeleteTarget(null)}
+      onConfirmDelete={(eventId) => {
+        deleteGoogleEvent(eventId).catch((error) => console.error("Google event delete error:", error));
+      }}
+    />
     </>
   );
 }
