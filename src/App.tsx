@@ -420,6 +420,16 @@ type SetupInstallResult = {
   catalog: SetupCatalog;
 };
 
+type SetupInstallProgress = {
+  stage: string;
+  part_key: SetupPartKey | "";
+  label: string;
+  file_index: number;
+  file_count: number;
+  percent: number;
+  message: string;
+};
+
 const SETUP_PARTS: SetupPart[] = [
   {
     key: "brain",
@@ -1623,6 +1633,7 @@ function App() {
   const [setupCatalog, setSetupCatalog] = useState<SetupCatalog | null>(null);
   const [setupInstalling, setSetupInstalling] = useState(false);
   const [setupNotice, setSetupNotice] = useState("");
+  const [setupProgress, setSetupProgress] = useState<SetupInstallProgress | null>(null);
   const [collapsedImageParts, setCollapsedImageParts] = useState<Record<string, boolean>>({});
   const [imageViewer, setImageViewer] = useState<{ url: string; localPath?: string; zoom: number; x: number; y: number } | null>(null);
   const [liveConversation, setLiveConversation] = useState(DEFAULT_SETTINGS.live_conversation);
@@ -1750,6 +1761,28 @@ function App() {
   useEffect(() => {
     activeTaskTypeRef.current = activeTaskType;
   }, [activeTaskType]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listen<SetupInstallProgress>("setup-install-progress", (event) => {
+      if (disposed) return;
+      setSetupProgress(event.payload);
+      setSetupNotice(event.payload.message);
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        unlisten = cleanup;
+      })
+      .catch((error) => console.error("Setup progress listener error:", error));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (!settingsLoaded) return;
@@ -5536,6 +5569,7 @@ ${personalityMemory.trim()}`
   const detectedSetupTier = setupTierFromSystem(systemInfo);
   const activeSetupTier = setupTierOverride ?? detectedSetupTier;
   const firstStartupSetupNeeded = !setupCompleted && !selectedModelPath;
+  const activeSetupPartKey = setupProgress?.part_key || "";
   const conversationLogoClass = messages.length === 0
     ? "hidden"
     : "pointer-events-none absolute left-1/2 top-1/2 z-0 w-[min(52vw,360px)] -translate-x-1/2 -translate-y-1/2 opacity-[0.045]";
@@ -7133,6 +7167,15 @@ ${personalityMemory.trim()}`
   const handleInstallSetupBundle = async () => {
     if (setupInstalling) return;
     setSetupInstalling(true);
+    setSetupProgress({
+      stage: "starting",
+      part_key: "",
+      label: "",
+      file_index: 0,
+      file_count: setupCatalog?.parts.reduce((count, part) => count + part.files.length, 0) || 0,
+      percent: 0,
+      message: "Preparing local model folders...",
+    });
     setSetupNotice("Downloading local AI parts. This can take a long time on the first run...");
     try {
       const result = await invoke<SetupInstallResult>("install_setup_bundle", {
@@ -7268,8 +7311,16 @@ ${personalityMemory.trim()}`
                   (() => {
                     const catalogPart = setupCatalog?.parts.find((item) => item.key === part.key);
                     const sizeLabel = catalogPart?.files.map((file) => file.size_hint).join(" + ") || part.note;
+                    const isActivePart = setupInstalling && activeSetupPartKey === part.key;
+                    const partState = catalogPart?.installed
+                      ? "Ready"
+                      : isActivePart
+                        ? setupProgress?.stage === "ready" ? "Ready" : "Installing"
+                        : setupInstalling
+                          ? "Queued"
+                          : "Needed";
                     return (
-                  <div key={part.key} className={`setup-part ${catalogPart?.installed ? "installed" : ""}`}>
+                  <div key={part.key} className={`setup-part ${catalogPart?.installed ? "installed" : ""} ${isActivePart ? "active" : ""}`}>
                     <div className="setup-part-icon">
                       {part.icon === "brain" ? (
                         <BrainIcon className="h-5 w-5" />
@@ -7285,7 +7336,7 @@ ${personalityMemory.trim()}`
                       <div className="setup-part-model">{setupPartModel(part, activeSetupTier)}</div>
                       <div className="setup-part-size">{sizeLabel}</div>
                     </div>
-                    <div className="setup-part-state">{catalogPart?.installed ? "Ready" : setupInstalling ? "Installing" : "Needed"}</div>
+                    <div className="setup-part-state">{partState}</div>
                   </div>
                     );
                   })()
@@ -7295,8 +7346,24 @@ ${personalityMemory.trim()}`
           </div>
 
           <div className="setup-footer">
-            <div className="setup-footer-note">
-              {setupNotice || "You can change models later. First startup only prepares a working default setup."}
+            <div className="setup-footer-info">
+              <div className="setup-footer-note">
+                {setupNotice || "You can change models later. First startup only prepares a working default setup."}
+              </div>
+              {(setupInstalling || setupProgress) && (
+                <div className="setup-progress" role="status" aria-live="polite">
+                  <div className="setup-progress-meta">
+                    <span>{setupProgress?.label || "Preparing installer"}</span>
+                    <strong>{setupProgress?.file_count ? `${setupProgress.file_index}/${setupProgress.file_count}` : "0%"}</strong>
+                  </div>
+                  <div className="setup-progress-track">
+                    <div
+                      className="setup-progress-fill"
+                      style={{ width: `${Math.max(3, setupProgress?.percent ?? 0)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             <div className="setup-actions">
               <button

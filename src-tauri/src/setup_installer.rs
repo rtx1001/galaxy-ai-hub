@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 
 use crate::app_paths;
 
@@ -34,6 +35,17 @@ pub struct SetupInstallResult {
     pub success: bool,
     pub message: String,
     pub catalog: SetupCatalog,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SetupInstallProgress {
+    pub stage: String,
+    pub part_key: String,
+    pub label: String,
+    pub file_index: usize,
+    pub file_count: usize,
+    pub percent: u32,
+    pub message: String,
 }
 
 fn app_root_dir() -> PathBuf {
@@ -228,11 +240,65 @@ fn write_brain_model_yml(tier: &str) -> Result<(), String> {
         .map_err(|e| format!("Could not write model.yml: {}", e))
 }
 
-fn download_file(file: &SetupFile) -> Result<(), String> {
+fn part_key_for_file(file: &SetupFile) -> String {
+    let destination = file.destination.replace('\\', "/").to_lowercase();
+    if destination.contains("/brain/") {
+        "brain".to_string()
+    } else if destination.contains("/voice-tts/") {
+        "voice".to_string()
+    } else if destination.contains("/qwen-edit/") {
+        "image".to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn emit_progress(
+    app: &tauri::AppHandle,
+    stage: &str,
+    file: Option<&SetupFile>,
+    file_index: usize,
+    file_count: usize,
+    message: String,
+) {
+    let percent = if file_count == 0 {
+        0
+    } else {
+        ((file_index.min(file_count) as f32 / file_count as f32) * 100.0).round() as u32
+    };
+    let progress = SetupInstallProgress {
+        stage: stage.to_string(),
+        part_key: file.map(part_key_for_file).unwrap_or_default(),
+        label: file.map(|item| item.label.clone()).unwrap_or_default(),
+        file_index,
+        file_count,
+        percent,
+        message,
+    };
+    let _ = app.emit("setup-install-progress", progress);
+}
+
+fn download_file(app: &tauri::AppHandle, file: &SetupFile, file_index: usize, file_count: usize) -> Result<(), String> {
     let destination = absolute_from_display(&file.destination);
     if file_installed(file) {
+        emit_progress(
+            app,
+            "ready",
+            Some(file),
+            file_index,
+            file_count,
+            format!("{} is already installed.", file.label),
+        );
         return Ok(());
     }
+    emit_progress(
+        app,
+        "downloading",
+        Some(file),
+        file_index.saturating_sub(1),
+        file_count,
+        format!("Downloading {} ({})...", file.label, file.size_hint),
+    );
     if let Some(parent) = destination.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("Could not create model folder {}: {}", parent.display(), e))?;
@@ -259,6 +325,14 @@ fn download_file(file: &SetupFile) -> Result<(), String> {
     }
     std::fs::rename(&temp, &destination)
         .map_err(|e| format!("Could not move downloaded file into place: {}", e))?;
+    emit_progress(
+        app,
+        "done",
+        Some(file),
+        file_index,
+        file_count,
+        format!("Installed {}.", file.label),
+    );
     Ok(())
 }
 
@@ -304,7 +378,7 @@ pub fn get_setup_catalog(tier: String) -> SetupCatalog {
 }
 
 #[tauri::command]
-pub async fn install_setup_bundle(tier: String) -> Result<SetupInstallResult, String> {
+pub async fn install_setup_bundle(app: tauri::AppHandle, tier: String) -> Result<SetupInstallResult, String> {
     let tier = match tier.as_str() {
         "light" | "balanced" | "high" => tier,
         _ => "balanced".to_string(),
@@ -315,10 +389,35 @@ pub async fn install_setup_bundle(tier: String) -> Result<SetupInstallResult, St
         all_files.extend(brain_files(&install_tier));
         all_files.extend(voice_files());
         all_files.extend(image_files(&install_tier));
-        for file in &all_files {
-            download_file(file)?;
+        let file_count = all_files.len();
+        emit_progress(
+            &app,
+            "starting",
+            None,
+            0,
+            file_count,
+            "Preparing local model folders...".to_string(),
+        );
+        for (index, file) in all_files.iter().enumerate() {
+            download_file(&app, file, index + 1, file_count)?;
         }
+        emit_progress(
+            &app,
+            "metadata",
+            None,
+            file_count,
+            file_count,
+            "Writing model metadata...".to_string(),
+        );
         write_brain_model_yml(&install_tier)?;
+        emit_progress(
+            &app,
+            "complete",
+            None,
+            file_count,
+            file_count,
+            "Local companion models are installed.".to_string(),
+        );
         Ok(SetupInstallResult {
             success: true,
             message: "Local companion models are installed.".to_string(),
