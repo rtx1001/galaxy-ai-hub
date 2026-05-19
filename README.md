@@ -6,7 +6,7 @@
 
 Galaxy AI Hub is a local-first desktop AI companion app.
 
-It is built for chatting with a personal AI character that can remember context, speak with a selected voice, use tools, generate images, and connect to Telegram while keeping the main AI work on your own PC.
+It is built for chatting with a personal AI character that can remember context, automations, speak with a selected voice, use tools, local workspace management, generate images, and connect to Telegram while keeping the main AI work on your own PC.
 
 > Early private test build. The app is still changing quickly while model setup, tool use, voice, image generation, Telegram, and automation are being refined.
 
@@ -29,7 +29,7 @@ These are the current local test models used by this build. They are not stored 
 
 | Part | Current model/files | Used for |
 | --- | --- | --- |
-| Brain | `gemma4/model.gguf` | Chat, reasoning, personality, tool use |
+| Brain | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` | Chat, reasoning, personality, tool use |
 | Image Studio | `Qwen-Rapid-NSFW-v23_Q4_K.gguf` | Text-to-image and image editing |
 | Image text encoder | `Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf` | Understanding image prompts |
 | Image projector | `Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf` | Multimodal image support |
