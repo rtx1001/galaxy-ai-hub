@@ -39,7 +39,7 @@ The design target is closer to a personal AI workstation than a normal chatbot w
 - **Frontend:** React 19, TypeScript, Vite
 - **Backend:** Rust
 - **Local LLM:** llama.cpp-compatible GGUF models
-- **Voice:** local voice synthesis runtime
+- **Voice:** local OmniVoice voice synthesis runtime (600+ langugages)
 - **Image generation:** local image runtime managed by the app
 - **Integrations:** Telegram, Google-related tooling, local workspace folders
 
@@ -89,10 +89,10 @@ Until that installer flow is finished, models are added manually.
 
 ## Adding LLM Models
 
-Galaxy AI Hub uses llama.cpp-compatible GGUF models. Put model folders under your configured model directory, for example:
+Galaxy AI Hub uses llama.cpp-compatible GGUF models. Download any multimodal GGUF LLM models into a folder, for example:
 
 ```text
-C:\Users\<you>\AppData\Roaming\Jan\data\llamacpp\models
+C:\models
 ```
 
 A simple model folder should look like this:
@@ -109,8 +109,8 @@ Example `model.yml`:
 
 ```yml
 embedding: false
-mmproj_path: llamacpp/models/gemma-4-E2B-it-Q6_K/mmproj.gguf
-model_path: llamacpp/models/gemma-4-E2B-it-Q6_K/model.gguf
+mmproj_path: /models/gemma-4-E2B-it-Q6_K/mmproj.gguf
+model_path: /models/gemma-4-E2B-it-Q6_K/model.gguf
 name: gemma-4-E2B-it-Q6_K
 size_bytes: 8065300448
 ```
@@ -119,16 +119,6 @@ Recommended starting models:
 
 - **Light PCs:** Gemma 4 E2B GGUF
 - **Balanced PCs:** Gemma 4 E4B GGUF
-- **Qwen alternative:** Qwen2.5 or Qwen3 GGUF instruct models
-- **Coding-focused option:** Qwen2.5 Coder GGUF
-
-Useful model links:
-
-- [Gemma 4 E2B GGUF on Hugging Face](https://huggingface.co/DuoNeural/Gemma-4-E2B-GGUF)
-- [Gemma 4 models collection on Hugging Face](https://huggingface.co/collections/unsloth/gemma-4)
-- [Official Qwen llama.cpp / GGUF guide](https://qwen.readthedocs.io/en/latest/run_locally/llama.cpp.html)
-- [Qwen2.5 1.5B Instruct GGUF](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF)
-- [Qwen3 4B GGUF](https://huggingface.co/Qwen/Qwen3-4B-GGUF)
 
 For most users, start with a Q4, Q5, or Q6 quant. Q4 is smaller and lighter. Q5/Q6 usually sound smarter if your PC has enough RAM/VRAM.
 
