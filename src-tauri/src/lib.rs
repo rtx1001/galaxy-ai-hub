@@ -14,6 +14,7 @@ mod google_calendar;
 mod llama_manager;
 mod omnivoice_runtime;
 mod resource_monitor;
+mod setup_installer;
 mod system_detect;
 mod weather;
 
@@ -168,6 +169,8 @@ pub fn run() {
             downloader::download_engine,
             downloader::check_engine_ready,
             downloader::get_engine_info,
+            setup_installer::get_setup_catalog,
+            setup_installer::install_setup_bundle,
             agent_store::remember_local_memory,
             agent_store::list_local_memory,
             agent_store::forget_local_memory,

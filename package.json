@@ -8,7 +8,8 @@
     "check:encoding": "node scripts/check-encoding.mjs",
     "build": "npm run check:encoding && tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "package:portable": "powershell -ExecutionPolicy Bypass -File scripts/package-portable.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

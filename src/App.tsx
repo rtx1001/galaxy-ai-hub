@@ -393,6 +393,33 @@ type SetupPart = {
   note: string;
 };
 
+type SetupFile = {
+  label: string;
+  url: string;
+  destination: string;
+  size_hint: string;
+};
+
+type SetupPartCatalog = {
+  key: SetupPartKey;
+  title: string;
+  files: SetupFile[];
+  installed: boolean;
+};
+
+type SetupCatalog = {
+  tier: SetupTier;
+  parts: SetupPartCatalog[];
+  brain_model_folder: string;
+  selected_brain_model_path: string;
+};
+
+type SetupInstallResult = {
+  success: boolean;
+  message: string;
+  catalog: SetupCatalog;
+};
+
 const SETUP_PARTS: SetupPart[] = [
   {
     key: "brain",
@@ -1580,6 +1607,9 @@ function App() {
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
   const [setupCompleted, setSetupCompleted] = useState(DEFAULT_SETTINGS.setup_completed);
   const [setupTierOverride, setSetupTierOverride] = useState<SetupTier | null>(null);
+  const [setupCatalog, setSetupCatalog] = useState<SetupCatalog | null>(null);
+  const [setupInstalling, setSetupInstalling] = useState(false);
+  const [setupNotice, setSetupNotice] = useState("");
   const [collapsedImageParts, setCollapsedImageParts] = useState<Record<string, boolean>>({});
   const [imageViewer, setImageViewer] = useState<{ url: string; localPath?: string; zoom: number; x: number; y: number } | null>(null);
   const [liveConversation, setLiveConversation] = useState(DEFAULT_SETTINGS.live_conversation);
@@ -1707,6 +1737,17 @@ function App() {
   useEffect(() => {
     activeTaskTypeRef.current = activeTaskType;
   }, [activeTaskType]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    const tier = setupTierOverride ?? setupTierFromSystem(systemInfo);
+    invoke<SetupCatalog>("get_setup_catalog", { tier })
+      .then(setSetupCatalog)
+      .catch((error) => {
+        console.error("Setup catalog error:", error);
+        setSetupNotice(error instanceof Error ? error.message : String(error));
+      });
+  }, [settingsLoaded, setupTierOverride, systemInfo]);
 
   const recommendedThreads = systemInfo
     ? clampNumber(Math.min(systemInfo.cpu_threads, 8), 2, Math.max(2, systemInfo.cpu_threads))
@@ -7076,6 +7117,34 @@ ${personalityMemory.trim()}`
     </div>
   );
 
+  const handleInstallSetupBundle = async () => {
+    if (setupInstalling) return;
+    setSetupInstalling(true);
+    setSetupNotice("Downloading local AI parts. This can take a long time on the first run...");
+    try {
+      const result = await invoke<SetupInstallResult>("install_setup_bundle", {
+        tier: activeSetupTier,
+      });
+      setSetupCatalog(result.catalog);
+      setModelFolder(result.catalog.brain_model_folder);
+      setSelectedModelPath(result.catalog.selected_brain_model_path);
+      setSetupCompleted(true);
+      setLeftPanelOpen(true);
+      setRightPanelOpen(true);
+      setSetupNotice(result.message);
+      await scanModelLibrary(
+        result.catalog.brain_model_folder,
+        result.catalog.selected_brain_model_path,
+        true,
+      );
+    } catch (error) {
+      console.error("Setup install error:", error);
+      setSetupNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSetupInstalling(false);
+    }
+  };
+
   if (!settingsLoaded) {
     return (
       <div className="startup-screen" role="status" aria-live="polite">
@@ -7133,7 +7202,7 @@ ${personalityMemory.trim()}`
               <h1 className="setup-title">Install your local AI companion</h1>
               <p className="setup-copy">
                 Galaxy will prepare the Brain, Voice, and Image Studio models for this PC.
-                This setup screen is now in place; download wiring is the next implementation step.
+                Downloads are large, resumable, and stored inside this portable app folder.
               </p>
             </div>
           </div>
@@ -7179,7 +7248,11 @@ ${personalityMemory.trim()}`
               <div className="setup-card-title">Companion parts</div>
               <div className="setup-parts">
                 {SETUP_PARTS.map((part) => (
-                  <div key={part.key} className="setup-part">
+                  (() => {
+                    const catalogPart = setupCatalog?.parts.find((item) => item.key === part.key);
+                    const sizeLabel = catalogPart?.files.map((file) => file.size_hint).join(" + ") || part.note;
+                    return (
+                  <div key={part.key} className={`setup-part ${catalogPart?.installed ? "installed" : ""}`}>
                     <div className="setup-part-icon">
                       {part.icon === "brain" ? (
                         <BrainIcon className="h-5 w-5" />
@@ -7193,9 +7266,12 @@ ${personalityMemory.trim()}`
                       <div className="setup-part-title">{part.title}</div>
                       <div className="setup-part-model">{setupPartModel(part, activeSetupTier)}</div>
                       <div className="setup-part-purpose">{part.purpose}</div>
+                      <div className="setup-part-size">{sizeLabel}</div>
                     </div>
-                    <div className="setup-part-state">Planned</div>
+                    <div className="setup-part-state">{catalogPart?.installed ? "Ready" : setupInstalling ? "Installing" : "Needed"}</div>
                   </div>
+                    );
+                  })()
                 ))}
               </div>
             </section>
@@ -7203,7 +7279,7 @@ ${personalityMemory.trim()}`
 
           <div className="setup-footer">
             <div className="setup-footer-note">
-              Next: these cards will download, verify, and register the model files automatically.
+              {setupNotice || "The app will download the selected model set, verify files, and register the Brain model automatically."}
             </div>
             <div className="setup-actions">
               <button
@@ -7214,20 +7290,17 @@ ${personalityMemory.trim()}`
                   setLeftPanelOpen(true);
                   setRightPanelOpen(true);
                 }}
+                disabled={setupInstalling}
               >
                 Manual setup for now
               </button>
               <button
                 type="button"
                 className="setup-primary-button"
-                onClick={() => {
-                  setSetupCompleted(true);
-                  setLeftPanelOpen(true);
-                  setRightPanelOpen(true);
-                  setModelMenuOpen(false);
-                }}
+                onClick={() => void handleInstallSetupBundle()}
+                disabled={setupInstalling}
               >
-                Continue to app
+                {setupInstalling ? "Installing..." : "Install models"}
               </button>
             </div>
           </div>

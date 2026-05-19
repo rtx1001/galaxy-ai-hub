@@ -60,7 +60,7 @@ The app should always prefer the LLM first. If there is enough VRAM, voice can s
 
 The goal is that new users should not need to manually hunt for model files.
 
-Planned first-start setup:
+First-start setup:
 
 1. Detect the PC hardware.
 2. Pick a recommended model tier automatically.
@@ -73,6 +73,23 @@ Planned first-start setup:
 9. Start chatting.
 
 Advanced users will still be able to choose their own GGUF models and folders.
+
+## Portable Build
+
+For new users, the simplest release format is planned to be a portable Windows zip:
+
+1. Download `GalaxyAIHub-portable.zip`.
+2. Extract it anywhere, such as `D:\GalaxyAIHub`.
+3. Run `Galaxy AI Hub.exe`.
+4. Let the first startup setup download the selected local models.
+
+Create the portable package:
+
+```powershell
+npm run package:portable
+```
+
+The portable zip includes the app, starter voice samples, and the small local image runtime. It does not include the large LLM/image/voice model files. Those are downloaded during first startup.
 
 ## Development
 
