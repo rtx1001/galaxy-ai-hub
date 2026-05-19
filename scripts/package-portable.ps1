@@ -34,7 +34,14 @@ try {
   if (Test-Path $samplesSource) {
     $samplesDest = Join-Path $portableRoot "assistant-runtime\voice\voice_samples"
     New-Item -ItemType Directory -Path $samplesDest -Force | Out-Null
-    Copy-Item -Path (Join-Path $samplesSource "*.wav") -Destination $samplesDest -Force
+    Get-ChildItem -Path $samplesSource -Filter "*.wav" -File |
+      Where-Object {
+        $_.Name -notmatch "^(celeb_|host_|utuber_)" -and
+        $_.Name -notin @("en_Trump.wav", "en_David_Attenborough.wav")
+      } |
+      ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $samplesDest -Force
+      }
   }
 
   $imageRuntimeSource = Join-Path $root "bin\stable-diffusion"

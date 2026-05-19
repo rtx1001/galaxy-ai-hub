@@ -311,12 +311,13 @@ details[open] > summary .details-chevron {
   padding: 28px;
   color: #e3e3e3;
   background:
-    radial-gradient(circle at 50% 26%, color-mix(in srgb, var(--accent-color) 18%, transparent), transparent 30%),
+    radial-gradient(circle at 50% 20%, color-mix(in srgb, var(--accent-color) 20%, transparent), transparent 28%),
+    radial-gradient(circle at 86% 74%, rgba(255, 255, 255, 0.06), transparent 22%),
     linear-gradient(180deg, #131314 0%, #17181a 46%, #101113 100%);
 }
 
 .setup-shell {
-  width: min(980px, calc(100vw - 56px));
+  width: min(960px, calc(100vw - 56px));
   overflow: hidden;
   border-radius: 30px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -327,26 +328,26 @@ details[open] > summary .details-chevron {
 .setup-hero {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 26px 28px 22px;
+  gap: 20px;
+  padding: 28px 30px 24px;
   border-bottom: 1px solid #282a2c;
 }
 
 .setup-logo {
-  width: 74px;
-  height: 74px;
+  width: 82px;
+  height: 82px;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  border-radius: 20px;
+  border-radius: 22px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 38%, transparent);
   background: #101113;
   box-shadow: 0 0 36px color-mix(in srgb, var(--accent-color) 18%, transparent);
 }
 
 .setup-logo img {
-  width: 48px;
-  height: 48px;
+  width: 54px;
+  height: 54px;
   object-fit: contain;
 }
 
@@ -362,7 +363,7 @@ details[open] > summary .details-chevron {
 .setup-title {
   margin: 6px 0 0;
   font-family: var(--font-title);
-  font-size: clamp(28px, 4vw, 44px);
+  font-size: clamp(30px, 4vw, 46px);
   line-height: 1;
   letter-spacing: 0;
 }
@@ -377,13 +378,13 @@ details[open] > summary .details-chevron {
 .setup-copy {
   max-width: 720px;
   margin: 10px 0 0;
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: 15px;
+  line-height: 1.6;
 }
 
 .setup-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 0.9fr) minmax(360px, 1.25fr);
+  grid-template-columns: minmax(270px, 0.85fr) minmax(380px, 1.2fr);
   gap: 14px;
   padding: 18px;
 }
@@ -396,15 +397,24 @@ details[open] > summary .details-chevron {
 }
 
 .setup-tier-badge {
+  display: flex;
   width: fit-content;
+  flex-direction: column;
+  gap: 2px;
   margin-top: 12px;
-  border-radius: 999px;
+  border-radius: 18px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
   background: color-mix(in srgb, var(--accent-color) 18%, #131314 82%);
-  padding: 8px 12px;
+  padding: 10px 13px;
   color: color-mix(in srgb, var(--accent-color) 72%, white 28%);
-  font-size: 13px;
+  font-size: 17px;
   font-weight: 800;
+}
+
+.setup-tier-badge small {
+  color: #c4c7c5;
+  font-size: 11px;
+  font-weight: 750;
 }
 
 .setup-muted {
@@ -415,15 +425,19 @@ details[open] > summary .details-chevron {
 
 .setup-spec-list {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   margin-top: 16px;
 }
 
 .setup-spec-list div {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-columns: 54px minmax(0, 1fr);
   align-items: baseline;
   gap: 12px;
+  min-height: 30px;
+  border-radius: 13px;
+  background: #101113;
+  padding: 7px 9px;
 }
 
 .setup-spec-list span {
@@ -460,7 +474,7 @@ details[open] > summary .details-chevron {
 }
 
 .setup-tier-button {
-  min-height: 42px;
+  min-height: 40px;
   background: #101113;
   color: #c4c7c5;
 }
@@ -473,16 +487,16 @@ details[open] > summary .details-chevron {
 
 .setup-parts {
   display: grid;
-  gap: 10px;
+  gap: 9px;
   margin-top: 14px;
 }
 
 .setup-part {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  min-height: 94px;
+  min-height: 102px;
   border-radius: 18px;
   border: 1px solid #282a2c;
   background: #101113;
@@ -496,8 +510,8 @@ details[open] > summary .details-chevron {
 .setup-part-icon {
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 34%, transparent);
   color: var(--accent-color);
@@ -510,8 +524,15 @@ details[open] > summary .details-chevron {
   font-weight: 850;
 }
 
+.setup-part-intro {
+  margin-top: 2px;
+  color: #e3e3e3;
+  font-size: 12px;
+  font-weight: 650;
+}
+
 .setup-part-model {
-  margin-top: 3px;
+  margin-top: 6px;
   overflow: hidden;
   color: var(--accent-color);
   font-size: 13px;
@@ -527,7 +548,7 @@ details[open] > summary .details-chevron {
 }
 
 .setup-part-size {
-  margin-top: 5px;
+  margin-top: 4px;
   overflow: hidden;
   color: #9aa0a6;
   font-size: 11px;
@@ -547,6 +568,22 @@ details[open] > summary .details-chevron {
   text-transform: uppercase;
 }
 
+.setup-part.installed .setup-part-state {
+  border-color: color-mix(in srgb, #79d06f 42%, transparent);
+  color: #79d06f;
+}
+
+.setup-size-note {
+  margin-top: 14px;
+  border-radius: 16px;
+  border: 1px solid #282a2c;
+  background: #101113;
+  padding: 10px 12px;
+  color: #c4c7c5;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .setup-footer {
   display: flex;
   align-items: center;
@@ -557,6 +594,7 @@ details[open] > summary .details-chevron {
 }
 
 .setup-footer-note {
+  max-width: 560px;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -570,8 +608,8 @@ details[open] > summary .details-chevron {
 
 .setup-secondary-button,
 .setup-primary-button {
-  min-height: 44px;
-  padding: 0 16px;
+  min-height: 46px;
+  padding: 0 18px;
   font-size: 13px;
 }
 

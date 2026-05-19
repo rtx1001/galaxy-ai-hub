@@ -478,6 +478,19 @@ const setupPartModel = (part: SetupPart, tier: SetupTier) => {
   return part.light;
 };
 
+const setupPartIntro = (part: SetupPart) => {
+  if (part.key === "brain") return "The part that thinks and chats.";
+  if (part.key === "voice") return "The part that lets characters speak.";
+  return "The part that paints and edits images.";
+};
+
+const setupTotalSizeLabel = (catalog: SetupCatalog | null) => {
+  if (!catalog) return "Checking download size...";
+  const labels = catalog.parts.flatMap((part) => part.files.map((file) => file.size_hint));
+  if (!labels.length) return "Download size will be shown before install.";
+  return `Downloads: ${labels.join(" + ")}`;
+};
+
 
 const createMessageId = () =>
   `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -7198,19 +7211,22 @@ ${personalityMemory.trim()}`
               <img src={brandLogo} alt="" aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <div className="setup-kicker">First Startup</div>
-              <h1 className="setup-title">Install your local AI companion</h1>
+              <div className="setup-kicker">Welcome to Galaxy</div>
+              <h1 className="setup-title">Build your local AI companion</h1>
               <p className="setup-copy">
-                Galaxy will prepare the Brain, Voice, and Image Studio models for this PC.
-                Downloads are large, resumable, and stored inside this portable app folder.
+                Galaxy needs three local parts before it can chat, speak, and create images.
+                Pick the setup that fits this PC, then let the app prepare everything in this folder.
               </p>
             </div>
           </div>
 
           <div className="setup-grid">
             <section className="setup-card setup-hardware-card">
-              <div className="setup-card-title">Hardware check</div>
-              <div className="setup-tier-badge">{setupTierLabel(activeSetupTier)} setup</div>
+              <div className="setup-card-title">Recommended setup</div>
+              <div className="setup-tier-badge">
+                <span>{setupTierLabel(activeSetupTier)}</span>
+                <small>{setupTierOverride ? "Selected by you" : "Picked for this PC"}</small>
+              </div>
               <p className="setup-muted">{setupTierDescription(activeSetupTier)}</p>
               <div className="setup-spec-list">
                 <div>
@@ -7238,14 +7254,15 @@ ${personalityMemory.trim()}`
                     className={`setup-tier-button ${activeSetupTier === tier ? "active" : ""}`}
                     onClick={() => setSetupTierOverride(tier)}
                   >
-                    {setupTierLabel(tier)}
+                    <span>{setupTierLabel(tier)}</span>
                   </button>
                 ))}
               </div>
+              <div className="setup-size-note">{setupTotalSizeLabel(setupCatalog)}</div>
             </section>
 
             <section className="setup-card setup-parts-card">
-              <div className="setup-card-title">Companion parts</div>
+              <div className="setup-card-title">What will be installed</div>
               <div className="setup-parts">
                 {SETUP_PARTS.map((part) => (
                   (() => {
@@ -7264,8 +7281,8 @@ ${personalityMemory.trim()}`
                     </div>
                     <div className="min-w-0">
                       <div className="setup-part-title">{part.title}</div>
+                      <div className="setup-part-intro">{setupPartIntro(part)}</div>
                       <div className="setup-part-model">{setupPartModel(part, activeSetupTier)}</div>
-                      <div className="setup-part-purpose">{part.purpose}</div>
                       <div className="setup-part-size">{sizeLabel}</div>
                     </div>
                     <div className="setup-part-state">{catalogPart?.installed ? "Ready" : setupInstalling ? "Installing" : "Needed"}</div>
@@ -7279,7 +7296,7 @@ ${personalityMemory.trim()}`
 
           <div className="setup-footer">
             <div className="setup-footer-note">
-              {setupNotice || "The app will download the selected model set, verify files, and register the Brain model automatically."}
+              {setupNotice || "You can change models later. First startup only prepares a working default setup."}
             </div>
             <div className="setup-actions">
               <button
@@ -7292,7 +7309,7 @@ ${personalityMemory.trim()}`
                 }}
                 disabled={setupInstalling}
               >
-                Manual setup for now
+                Choose files myself
               </button>
               <button
                 type="button"
@@ -7300,7 +7317,7 @@ ${personalityMemory.trim()}`
                 onClick={() => void handleInstallSetupBundle()}
                 disabled={setupInstalling}
               >
-                {setupInstalling ? "Installing..." : "Install models"}
+                {setupInstalling ? "Installing..." : "Install recommended setup"}
               </button>
             </div>
           </div>
