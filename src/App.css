@@ -308,7 +308,7 @@ details[open] > summary .details-chevron {
   box-sizing: border-box;
   display: grid;
   place-items: center;
-  padding: 28px;
+  padding: 18px;
   color: #e3e3e3;
   background:
     radial-gradient(circle at 50% 20%, color-mix(in srgb, var(--accent-color) 20%, transparent), transparent 28%),
@@ -317,7 +317,8 @@ details[open] > summary .details-chevron {
 }
 
 .setup-shell {
-  width: min(960px, calc(100vw - 56px));
+  position: relative;
+  width: min(940px, calc(100vw - 36px));
   overflow: hidden;
   border-radius: 30px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -325,29 +326,57 @@ details[open] > summary .details-chevron {
   box-shadow: 0 30px 100px rgba(0, 0, 0, 0.46);
 }
 
+.setup-close-button {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #282a2c;
+  border-radius: 16px;
+  background: #131314;
+  color: #e3e3e3;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  transition: background 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+
+.setup-close-button:hover:not(:disabled) {
+  background: #282a2c;
+  color: var(--accent-color);
+}
+
+.setup-close-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .setup-hero {
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 28px 30px 24px;
+  gap: 16px;
+  padding: 20px 64px 18px 22px;
   border-bottom: 1px solid #282a2c;
 }
 
 .setup-logo {
-  width: 82px;
-  height: 82px;
+  width: 68px;
+  height: 68px;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  border-radius: 22px;
+  border-radius: 18px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 38%, transparent);
   background: #101113;
   box-shadow: 0 0 36px color-mix(in srgb, var(--accent-color) 18%, transparent);
 }
 
 .setup-logo img {
-  width: 54px;
-  height: 54px;
+  width: 46px;
+  height: 46px;
   object-fit: contain;
 }
 
@@ -361,9 +390,9 @@ details[open] > summary .details-chevron {
 }
 
 .setup-title {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   font-family: var(--font-title);
-  font-size: clamp(30px, 4vw, 46px);
+  font-size: clamp(28px, 3.4vw, 40px);
   line-height: 1;
   letter-spacing: 0;
 }
@@ -377,37 +406,37 @@ details[open] > summary .details-chevron {
 
 .setup-copy {
   max-width: 720px;
-  margin: 10px 0 0;
-  font-size: 15px;
-  line-height: 1.6;
+  margin: 7px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .setup-grid {
   display: grid;
   grid-template-columns: minmax(270px, 0.85fr) minmax(380px, 1.2fr);
-  gap: 14px;
-  padding: 18px;
+  gap: 12px;
+  padding: 14px;
 }
 
 .setup-card {
-  border-radius: 24px;
+  border-radius: 22px;
   border: 1px solid #282a2c;
   background: #18191b;
-  padding: 18px;
+  padding: 14px;
 }
 
 .setup-tier-badge {
   display: flex;
   width: fit-content;
   flex-direction: column;
-  gap: 2px;
-  margin-top: 12px;
-  border-radius: 18px;
+  gap: 1px;
+  margin-top: 9px;
+  border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
   background: color-mix(in srgb, var(--accent-color) 18%, #131314 82%);
-  padding: 10px 13px;
+  padding: 8px 11px;
   color: color-mix(in srgb, var(--accent-color) 72%, white 28%);
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 800;
 }
 
@@ -418,15 +447,15 @@ details[open] > summary .details-chevron {
 }
 
 .setup-muted {
-  margin: 12px 0 0;
-  font-size: 13px;
-  line-height: 1.55;
+  margin: 9px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .setup-spec-list {
   display: grid;
-  gap: 7px;
-  margin-top: 16px;
+  gap: 6px;
+  margin-top: 12px;
 }
 
 .setup-spec-list div {
@@ -434,10 +463,10 @@ details[open] > summary .details-chevron {
   grid-template-columns: 54px minmax(0, 1fr);
   align-items: baseline;
   gap: 12px;
-  min-height: 30px;
-  border-radius: 13px;
+  min-height: 28px;
+  border-radius: 12px;
   background: #101113;
-  padding: 7px 9px;
+  padding: 6px 8px;
 }
 
 .setup-spec-list span {
@@ -460,8 +489,8 @@ details[open] > summary .details-chevron {
 .setup-tier-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 18px;
+  gap: 7px;
+  margin-top: 13px;
 }
 
 .setup-tier-button,
@@ -474,7 +503,7 @@ details[open] > summary .details-chevron {
 }
 
 .setup-tier-button {
-  min-height: 40px;
+  min-height: 36px;
   background: #101113;
   color: #c4c7c5;
 }
@@ -487,20 +516,20 @@ details[open] > summary .details-chevron {
 
 .setup-parts {
   display: grid;
-  gap: 9px;
-  margin-top: 14px;
+  gap: 7px;
+  margin-top: 11px;
 }
 
 .setup-part {
   display: grid;
   grid-template-columns: 46px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  min-height: 102px;
-  border-radius: 18px;
+  gap: 10px;
+  min-height: 82px;
+  border-radius: 16px;
   border: 1px solid #282a2c;
   background: #101113;
-  padding: 12px;
+  padding: 9px 10px;
 }
 
 .setup-part.installed {
@@ -518,9 +547,9 @@ details[open] > summary .details-chevron {
 .setup-part-icon {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 34%, transparent);
   color: var(--accent-color);
   background: color-mix(in srgb, var(--accent-color) 12%, #131314 88%);
@@ -528,22 +557,22 @@ details[open] > summary .details-chevron {
 
 .setup-part-title {
   color: #f1f3f4;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 850;
 }
 
 .setup-part-intro {
-  margin-top: 2px;
+  margin-top: 1px;
   color: #e3e3e3;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
 }
 
 .setup-part-model {
-  margin-top: 6px;
+  margin-top: 4px;
   overflow: hidden;
   color: var(--accent-color);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -556,7 +585,7 @@ details[open] > summary .details-chevron {
 }
 
 .setup-part-size {
-  margin-top: 4px;
+  margin-top: 2px;
   overflow: hidden;
   color: #9aa0a6;
   font-size: 11px;
@@ -568,7 +597,7 @@ details[open] > summary .details-chevron {
 .setup-part-state {
   border-radius: 999px;
   border: 1px solid #282a2c;
-  padding: 6px 9px;
+  padding: 5px 8px;
   color: #9aa0a6;
   font-size: 10px;
   font-weight: 850;
@@ -582,22 +611,33 @@ details[open] > summary .details-chevron {
 }
 
 .setup-size-note {
-  margin-top: 14px;
+  margin-top: 11px;
   border-radius: 16px;
   border: 1px solid #282a2c;
   background: #101113;
-  padding: 10px 12px;
+  padding: 9px 11px;
   color: #c4c7c5;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.setup-size-note strong {
+  color: #f1f3f4;
+  font-weight: 850;
+}
+
+.setup-size-note span:last-child {
+  color: var(--accent-color);
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .setup-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px 18px 18px;
+  gap: 12px;
+  padding: 12px 14px 14px;
   border-top: 1px solid #282a2c;
 }
 
@@ -608,13 +648,13 @@ details[open] > summary .details-chevron {
 
 .setup-footer-note {
   max-width: 560px;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .setup-progress {
   max-width: 560px;
-  margin-top: 10px;
+  margin-top: 7px;
 }
 
 .setup-progress-meta {
@@ -659,14 +699,14 @@ details[open] > summary .details-chevron {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
 }
 
 .setup-secondary-button,
 .setup-primary-button {
-  min-height: 46px;
-  padding: 0 18px;
-  font-size: 13px;
+  min-height: 40px;
+  padding: 0 15px;
+  font-size: 12px;
 }
 
 .setup-secondary-button {
@@ -684,6 +724,34 @@ details[open] > summary .details-chevron {
 .setup-primary-button:disabled {
   cursor: progress;
   opacity: 0.64;
+}
+
+@media (max-height: 920px) and (min-width: 781px) {
+  .setup-screen {
+    align-items: start;
+    padding-block: 12px;
+  }
+
+  .setup-title {
+    font-size: 32px;
+  }
+
+  .setup-copy {
+    max-width: 680px;
+  }
+
+  .setup-spec-list div {
+    min-height: 26px;
+    padding-block: 5px;
+  }
+
+  .setup-part {
+    min-height: 76px;
+  }
+
+  .setup-footer {
+    padding-block: 10px;
+  }
 }
 
 @media (max-width: 780px) {

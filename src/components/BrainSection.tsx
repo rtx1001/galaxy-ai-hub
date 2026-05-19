@@ -74,9 +74,11 @@ export function BrainSection({
                   onClick={() => onSelectModel(model.path)}
                   className={`w-full rounded-xl px-3 py-2 text-left transition ${selectedModelPath === model.path ? "bg-[var(--accent-soft)] ring-1 ring-[var(--accent-soft-strong)]" : "hover:bg-[#1e1f20]"}`}
                 >
-                  <div className="flex items-center gap-2">
-                    <BrainIcon className={`h-4 w-4 shrink-0 ${selectedModelPath === model.path && activeBrain ? "text-emerald-400" : "text-[#c4c7c5]"}`} />
-                    {model.has_vision && <EyeIcon className="h-4 w-4 shrink-0 text-[var(--accent-color)]" />}
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex w-9 shrink-0 items-center gap-1.5">
+                      <BrainIcon className={`h-4 w-4 shrink-0 ${selectedModelPath === model.path && activeBrain ? "text-emerald-400" : "text-[#c4c7c5]"}`} />
+                      {model.has_vision ? <EyeIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent-color)]" /> : <span className="h-3.5 w-3.5 shrink-0" />}
+                    </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold text-[#e3e3e3]">{model.name}</div>
                       <div className="mt-0.5 truncate text-xs text-[#c4c7c5]">{model.relative_path}</div>

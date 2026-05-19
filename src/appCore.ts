@@ -489,6 +489,41 @@ export const setupTotalSizeLabel = (catalog: SetupCatalog | null) => {
   return `Downloads: ${labels.join(" + ")}`;
 };
 
+const setupSizeHintToMb = (label: string) => {
+  const match = label.match(/([\d.]+)\s*(gb|mb)/i);
+  if (!match) return 0;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return 0;
+  return match[2].toLowerCase() === "gb" ? value * 1024 : value;
+};
+
+const setupMbLabel = (mb: number) => {
+  if (mb <= 0) return "size pending";
+  if (mb >= 1024) return `about ${(mb / 1024).toFixed(1)} GB`;
+  return `about ${Math.round(mb)} MB`;
+};
+
+export const setupDownloadSizeSummary = (catalog: SetupCatalog | null) => {
+  if (!catalog) {
+    return {
+      total: "Checking download size...",
+      parts: [] as Array<{ title: string; size: string }>,
+    };
+  }
+  const parts = catalog.parts.map((part) => {
+    const mb = part.files.reduce((sum, file) => sum + setupSizeHintToMb(file.size_hint), 0);
+    return {
+      title: part.title,
+      size: setupMbLabel(mb),
+    };
+  });
+  const totalMb = parts.reduce((sum, part) => sum + setupSizeHintToMb(part.size), 0);
+  return {
+    total: `Total download size: ${setupMbLabel(totalMb)}`,
+    parts,
+  };
+};
+
 
 export const createMessageId = () =>
   `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;

@@ -1,16 +1,16 @@
 import { Dispatch, SetStateAction } from "react";
-import { BrainIcon, BrushIcon, SpeakerIcon } from "./Icons";
+import { BrainIcon, BrushIcon, CloseIcon, SpeakerIcon } from "./Icons";
 import {
   SETUP_PARTS,
   SetupCatalog,
   SetupInstallProgress,
   SetupTier,
   SystemInfo,
+  setupDownloadSizeSummary,
   setupPartIntro,
   setupPartModel,
   setupTierDescription,
   setupTierLabel,
-  setupTotalSizeLabel,
 } from "../appCore";
 
 type SetupTheme = {
@@ -33,6 +33,7 @@ type SetupScreenProps = {
   activeSetupPartKey: string;
   setupProgress: SetupInstallProgress | null;
   setupNotice: string;
+  onClose: () => void;
   onChooseFiles: () => void;
   onInstall: () => void;
 };
@@ -51,11 +52,13 @@ export function SetupScreen({
   activeSetupPartKey,
   setupProgress,
   setupNotice,
+  onClose,
   onChooseFiles,
   onInstall,
 }: SetupScreenProps) {
   const hasInstalledParts = Boolean(setupCatalog?.parts.some((part) => part.installed));
   const hasMissingParts = Boolean(setupCatalog?.parts.some((part) => !part.installed));
+  const sizeSummary = setupDownloadSizeSummary(setupCatalog);
   const installButtonLabel = setupInstalling
     ? "Installing..."
     : hasInstalledParts && hasMissingParts
@@ -75,6 +78,15 @@ export function SetupScreen({
       }
     >
       <div className="setup-shell">
+        <button
+          type="button"
+          className="setup-close-button"
+          onClick={onClose}
+          disabled={setupInstalling}
+          title="Back to chat"
+        >
+          <CloseIcon className="h-4.5 w-4.5" />
+        </button>
         <div className="setup-hero">
           <div className="setup-logo">
             <img src={brandLogo} alt="" aria-hidden="true" />
@@ -127,7 +139,19 @@ export function SetupScreen({
                 </button>
               ))}
             </div>
-            <div className="setup-size-note">{setupTotalSizeLabel(setupCatalog)}</div>
+            <div className="setup-size-note">
+              <strong>{sizeSummary.total}</strong>
+              {sizeSummary.parts.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {sizeSummary.parts.map((part) => (
+                    <div key={part.title} className="flex items-center justify-between gap-3">
+                      <span>{part.title}</span>
+                      <span>{part.size}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
 
           <section className="setup-card setup-parts-card">

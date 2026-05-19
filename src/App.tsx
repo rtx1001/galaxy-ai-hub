@@ -5138,6 +5138,7 @@ ${personalityMemory.trim()}`
       setLeftPanelOpen(true);
       setRightPanelOpen(true);
       setSetupNotice(result.message);
+      window.setTimeout(() => ensureConversationStartsAtBottom(), 0);
       await scanModelLibrary(
         result.catalog.brain_model_folder,
         result.catalog.selected_brain_model_path,
@@ -5149,6 +5150,14 @@ ${personalityMemory.trim()}`
     } finally {
       setSetupInstalling(false);
     }
+  };
+
+  const closeSetupScreen = () => {
+    setSetupCompleted(true);
+    setSetupScreenOpen(false);
+    setLeftPanelOpen(true);
+    setRightPanelOpen(true);
+    window.setTimeout(() => ensureConversationStartsAtBottom(), 0);
   };
 
   if (!settingsLoaded) {
@@ -5175,12 +5184,8 @@ ${personalityMemory.trim()}`
         activeSetupPartKey={activeSetupPartKey}
         setupProgress={setupProgress}
         setupNotice={setupNotice}
-        onChooseFiles={() => {
-          setSetupCompleted(true);
-          setSetupScreenOpen(false);
-          setLeftPanelOpen(true);
-          setRightPanelOpen(true);
-        }}
+        onClose={closeSetupScreen}
+        onChooseFiles={closeSetupScreen}
         onInstall={() => void handleInstallSetupBundle()}
       />
     );
@@ -6069,7 +6074,7 @@ ${personalityMemory.trim()}`
                   </button>
 
                   {quickModelMenuOpen && (
-                    <div className="dropdown-scroll absolute bottom-full right-0 z-50 mb-2 max-h-80 w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-2xl border border-[#282a2c] bg-[#131314] p-2 shadow-2xl">
+                    <div className="dropdown-scroll absolute bottom-full right-0 z-50 mb-2 max-h-80 w-64 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-2xl border border-[#282a2c] bg-[#131314] p-2 shadow-2xl">
                       {availableModels.length === 0 ? (
                         <div className="p-4 text-center text-xs text-[#73777f]">No models found</div>
                       ) : (
@@ -6082,14 +6087,16 @@ ${personalityMemory.trim()}`
                               setSelectedModelPath(model.path);
                               loadModelPath(model.path).catch((error) => console.error("Model select error:", error));
                             }}
-                            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${selectedModelPath === model.path ? "bg-[var(--accent-soft)] text-[var(--accent-color)]" : "text-[#c4c7c5] hover:bg-[#282a2c]"}`}
+                            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left transition ${selectedModelPath === model.path ? "bg-[var(--accent-soft)] text-[var(--accent-color)]" : "text-[#c4c7c5] hover:bg-[#282a2c]"}`}
                           >
-                            <BrainIcon className={`h-4 w-4 shrink-0 ${selectedModelPath === model.path && (brainStatus === "Ready" || brainStatus === "Thinking") ? "text-emerald-400" : "text-[#c4c7c5]"}`} />
+                            <div className="flex w-9 shrink-0 items-center gap-1.5">
+                              <BrainIcon className={`h-4 w-4 shrink-0 ${selectedModelPath === model.path && (brainStatus === "Ready" || brainStatus === "Thinking") ? "text-emerald-400" : "text-[#c4c7c5]"}`} />
+                              {model.has_vision && <EyeIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent-color)]" />}
+                            </div>
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-sm font-semibold">{model.name}</div>
                               <div className="truncate text-[10px] opacity-60">{model.path.split(/[/\\]/).pop()}</div>
                             </div>
-                            {model.has_vision && <EyeIcon className="h-4 w-4 shrink-0 text-[var(--accent-color)]" />}
                           </button>
                         ))
                       )}
