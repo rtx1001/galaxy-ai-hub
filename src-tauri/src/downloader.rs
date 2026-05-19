@@ -216,7 +216,10 @@ pub fn start_download_engine(has_nvidia_gpu: bool, force_refresh: Option<bool>) 
     let bat_path_clone = bat_path.clone();
 
     std::thread::spawn(move || {
-        let _ = Command::new("cmd").arg("/C").arg(&bat_path_clone).status();
+        let mut command = Command::new("cmd");
+        command.arg("/C").arg(&bat_path_clone);
+        crate::process_util::hide_window(&mut command);
+        let _ = command.status();
         let _ = std::fs::remove_file(&bat_path_clone);
         IS_DOWNLOADING.store(false, Ordering::SeqCst);
     });

@@ -89,17 +89,31 @@ fn omnivoice_cpp_output_dir() -> PathBuf {
 }
 
 fn omnivoice_tts_executable_path() -> PathBuf {
-    let bundled = omnivoice_runtime_dir()
-        .join("bin")
-        .join("omnivoice-tts.exe");
-    if bundled.exists() {
-        bundled
-    } else {
+    let candidates = [
+        omnivoice_runtime_dir()
+            .join("bin")
+            .join("omnivoice-tts.exe"),
+        omnivoice_runtime_dir().join("bin").join("llama-tts.exe"),
         app_root_dir()
             .join("src-tauri")
             .join("engine")
-            .join("omnivoice-tts.exe")
-    }
+            .join("omnivoice-tts.exe"),
+        app_root_dir()
+            .join("src-tauri")
+            .join("engine")
+            .join("llama-tts.exe"),
+        app_root_dir().join("engine").join("omnivoice-tts.exe"),
+        app_root_dir().join("engine").join("llama-tts.exe"),
+    ];
+    candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .unwrap_or_else(|| {
+            app_root_dir()
+                .join("src-tauri")
+                .join("engine")
+                .join("llama-tts.exe")
+        })
 }
 
 fn ensure_dirs() -> Result<(), String> {
@@ -335,6 +349,7 @@ fn start_sidecar(
         .parent()
         .map(|path| path.to_path_buf())
         .unwrap_or_else(app_root_dir);
+    crate::process_util::hide_window(&mut command);
     let mut child = command
         .current_dir(current_dir)
         .spawn()
@@ -648,6 +663,7 @@ pub async fn synthesize_speech_with_state(
         .parent()
         .map(|path| path.to_path_buf())
         .unwrap_or_else(app_root_dir);
+    crate::process_util::hide_window(&mut command);
     let mut child = command
         .current_dir(current_dir)
         .spawn()

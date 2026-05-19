@@ -78,6 +78,16 @@ export function RefreshIcon({ className = "h-5 w-5" }: { className?: string }) {
   );
 }
 
+export function DownloadIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M12 3v12" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M5 21h14" />
+    </svg>
+  );
+}
+
 
 
 export function EditIcon({ className = "h-4 w-4" }: { className?: string }) {

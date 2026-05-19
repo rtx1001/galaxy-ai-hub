@@ -30,6 +30,17 @@ try {
   Copy-Item -LiteralPath (Join-Path $root "README.md") -Destination (Join-Path $portableRoot "README.md") -ErrorAction SilentlyContinue
   Copy-Item -LiteralPath (Join-Path $root "Logo") -Destination (Join-Path $portableRoot "Logo") -Recurse -ErrorAction SilentlyContinue
 
+  $engineSource = Join-Path $root "src-tauri\engine"
+  if (Test-Path $engineSource) {
+    $engineDest = Join-Path $portableRoot "src-tauri\engine"
+    New-Item -ItemType Directory -Path $engineDest -Force | Out-Null
+    Get-ChildItem -Path $engineSource -File |
+      Where-Object { $_.Name -match '\.(exe|dll|txt)$' } |
+      ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $engineDest -Force
+      }
+  }
+
   $samplesSource = Join-Path $root "assistant-runtime\voice\voice_samples"
   if (Test-Path $samplesSource) {
     $samplesDest = Join-Path $portableRoot "assistant-runtime\voice\voice_samples"

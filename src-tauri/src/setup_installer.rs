@@ -72,6 +72,9 @@ struct BrainChoice {
     repo: &'static str,
     file: &'static str,
     size_hint: &'static str,
+    mmproj_repo: &'static str,
+    mmproj_file: &'static str,
+    mmproj_size_hint: &'static str,
 }
 
 fn brain_choice(tier: &str) -> BrainChoice {
@@ -79,9 +82,12 @@ fn brain_choice(tier: &str) -> BrainChoice {
         "light" => BrainChoice {
             folder_name: "gemma-4-E2B-it-Q4_K_M",
             model_name: "Gemma 4 E2B Q4_K_M",
-            repo: "DuoNeural/Gemma-4-E2B-GGUF",
-            file: "gemma-4-E2B-it.Q4_K_M.gguf",
-            size_hint: "about 3.5 GB",
+            repo: "lmstudio-community/gemma-4-E2B-it-GGUF",
+            file: "gemma-4-E2B-it-Q4_K_M.gguf",
+            size_hint: "about 3.7 GB",
+            mmproj_repo: "lmstudio-community/gemma-4-E2B-it-GGUF",
+            mmproj_file: "mmproj-gemma-4-E2B-it-BF16.gguf",
+            mmproj_size_hint: "about 987 MB",
         },
         "high" => BrainChoice {
             folder_name: "gemma-4-E4B-it-Q8_0",
@@ -89,6 +95,9 @@ fn brain_choice(tier: &str) -> BrainChoice {
             repo: "unsloth/gemma-4-E4B-it-GGUF",
             file: "gemma-4-E4B-it-Q8_0.gguf",
             size_hint: "about 8.2 GB",
+            mmproj_repo: "unsloth/gemma-4-E4B-it-GGUF",
+            mmproj_file: "mmproj-BF16.gguf",
+            mmproj_size_hint: "about 987 MB",
         },
         _ => BrainChoice {
             folder_name: "gemma-4-E4B-it-Q5_K_M",
@@ -96,6 +105,9 @@ fn brain_choice(tier: &str) -> BrainChoice {
             repo: "unsloth/gemma-4-E4B-it-GGUF",
             file: "gemma-4-E4B-it-Q5_K_M.gguf",
             size_hint: "about 5.6 GB",
+            mmproj_repo: "unsloth/gemma-4-E4B-it-GGUF",
+            mmproj_file: "mmproj-BF16.gguf",
+            mmproj_size_hint: "about 987 MB",
         },
     }
 }
@@ -115,7 +127,13 @@ fn relative_display(path: &Path) -> String {
         .to_string()
 }
 
-fn setup_file(label: &str, repo: &str, file: &str, destination: PathBuf, size_hint: &str) -> SetupFile {
+fn setup_file(
+    label: &str,
+    repo: &str,
+    file: &str,
+    destination: PathBuf,
+    size_hint: &str,
+) -> SetupFile {
     SetupFile {
         label: label.to_string(),
         url: hf_url(repo, file),
@@ -126,13 +144,22 @@ fn setup_file(label: &str, repo: &str, file: &str, destination: PathBuf, size_hi
 
 fn brain_files(tier: &str) -> Vec<SetupFile> {
     let choice = brain_choice(tier);
-    vec![setup_file(
-        choice.model_name,
-        choice.repo,
-        choice.file,
-        selected_brain_model_path_for_tier(tier),
-        choice.size_hint,
-    )]
+    vec![
+        setup_file(
+            choice.model_name,
+            choice.repo,
+            choice.file,
+            selected_brain_model_path_for_tier(tier),
+            choice.size_hint,
+        ),
+        setup_file(
+            "Gemma 4 vision projector",
+            choice.mmproj_repo,
+            choice.mmproj_file,
+            brain_model_folder_for_tier(tier).join("mmproj.gguf"),
+            choice.mmproj_size_hint,
+        ),
+    ]
 }
 
 fn voice_files(tier: &str) -> Vec<SetupFile> {
@@ -243,7 +270,11 @@ fn absolute_from_display(path: &str) -> PathBuf {
 
 fn file_installed(file: &SetupFile) -> bool {
     let path = absolute_from_display(&file.destination);
-    path.exists() && path.metadata().map(|meta| meta.len() > 1024 * 1024).unwrap_or(false)
+    path.exists()
+        && path
+            .metadata()
+            .map(|meta| meta.len() > 1024 * 1024)
+            .unwrap_or(false)
 }
 
 fn files_installed(files: &[SetupFile]) -> bool {
@@ -253,9 +284,14 @@ fn files_installed(files: &[SetupFile]) -> bool {
 fn write_brain_model_yml(tier: &str) -> Result<(), String> {
     let folder = brain_model_folder_for_tier(tier);
     let model = folder.join("model.gguf");
-    let bytes = std::fs::metadata(&model)
+    let mmproj = folder.join("mmproj.gguf");
+    let model_bytes = std::fs::metadata(&model)
         .map_err(|e| format!("Could not read installed brain model metadata: {}", e))?
         .len();
+    let mmproj_bytes = std::fs::metadata(&mmproj)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+    let total_bytes = model_bytes.saturating_add(mmproj_bytes);
     let name = folder
         .file_name()
         .and_then(|value| value.to_str())
@@ -266,10 +302,23 @@ fn write_brain_model_yml(tier: &str) -> Result<(), String> {
         .display()
         .to_string()
         .replace('\\', "/");
-    let content = format!(
-        "embedding: false\nmodel_path: {}\nname: {}\nsize_bytes: {}\n",
-        relative_model, name, bytes
-    );
+    let relative_mmproj = mmproj
+        .strip_prefix(app_root_dir())
+        .unwrap_or(&mmproj)
+        .display()
+        .to_string()
+        .replace('\\', "/");
+    let content = if mmproj.exists() {
+        format!(
+            "embedding: false\nmmproj_path: {}\nmodel_path: {}\nname: {}\nsize_bytes: {}\n",
+            relative_mmproj, relative_model, name, total_bytes
+        )
+    } else {
+        format!(
+            "embedding: false\nmodel_path: {}\nname: {}\nsize_bytes: {}\n",
+            relative_model, name, total_bytes
+        )
+    };
     std::fs::write(folder.join("model.yml"), content)
         .map_err(|e| format!("Could not write model.yml: {}", e))
 }
@@ -312,7 +361,12 @@ fn emit_progress(
     let _ = app.emit("setup-install-progress", progress);
 }
 
-fn download_file(app: &tauri::AppHandle, file: &SetupFile, file_index: usize, file_count: usize) -> Result<(), String> {
+fn download_file(
+    app: &tauri::AppHandle,
+    file: &SetupFile,
+    file_index: usize,
+    file_count: usize,
+) -> Result<(), String> {
     let destination = absolute_from_display(&file.destination);
     if file_installed(file) {
         emit_progress(
@@ -338,20 +392,27 @@ fn download_file(app: &tauri::AppHandle, file: &SetupFile, file_index: usize, fi
             .map_err(|e| format!("Could not create model folder {}: {}", parent.display(), e))?;
     }
     let temp = destination.with_extension("download");
-    let status = Command::new("curl.exe")
+    let mut command = Command::new("curl.exe");
+    command
         .arg("--ssl-no-revoke")
         .arg("-L")
         .arg("-C")
         .arg("-")
         .arg("-o")
         .arg(&temp)
-        .arg(&file.url)
+        .arg(&file.url);
+    crate::process_util::hide_window(&mut command);
+    let status = command
         .status()
         .map_err(|e| format!("Could not start downloader: {}", e))?;
     if !status.success() {
         return Err(format!("Download failed for {}", file.label));
     }
-    if temp.metadata().map(|meta| meta.len() <= 1024 * 1024).unwrap_or(true) {
+    if temp
+        .metadata()
+        .map(|meta| meta.len() <= 1024 * 1024)
+        .unwrap_or(true)
+    {
         return Err(format!("Downloaded file looks incomplete: {}", file.label));
     }
     if destination.exists() {
@@ -401,10 +462,7 @@ pub fn get_setup_catalog(tier: String) -> SetupCatalog {
                 files: image,
             },
         ],
-        brain_model_folder: portable_models_dir()
-            .join("brain")
-            .display()
-            .to_string(),
+        brain_model_folder: portable_models_dir().join("brain").display().to_string(),
         selected_brain_model_path: selected_brain_model_path_for_tier(&tier)
             .display()
             .to_string(),
@@ -412,7 +470,10 @@ pub fn get_setup_catalog(tier: String) -> SetupCatalog {
 }
 
 #[tauri::command]
-pub async fn install_setup_bundle(app: tauri::AppHandle, tier: String) -> Result<SetupInstallResult, String> {
+pub async fn install_setup_bundle(
+    app: tauri::AppHandle,
+    tier: String,
+) -> Result<SetupInstallResult, String> {
     let tier = match tier.as_str() {
         "light" | "balanced" | "high" => tier,
         _ => "balanced".to_string(),

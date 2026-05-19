@@ -25,13 +25,18 @@ def warmup(cache_dir: str) -> int:
     return 0
 
 
-def transcribe(audio_path: str, cache_dir: str) -> int:
+def transcribe(audio_path: str, cache_dir: str, language: str | None = None) -> int:
     model = load_model(cache_dir)
+    options = {
+        "beam_size": 1,
+        "vad_filter": True,
+        "condition_on_previous_text": False,
+    }
+    if language:
+        options["language"] = language
     segments, info = model.transcribe(
         audio_path,
-        beam_size=1,
-        vad_filter=True,
-        condition_on_previous_text=False,
+        **options,
     )
     text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
     print(
@@ -56,6 +61,7 @@ def main() -> int:
     transcribe_parser = subparsers.add_parser("transcribe")
     transcribe_parser.add_argument("--audio", required=True)
     transcribe_parser.add_argument("--cache-dir", required=True)
+    transcribe_parser.add_argument("--language", default=None)
 
     args = parser.parse_args()
 
@@ -63,7 +69,7 @@ def main() -> int:
         if args.command == "warmup":
             return warmup(args.cache_dir)
         if args.command == "transcribe":
-            return transcribe(args.audio, args.cache_dir)
+            return transcribe(args.audio, args.cache_dir, args.language)
         raise ValueError(f"Unsupported command: {args.command}")
     except Exception as exc:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)

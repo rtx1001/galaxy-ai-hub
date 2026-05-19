@@ -13,6 +13,7 @@ mod file_tools;
 mod google_calendar;
 mod llama_manager;
 mod omnivoice_runtime;
+mod process_util;
 mod resource_monitor;
 mod setup_installer;
 mod system_detect;
@@ -224,6 +225,7 @@ pub fn run() {
             google_calendar::execute_google_api,
             assistant_runtime::start_voice_setup,
             assistant_runtime::get_voice_setup_status,
+            assistant_runtime::default_voice_samples_folder,
             assistant_runtime::list_voice_samples,
             assistant_runtime::detect_voice_sample_language,
             omnivoice_runtime::prepare_omnivoice_engine,

@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{
@@ -165,7 +166,7 @@ struct WhisperStdout {
 }
 
 const VOICE_RUNTIME_SCRIPT: &str = include_str!("../python/voice_runtime.py");
-const PREPARED_VOICE_SAMPLE_VERSION: &str = "v4-mono22050-normfade-8s";
+const PREPARED_VOICE_SAMPLE_VERSION: &str = "v5-mono22050-normfade-8s-langhint";
 const PREPARED_VOICE_SAMPLE_RATE: u32 = 22_050;
 const DEFAULT_QWEN_IMAGE_MODELS: &[&str] = &[
     "Qwen-Rapid-NSFW-v23_Q8_0.gguf",
@@ -198,7 +199,7 @@ fn voices_dir(folder: Option<&str>) -> PathBuf {
     folder
         .filter(|value| !value.trim().is_empty())
         .map(|value| PathBuf::from(value.trim()))
-        .unwrap_or_else(|| app_root_dir().join("voices"))
+        .unwrap_or_else(|| assistant_runtime_dir().join("voice").join("voice_samples"))
 }
 
 fn voice_runtime_dir() -> PathBuf {
@@ -337,8 +338,10 @@ fn ensure_voice_worker_script() -> Result<PathBuf, String> {
 }
 
 fn command_exists(program: &str, args: &[&str]) -> bool {
-    Command::new(program)
-        .args(args)
+    let mut command = Command::new(program);
+    command.args(args);
+    crate::process_util::hide_window(&mut command);
+    command
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
@@ -350,18 +353,20 @@ fn create_venv() -> Result<(), String> {
     }
 
     let venv_dir = voice_venv_dir();
-    let status = if command_exists("py", &["-3", "--version"]) {
-        Command::new("py")
-            .args(["-3", "-m", "venv"])
-            .arg(&venv_dir)
-            .status()
+    let mut command = if command_exists("py", &["-3", "--version"]) {
+        let mut command = Command::new("py");
+        command.args(["-3", "-m", "venv"]);
+        command
     } else {
-        Command::new("python")
-            .args(["-m", "venv"])
-            .arg(&venv_dir)
-            .status()
-    }
-    .map_err(|e| format!("Unable to start Python for voice helper: {}", e))?;
+        let mut command = Command::new("python");
+        command.args(["-m", "venv"]);
+        command
+    };
+    command.arg(&venv_dir);
+    crate::process_util::hide_window(&mut command);
+    let status = command
+        .status()
+        .map_err(|e| format!("Unable to start Python for voice helper: {}", e))?;
 
     if !status.success() {
         return Err(
@@ -373,7 +378,11 @@ fn create_venv() -> Result<(), String> {
     Ok(())
 }
 
-fn run_voice_python(args: &[&str]) -> Result<std::process::Output, String> {
+fn run_voice_python<I, S>(args: I) -> Result<std::process::Output, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let script_path = ensure_voice_worker_script()?;
     let mut command = Command::new(voice_python_path());
     command
@@ -386,6 +395,7 @@ fn run_voice_python(args: &[&str]) -> Result<std::process::Output, String> {
         .env("PIP_CACHE_DIR", pip_cache_dir())
         .current_dir(voice_runtime_dir());
 
+    crate::process_util::hide_window(&mut command);
     command
         .output()
         .map_err(|e| format!("Voice helper failed to start: {}", e))
@@ -416,10 +426,13 @@ fn install_voice_runtime_blocking(state: VoiceRuntimeState) {
             },
         );
 
-        let pip_upgrade = Command::new(voice_python_path())
+        let mut pip_command = Command::new(voice_python_path());
+        pip_command
             .args(["-m", "pip", "install", "--upgrade", "pip"])
             .env("PIP_CACHE_DIR", pip_cache_dir())
-            .current_dir(voice_runtime_dir())
+            .current_dir(voice_runtime_dir());
+        crate::process_util::hide_window(&mut pip_command);
+        let pip_upgrade = pip_command
             .status()
             .map_err(|e| format!("Could not prepare pip: {}", e))?;
 
@@ -427,10 +440,13 @@ fn install_voice_runtime_blocking(state: VoiceRuntimeState) {
             return Err("Could not prepare the voice installer.".to_string());
         }
 
-        let install = Command::new(voice_python_path())
+        let mut install_command = Command::new(voice_python_path());
+        install_command
             .args(["-m", "pip", "install", "faster-whisper"])
             .env("PIP_CACHE_DIR", pip_cache_dir())
-            .current_dir(voice_runtime_dir())
+            .current_dir(voice_runtime_dir());
+        crate::process_util::hide_window(&mut install_command);
+        let install = install_command
             .status()
             .map_err(|e| format!("Could not install faster-whisper: {}", e))?;
 
@@ -920,6 +936,7 @@ async fn generate_image_with_sdcpp_qwen(
             command.arg("-r").arg(path);
         }
 
+        crate::process_util::hide_window(&mut command);
         let output = command
             .output()
             .map_err(|e| format!("Could not start the local image engine: {}", e))?;
@@ -4306,18 +4323,75 @@ fn voice_language_cache_key(path: &Path) -> Result<String, String> {
     ))
 }
 
+fn voice_language_hint_from_path(path: &Path) -> Option<&'static str> {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let tokens: Vec<&str> = file_name
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .collect();
+
+    if tokens.iter().any(|token| matches!(*token, "vi" | "vn" | "vie"))
+        || file_name.contains("vietnam")
+    {
+        return Some("vi");
+    }
+    if tokens.iter().any(|token| matches!(*token, "en" | "eng"))
+        || file_name.contains("english")
+    {
+        return Some("en");
+    }
+    if tokens.iter().any(|token| matches!(*token, "th" | "tha" | "thai"))
+        || file_name.contains("thai")
+    {
+        return Some("th");
+    }
+    if tokens.iter().any(|token| matches!(*token, "ja" | "jp" | "jpn"))
+        || file_name.contains("japanese")
+    {
+        return Some("ja");
+    }
+    if tokens.iter().any(|token| matches!(*token, "ko" | "kr" | "kor"))
+        || file_name.contains("korean")
+    {
+        return Some("ko");
+    }
+    if tokens.iter().any(|token| matches!(*token, "zh" | "cn" | "zho" | "chi"))
+        || file_name.contains("chinese")
+        || file_name.contains("mandarin")
+    {
+        return Some("zh");
+    }
+
+    None
+}
+
+fn voice_transcribe_args(audio_path: &Path, language_hint: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "transcribe".to_string(),
+        "--audio".to_string(),
+        audio_path.to_string_lossy().to_string(),
+        "--cache-dir".to_string(),
+        voice_cache_dir().to_string_lossy().to_string(),
+    ];
+    if let Some(language) = language_hint {
+        args.push("--language".to_string());
+        args.push(language.to_string());
+    }
+    args
+}
+
 fn detect_voice_language_from_path_blocking(
     audio_path: &Path,
 ) -> Result<DetectedVoiceLanguage, String> {
     ensure_voice_dirs()?;
 
-    let stdout = run_voice_python(&[
-        "transcribe",
-        "--audio",
-        audio_path.to_string_lossy().as_ref(),
-        "--cache-dir",
-        voice_cache_dir().to_string_lossy().as_ref(),
-    ])?;
+    let language_hint = voice_language_hint_from_path(audio_path);
+    let args = voice_transcribe_args(audio_path, language_hint);
+    let stdout = run_voice_python(&args)?;
 
     if !stdout.status.success() {
         let stderr = String::from_utf8_lossy(&stdout.stderr).trim().to_string();
@@ -4332,7 +4406,9 @@ fn detect_voice_language_from_path_blocking(
         .map_err(|e| format!("Could not read the voice helper result: {}", e))?;
 
     Ok(DetectedVoiceLanguage {
-        language: parsed.language.trim().to_string(),
+        language: language_hint
+            .unwrap_or_else(|| parsed.language.trim())
+            .to_string(),
         language_probability: parsed.language_probability,
     })
 }
@@ -4442,13 +4518,8 @@ pub(crate) fn transcribe_prepared_voice_sample_path(audio_path: &Path) -> Result
         );
     }
 
-    let stdout = run_voice_python(&[
-        "transcribe",
-        "--audio",
-        audio_path.to_string_lossy().as_ref(),
-        "--cache-dir",
-        voice_cache_dir().to_string_lossy().as_ref(),
-    ])?;
+    let args = voice_transcribe_args(audio_path, voice_language_hint_from_path(audio_path));
+    let stdout = run_voice_python(&args)?;
 
     if !stdout.status.success() {
         let stderr = String::from_utf8_lossy(&stdout.stderr).trim().to_string();
@@ -4469,6 +4540,11 @@ pub(crate) fn transcribe_prepared_voice_sample_path(audio_path: &Path) -> Result
 
     let _ = std::fs::write(&transcript_cache_path, &text);
     Ok(text)
+}
+
+#[tauri::command]
+pub fn default_voice_samples_folder() -> String {
+    voices_dir(None).to_string_lossy().to_string()
 }
 
 #[tauri::command]
@@ -4528,13 +4604,8 @@ pub async fn transcribe_audio(
         .map_err(|e| format!("Could not save the recorded audio: {}", e))?;
 
     let stdout = tokio::task::spawn_blocking(move || {
-        run_voice_python(&[
-            "transcribe",
-            "--audio",
-            audio_path.to_string_lossy().as_ref(),
-            "--cache-dir",
-            voice_cache_dir().to_string_lossy().as_ref(),
-        ])
+        let args = voice_transcribe_args(&audio_path, None);
+        run_voice_python(&args)
     })
     .await
     .map_err(|e| format!("Voice listening task failed: {}", e))??;

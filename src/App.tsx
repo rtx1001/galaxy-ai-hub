@@ -4,1537 +4,105 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import brandLogo from "./assets/logo-gah.svg";
-import { ChatContentPart, ChatMessage, ChatSessions, EngineInfo, ModelLoadStatus, VoiceSetupStatus, ToolResultCard, ImageProposal, ActionProposal, FilePreviewResult } from "./types";
-import { MicIcon, SendIcon, StopIcon, ImageIcon, FolderIcon, SpeakerIcon, EraserIcon, EditIcon, PlusIcon, CloseIcon, ChevronDownIcon, ChevronUpIcon, PlayIcon, CameraIcon, BrainIcon, EyeIcon, GearIcon, MenuIcon, TrashIcon, BrushIcon, RefreshIcon, RepeatIcon, SaveIcon } from "./components/Icons";
+import { ChatContentPart, ChatMessage, ChatSessions, EngineInfo, ModelLoadStatus, VoiceSetupStatus, ActionProposal, FilePreviewResult } from "./types";
+import { MicIcon, SendIcon, StopIcon, ImageIcon, FolderIcon, SpeakerIcon, EraserIcon, PlusIcon, CloseIcon, ChevronDownIcon, ChevronUpIcon, PlayIcon, CameraIcon, BrainIcon, EyeIcon, GearIcon, MenuIcon, TrashIcon, BrushIcon, RefreshIcon, RepeatIcon, SaveIcon, DownloadIcon } from "./components/Icons";
 import { IconButton, SliderField, NumberStepper, AvatarImage } from "./components/UI";
 import { FilePreviewCard, ToolResultCards, ImageProposalCard, ActionProposalCard } from "./components/ToolCards";
 import { FormattedMessageText } from "./components/ChatBubble";
 import { HeartbeatMonitor } from "./components/HeartbeatMonitor";
 import { ResourceHeader } from "./components/ResourceHeader";
-import { clampNumber, formatBytes, getVietnameseLunarDate } from "./utils";
-
-type VramMemoryStatus = {
-  available: boolean;
-  used_mb: number;
-  total_mb: number;
-  free_mb: number;
-};
-
-type OmniVoiceVramEstimate = {
-  required_mb: number;
-  model_mb: number;
-  overhead_mb: number;
-};
-
-type AudioSynthesisResult = {
-  audio_base64: string;
-  mime_type: string;
-};
-
-type LocalImageDataUrl = {
-  data_url: string;
-  path: string;
-};
-
-type VoiceSample = {
-  name: string;
-  label: string;
-  path: string;
-  language?: string | null;
-  language_probability?: number | null;
-};
-
-type SystemInfo = {
-  has_nvidia_gpu: boolean;
-  gpu_details: string;
-  total_vram_mb: number;
-  total_ram_mb: number;
-  cpu_name: string;
-  cpu_threads: number;
-  recommended_chat_gpu_layers: number;
-  recommended_task_gpu_layers: number;
-  recommended_context_size: number;
-};
-
-type ModelLibraryEntry = {
-  path: string;
-  name: string;
-  relative_path: string;
-  has_vision: boolean;
-};
-
-type ModelStatus = {
-  status: string;
-  message: string;
-  has_vision: boolean;
-  model_name: string;
-  model_path: string;
-  gpu_layers: number;
-};
-
-type FileActionResult = {
-  success: boolean;
-  message: string;
-  path: string | null;
-};
-type AgentReactResult = {
-  answer: string;
-  thinking?: string | null;
-  tool_used: string | null;
-  observation: string | null;
-  cards: ToolResultCard[];
-  image_proposal: ImageProposal | null;
-  file_preview: FilePreviewResult | null;
-  action_proposal: ActionProposal | null;
-  tool_trace: ToolTrace[];
-};
-type MemoryItem = {
-  id: number;
-  kind: string;
-  key: string;
-  value: string;
-  source: string;
-  confidence: number;
-  created_at: number;
-  updated_at: number;
-};
-type ToolTrace = {
-  tool: string;
-  success: boolean;
-  summary: string;
-};
-
-type ToolRunRecord = {
-  id: number;
-  tool_name: string;
-  input_json: string;
-  output_text: string;
-  success: boolean;
-  duration_ms: number;
-  created_at: number;
-};
-
-type TelegramBotStatus = {
-  success: boolean;
-  message: string;
-  username: string | null;
-};
-
-type TelegramGuest = {
-  id: string;
-  name: string;
-};
-
-type PendingShellAction = {
-  id: number;
-  command: string;
-  working_directory: string;
-  purpose: string;
-  risk_level: string;
-  timeout_seconds: number;
-  created_at: number;
-};
-
-type ShellExecutionResult = {
-  id: number;
-  command: string;
-  working_directory: string;
-  exit_code: number | null;
-  stdout: string;
-  stderr: string;
-  timed_out: boolean;
-  duration_ms: number;
-};
-
-type ShellToolRequest = {
-  purpose?: string;
-  command?: string;
-  working_directory?: string;
-  timeout_seconds?: number;
-};
-
-type AutomationJob = {
-  id: number;
-  name: string;
-  prompt: string;
-  schedule: string;
-  enabled: boolean;
-  next_run_at: number | null;
-  last_run_at: number | null;
-  created_at: number;
-  updated_at: number;
-};
-
-type GoogleConnectionStatus = {
-  connected: boolean;
-  email: string | null;
-  expires_at: number | null;
-};
-
-type GoogleCalendarEvent = {
-  id: string;
-  title: string;
-  start: string;
-  end: string;
-  all_day: boolean;
-  location: string | null;
-  description: string | null;
-  html_link: string | null;
-};
-
-type ThemeSwatch = {
-  id: string;
-  accent: string;
-  hover: string;
-  soft: string;
-};
-
-type AutomationRepeat = "once" | "every_minutes" | "every_hours" | "daily" | "weekly" | "monthly";
-type AutomationEveryUnit = "minutes" | "hours";
-type SendOptions = {
-  text?: string;
-  imageDataUrl?: string;
-  imagePath?: string;
-  sourceLabel?: string;
-  skipLocalIntent?: boolean;
-  silentUser?: boolean;
-  autoApproveActions?: boolean;
-};
-
-type AppSettings = {
-  setup_completed: boolean;
-  user_name: string;
-  user_avatar: string;
-  user_description: string;
-  user_location_label: string;
-  user_latitude: number | null;
-  user_longitude: number | null;
-  theme_swatch_id: string;
-  live_conversation: boolean;
-  telegram_bot_token: string;
-  telegram_owner_id: string;
-  telegram_guests: TelegramGuest[];
-  thinking_enabled: boolean;
-  google_client_id: string;
-  google_client_secret: string;
-  google_redirect_uri: string;
-  image_width: number;
-  image_height: number;
-  voice_folder: string;
-  selected_voice_path: string;
-  creativity: number;
-  sampling_temperature: number;
-  top_k: number;
-  top_p: number;
-  min_p: number;
-  repeat_last_n: number;
-  repeat_penalty: number;
-  memory_size: number;
-  reply_length: number;
-  intelligence_quality: number;
-  personality: string;
-  personality_presets: PersonalityPreset[];
-  selected_personality_id: string;
-  user_profiles: UserProfilePreset[];
-  selected_user_profile_id: string;
-  model_folder: string;
-  selected_model_path: string;
-  linked_folders: string[];
-  ui_left_panel_open: boolean;
-  ui_right_panel_open: boolean;
-  ui_workspace_open: boolean;
-  ui_image_studio_open: boolean;
-  ui_calendar_open: boolean;
-  ui_automation_open: boolean;
-  ui_telegram_open: boolean;
-  ui_google_open: boolean;
-  ui_tool_activity_open: boolean;
-  ui_sampling_open: boolean;
-};
-
-type PersonalityPreset = {
-  id: string;
-  name: string;
-  prompt: string;
-  avatar?: string;
-  voice_path?: string;
-};
-
-type UserProfilePreset = {
-  id: string;
-  name: string;
-  description: string;
-  avatar?: string;
-  voice_path?: string;
-  location_label?: string;
-  latitude?: number | null;
-  longitude?: number | null;
-  auto_speech?: boolean;
-};
-
-type CharacterSettings = {
-  voice_path: string;
-  avatar: string;
-  prompt: string;
-  greeting: string;
-  notes: string;
-};
-
-type CharacterFiles = {
-  id: string;
-  name: string;
-  folder: string;
-  soul: string;
-  settings: CharacterSettings;
-};
-
-const syncSoulCoreIdentity = (soul: string, name: string, prompt: string) => {
-  const cleanName = name.trim() || "Assistant";
-  const cleanPrompt = prompt.trim() || "A helpful, emotionally aware companion assistant.";
-  const baseSoul = soul.trim()
-    ? soul.trim()
-    : `# ${cleanName} Soul\n\n## Core Identity\n\n${cleanPrompt}\n\n## Emotional Cognition\n\n- First notice the user's language, mood, and implied need before deciding whether to act.\n\n## Speech Style\n\n- Stay natural and concise.\n\n## Boundaries\n\n- Do not invent actions, files, messages, events, or facts.\n`;
-
-  const corePattern = /(## Core Identity\s*\n\n)([\s\S]*?)(?=\n\n## |\s*$)/;
-  if (corePattern.test(baseSoul)) {
-    return baseSoul.replace(corePattern, `$1${cleanPrompt}`);
-  }
-  return `${baseSoul}\n\n## Core Identity\n\n${cleanPrompt}`.trim();
-};
-
-type BrainMessage = {
-  role: "system" | "user" | "assistant";
-  content: string | ChatContentPart[];
-};
-
-const MAX_BRAIN_HISTORY_MESSAGES = 18;
-
-const DEFAULT_SETTINGS: AppSettings = {
-  setup_completed: false,
-  user_name: "You",
-  user_avatar: "",
-  user_description: "",
-  user_location_label: "",
-  user_latitude: null,
-  user_longitude: null,
-  theme_swatch_id: "blue",
-  live_conversation: false,
-  telegram_bot_token: "",
-  telegram_owner_id: "",
-  telegram_guests: [],
-  thinking_enabled: false,
-  google_client_id: "",
-  google_client_secret: "",
-  google_redirect_uri: "http://127.0.0.1:8765/google/callback",
-  image_width: 1024,
-  image_height: 1024,
-  voice_folder: "",
-  selected_voice_path: "",
-  creativity: 50,
-  sampling_temperature: 0.6,
-  top_k: 40,
-  top_p: 0.9,
-  min_p: 0.1,
-  repeat_last_n: 64,
-  repeat_penalty: 1.0,
-  memory_size: 4096,
-  reply_length: 512,
-  intelligence_quality: 50,
-  personality: "You are a helpful and friendly AI assistant.",
-  personality_presets: [
-    {
-      id: "default",
-      name: "Helpful",
-      prompt: "You are a helpful and friendly AI assistant.",
-      avatar: "",
-    },
-  ],
-  selected_personality_id: "default",
-  user_profiles: [
-    {
-      id: "default_user",
-      name: "You",
-      description: "",
-      avatar: "",
-      voice_path: "",
-      location_label: "",
-      latitude: null,
-      longitude: null,
-      auto_speech: true,
-    },
-  ],
-  selected_user_profile_id: "default_user",
-  model_folder: "",
-  selected_model_path: "",
-  linked_folders: [],
-  ui_left_panel_open: true,
-  ui_right_panel_open: true,
-  ui_workspace_open: false,
-  ui_image_studio_open: false,
-  ui_calendar_open: false,
-  ui_automation_open: false,
-  ui_telegram_open: false,
-  ui_google_open: false,
-  ui_tool_activity_open: false,
-  ui_sampling_open: false,
-};
-
-type SetupTier = "light" | "balanced" | "high";
-type SetupPartKey = "brain" | "voice" | "image";
-
-type SetupPart = {
-  key: SetupPartKey;
-  title: string;
-  icon: "brain" | "voice" | "image";
-  purpose: string;
-  light: string;
-  balanced: string;
-  high: string;
-  note: string;
-};
-
-type SetupFile = {
-  label: string;
-  url: string;
-  destination: string;
-  size_hint: string;
-};
-
-type SetupPartCatalog = {
-  key: SetupPartKey;
-  title: string;
-  files: SetupFile[];
-  installed: boolean;
-};
-
-type SetupCatalog = {
-  tier: SetupTier;
-  parts: SetupPartCatalog[];
-  brain_model_folder: string;
-  selected_brain_model_path: string;
-};
-
-type SetupInstallResult = {
-  success: boolean;
-  message: string;
-  catalog: SetupCatalog;
-};
-
-type SetupInstallProgress = {
-  stage: string;
-  part_key: SetupPartKey | "";
-  label: string;
-  file_index: number;
-  file_count: number;
-  percent: number;
-  message: string;
-};
-
-const SETUP_PARTS: SetupPart[] = [
-  {
-    key: "brain",
-    title: "Brain",
-    icon: "brain",
-    purpose: "Main chat, reasoning, memory, and tool use.",
-    light: "Gemma 4 E2B GGUF Q4/Q5",
-    balanced: "Gemma 4 E4B GGUF Q5/Q6",
-    high: "Gemma 4 E4B GGUF Q8",
-    note: "The app always gives the LLM first priority.",
-  },
-  {
-    key: "voice",
-    title: "Voice",
-    icon: "voice",
-    purpose: "Local character speech and one-shot voice samples.",
-    light: "Q4 voice model, loaded only when needed",
-    balanced: "Q8 voice model, kept ready when VRAM allows",
-    high: "Q8 voice model, persistent beside the LLM when possible",
-    note: "Starter samples are included for new users.",
-  },
-  {
-    key: "image",
-    title: "Image Studio",
-    icon: "image",
-    purpose: "Text-to-image and image editing from chat.",
-    light: "Qwen Image Edit Q3 at smaller resolutions",
-    balanced: "Qwen Image Edit Q4 at 1024px",
-    high: "Qwen Image Edit Q5 at 1024-1536px",
-    note: "Image files stay outside Git and will be downloaded by setup.",
-  },
-];
-
-const setupTierFromSystem = (info: SystemInfo | null): SetupTier => {
-  if (!info) return "balanced";
-  if (info.total_ram_mb >= 60000 && info.total_vram_mb >= 12000) return "high";
-  if (info.total_ram_mb >= 30000 && info.total_vram_mb >= 8000) return "balanced";
-  return "light";
-};
-
-const setupTierLabel = (tier: SetupTier) => {
-  if (tier === "high") return "High";
-  if (tier === "balanced") return "Balanced";
-  return "Light";
-};
-
-const setupTierDescription = (tier: SetupTier) => {
-  if (tier === "high") return "Best for larger context, smoother voice, and heavier image work.";
-  if (tier === "balanced") return "Best default for local chat, voice, and 1024px image generation.";
-  return "Best for lighter PCs. Chat comes first and other models swap when needed.";
-};
-
-const setupPartModel = (part: SetupPart, tier: SetupTier) => {
-  if (tier === "high") return part.high;
-  if (tier === "balanced") return part.balanced;
-  return part.light;
-};
-
-const setupPartIntro = (part: SetupPart) => {
-  if (part.key === "brain") return "The part that thinks and chats.";
-  if (part.key === "voice") return "The part that lets characters speak.";
-  return "The part that paints and edits images.";
-};
-
-const setupTotalSizeLabel = (catalog: SetupCatalog | null) => {
-  if (!catalog) return "Checking download size...";
-  const labels = catalog.parts.flatMap((part) => part.files.map((file) => file.size_hint));
-  if (!labels.length) return "Download size will be shown before install.";
-  return `Downloads: ${labels.join(" + ")}`;
-};
-
-
-const createMessageId = () =>
-  `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const SPEECH_CACHE_LIMIT = 12;
-const SHELL_TOOL_PATTERN = /<galaxy_shell>\s*([\s\S]*?)\s*<\/galaxy_shell>/i;
-const extractMessageText = (content: ChatMessage["content"]) => {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  return content
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
-};
-
-const splitAssistantTextForChat = (text: string) => {
-  const clean = text.trim();
-  const target = 620;
-  const hardLimit = 900;
-  if (clean.length <= hardLimit) return clean ? [clean] : [];
-
-  const chunks: string[] = [];
-  let current = "";
-  const pushCurrent = () => {
-    const value = current.trim();
-    if (value) chunks.push(value);
-    current = "";
-  };
-  const appendUnit = (unit: string) => {
-    const piece = unit.trim();
-    if (!piece) return;
-    if (current && current.length + piece.length + 2 > target) {
-      pushCurrent();
-    }
-    if (piece.length <= hardLimit) {
-      current = current ? `${current}\n\n${piece}` : piece;
-      return;
-    }
-    const sentences = piece.match(/[^.!?\u3002\uFF01\uFF1F\n]+[.!?\u3002\uFF01\uFF1F]?/g) ?? [piece];
-    for (const sentence of sentences) {
-      const line = sentence.trim();
-      if (!line) continue;
-      if (current && current.length + line.length + 1 > target) {
-        pushCurrent();
-      }
-      if (line.length <= hardLimit) {
-        current = current ? `${current} ${line}` : line;
-        continue;
-      }
-      for (let index = 0; index < line.length; index += hardLimit) {
-        if (current) pushCurrent();
-        const chunk = line.slice(index, index + hardLimit).trim();
-        if (chunk) chunks.push(chunk);
-      }
-    }
-  };
-
-  clean.split(/\n{2,}/).forEach(appendUnit);
-  pushCurrent();
-  return chunks.length ? chunks : [clean];
-};
-
-const splitAssistantMessageForChat = (message: ChatMessage): ChatMessage[] => {
-  if (message.role !== "assistant" || typeof message.content !== "string") return [message];
-  const chunks = splitAssistantTextForChat(message.content);
-  if (chunks.length <= 1) return [{ ...message, content: chunks[0] ?? message.content }];
-  return chunks.map((chunk, index) => ({
-    ...message,
-    id: index === 0 ? message.id : createMessageId(),
-    content: chunk,
-    thinking: index === 0 ? message.thinking : undefined,
-  }));
-};
-
-type DisplayLanguage = "en" | "vi";
-
-const detectDisplayLanguage = (text: string): DisplayLanguage => {
-  return /[\u0100-\u024f\u1ea0-\u1ef9]/.test(text) ? "vi" : "en";
-};
-
-const THEME_SWATCHS: ThemeSwatch[] = [
-  { id: "blue", accent: "#a8c7fa", hover: "#bfd4fb", soft: "rgba(168, 199, 250, 0.18)" },
-  { id: "green", accent: "#7bd17a", hover: "#96e093", soft: "rgba(123, 209, 122, 0.18)" },
-  { id: "lime", accent: "#d7db63", hover: "#e3e882", soft: "rgba(215, 219, 99, 0.18)" },
-  { id: "gold", accent: "#f0c531", hover: "#f4d25c", soft: "rgba(240, 197, 49, 0.18)" },
-  { id: "orange", accent: "#f45c3d", hover: "#f77860", soft: "rgba(244, 92, 61, 0.18)" },
-  { id: "pink", accent: "#d45aae", hover: "#dd78bf", soft: "rgba(212, 90, 174, 0.18)" },
-  { id: "purple", accent: "#a95de6", hover: "#bb7ced", soft: "rgba(169, 93, 230, 0.18)" },
-];
-
-const filePreviewContextText = (preview: FilePreviewResult) => {
-  const mime = preview.mime_type.toLowerCase();
-  const lines = [
-    "File preview shown in this conversation:",
-    `Title: ${preview.name}`,
-    `Type: ${preview.mime_type || preview.extension || "file"}`,
-    `Path: ${preview.path}`,
-    `Size: ${formatBytes(preview.size_bytes)}`,
-  ];
-  if (mime.startsWith("image/")) {
-    lines.push(preview.data_url ? "Visual: image pixels are available in the conversation context." : "Visual: image pixels are not available.");
-  } else if (mime.startsWith("audio/")) {
-    lines.push(preview.perception ? `Audio transcript/perception: ${preview.perception}` : "Audio: playable in chat, but no transcript or audio analysis has been generated yet.");
-  } else if (mime.startsWith("video/")) {
-    lines.push(preview.perception ? `Video transcript/perception: ${preview.perception}` : "Video: playable in chat, but no transcript or frame analysis has been generated yet.");
-  } else if (preview.text) {
-    lines.push(`Text preview:\n${preview.text.slice(0, 4000)}`);
-  }
-  if (preview.truncated) {
-    lines.push("Status: preview was truncated.");
-  }
-  return lines.join("\n");
-};
-
-const buildAgentMessageContent = (content: ChatMessage["content"], includeImages: boolean): BrainMessage["content"] => {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  const parts: ChatContentPart[] = [];
-  for (const part of content) {
-    if (part.type === "text") {
-      parts.push(part);
-    } else if (part.type === "image_url") {
-      if (includeImages) {
-        parts.push(part);
-      }
-    } else if (part.type === "file_preview") {
-      parts.push({ type: "text", text: filePreviewContextText(part.file_preview) });
-      if (includeImages && part.file_preview.mime_type.toLowerCase().startsWith("image/") && part.file_preview.data_url) {
-        parts.push({ type: "image_url", image_url: { url: part.file_preview.data_url } });
-      }
-    } else if (part.type === "tool_result_cards") {
-      const text = part.cards
-        .map((card) => {
-          const fields = card.fields
-            .map((field) => `${field.label}: ${field.value}`)
-            .join("\n");
-          const items = card.items
-            .slice(0, 5)
-            .map((item, index) => {
-              const details = item.details.map((field) => `${field.label}: ${field.value}`).join("\n");
-              return `${index + 1}. ${item.title}${item.subtitle ? `\n${item.subtitle}` : ""}${details ? `\n${details}` : ""}`;
-            })
-            .join("\n\n");
-          return [`Tool result: ${card.title}`, card.summary || "", fields, items || card.text || ""].filter(Boolean).join("\n");
-        })
-        .join("\n\n");
-      if (text.trim()) {
-        parts.push({ type: "text", text: text.slice(0, 8000) });
-      }
-    } else if (part.type === "image_proposal") {
-      const proposalLines = [
-        "Pending image proposal awaiting approval:",
-        `Prompt: ${part.image_proposal.prompt}`,
-        `Mode: ${part.image_proposal.mode}`,
-        part.image_proposal.mask_prompt ? `Mask prompt: ${part.image_proposal.mask_prompt}` : "",
-      ].filter(Boolean);
-      parts.push({ type: "text", text: proposalLines.join("\n") });
-    } else if (part.type === "action_proposal") {
-      const proposalLines = [
-        "Pending action proposal awaiting approval:",
-        `Action type: ${part.action_proposal.action_type}`,
-        `Title: ${part.action_proposal.title}`,
-        `Risk: ${part.action_proposal.risk_level}`,
-        `Details: ${part.action_proposal.details}`,
-      ].filter(Boolean);
-      parts.push({ type: "text", text: proposalLines.join("\n") });
-    }
-  }
-
-  const hasImage = parts.some((part) => part.type === "image_url");
-  if (hasImage) {
-    return parts;
-  }
-  return parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
-};
-
-const extractAgentMessageText = (content: BrainMessage["content"]) => {
-  if (typeof content === "string") {
-    return content;
-  }
-  return content
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
-};
-
-const isExplicitApprovalText = (text: string) => {
-  const normalized = normalizeIntentText(text).replace(/[!?.,]+/g, " ").replace(/\s+/g, " ").trim();
-  if (!normalized) return false;
-  return [
-    "ok",
-    "okay",
-    "oke",
-    "yes",
-    "yeah",
-    "yep",
-    "duoc",
-    "duoc roi",
-    "u",
-    "um",
-    "uhm",
-    "duyet",
-    "duyet di",
-    "lam di",
-    "ok lam di",
-    "oke lam di",
-    "tao di",
-    "ok tao di",
-    "oke tao di",
-    "xoa di",
-    "ok xoa di",
-    "oke xoa di",
-  ].includes(normalized);
-};
-
-const findPendingImageProposal = (chatMessages: ChatMessage[]) => {
-  for (let messageIndex = chatMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const message = chatMessages[messageIndex];
-    if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
-    for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex -= 1) {
-      const part = message.content[partIndex];
-      if (part.type === "image_proposal") {
-        return { messageId: message.id, partIndex, proposal: part.image_proposal };
-      }
-    }
-  }
-  return null;
-};
-
-const findPendingActionProposal = (chatMessages: ChatMessage[]) => {
-  for (let messageIndex = chatMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const message = chatMessages[messageIndex];
-    if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
-    for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex -= 1) {
-      const part = message.content[partIndex];
-      if (part.type === "action_proposal") {
-        return { messageId: message.id, partIndex, proposal: part.action_proposal };
-      }
-    }
-  }
-  return null;
-};
-
-const compactMessageForBrain = (message: ChatMessage, isLatest: boolean, includeImages: boolean): BrainMessage | null => {
-  const agentContent = buildAgentMessageContent(message.content, includeImages);
-  if (message.role === "assistant" && !extractAgentMessageText(agentContent).trim()) {
-    return null;
-  }
-
-  if (!Array.isArray(agentContent)) {
-    return {
-      role: message.role,
-      content: agentContent,
-    };
-  }
-
-  if (isLatest) {
-    return {
-      role: message.role,
-      content: agentContent,
-    };
-  }
-
-  return {
-    role: message.role,
-    content: agentContent,
-  };
-};
-
-const compactContentForStorage = (content: ChatMessage["content"]): ChatMessage["content"] => {
-  if (typeof content === "string") {
-    return content.slice(0, 12_000);
-  }
-
-  const parts = content
-    .map((part): ChatContentPart | null => {
-      if (part.type === "text") {
-        const text = part.text.slice(0, 12_000);
-        return text.trim() ? { type: "text", text } : null;
-      }
-      if (part.type === "image_url") {
-        const localPath = part.image_url.local_path;
-        const url = localPath ? "" : part.image_url.url;
-        if (!localPath && !url) return null;
-        return {
-          type: "image_url",
-          image_url: {
-            url,
-            local_path: localPath,
-          },
-        };
-      }
-      if (part.type === "image_proposal") {
-        return part;
-      }
-      if (part.type === "action_proposal") {
-        return part;
-      }
-      return null;
-    })
-    .filter((part): part is ChatContentPart => Boolean(part));
-
-  return parts.length ? parts : extractMessageText(content).slice(0, 12_000);
-};
-
-const chatMessageHasContent = (message: ChatMessage) => {
-  if (typeof message.content === "string") {
-    return Boolean(message.content.trim() || message.thinking?.trim());
-  }
-  return message.content.length > 0 || Boolean(message.thinking?.trim());
-};
-
-const textLooksVietnamese = (text: string) =>
-  /[\u0102\u0103\u00C2\u00E2\u0110\u0111\u00CA\u00EA\u00D4\u00F4\u01A0\u01A1\u01AF\u01B0\u00C0-\u1EF9]/u.test(text);
-
-const conversationWantsVietnamese = (chatMessages: ChatMessage[]) =>
-  chatMessages
-    .slice(-8)
-    .some((message) => textLooksVietnamese(extractMessageText(message.content)));
-
-const compactChatSessionForStorage = (chatMessages: ChatMessage[]) =>
-  chatMessages
-    .slice(-80)
-    .map((message) => ({
-      id: message.id,
-      role: message.role,
-      content: compactContentForStorage(message.content),
-      thinking: message.thinking?.slice(0, 6_000),
-    }))
-    .filter(chatMessageHasContent) as ChatMessage[];
-
-const compactSessionFingerprint = (chatMessages: ChatMessage[]) =>
-  JSON.stringify(compactChatSessionForStorage(chatMessages));
-
-const parseStoredChatSession = (raw: string): ChatMessage[] => {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((message): ChatMessage | null => {
-        if (
-          !message ||
-          typeof message.id !== "string" ||
-          (message.role !== "user" && message.role !== "assistant")
-        ) {
-          return null;
-        }
-        const rawContent = message.content;
-        let content: ChatMessage["content"] | null = null;
-        if (typeof rawContent === "string") {
-          content = rawContent;
-        } else if (Array.isArray(rawContent)) {
-          const parts = rawContent
-            .map((part): ChatContentPart | null => {
-              if (!part || typeof part !== "object") return null;
-              if (part.type === "text" && typeof part.text === "string") {
-                return { type: "text", text: part.text };
-              }
-              if (
-                part.type === "image_url" &&
-                part.image_url &&
-                typeof part.image_url === "object"
-              ) {
-                const url = typeof part.image_url.url === "string" ? part.image_url.url : "";
-                const localPath =
-                  typeof part.image_url.local_path === "string" ? part.image_url.local_path : undefined;
-                if (!url && !localPath) return null;
-                return { type: "image_url", image_url: { url, local_path: localPath } };
-              }
-              if (
-                part.type === "image_proposal" &&
-                part.image_proposal &&
-                typeof part.image_proposal.prompt === "string" &&
-                typeof part.image_proposal.mode === "string"
-              ) {
-                return { type: "image_proposal", image_proposal: part.image_proposal };
-              }
-              if (
-                part.type === "action_proposal" &&
-                part.action_proposal &&
-                typeof part.action_proposal.title === "string"
-              ) {
-                return { type: "action_proposal", action_proposal: part.action_proposal };
-              }
-              return null;
-            })
-            .filter((part): part is ChatContentPart => Boolean(part));
-          content = parts.length ? parts : null;
-        }
-        if (!content) return null;
-        return {
-          id: message.id,
-          role: message.role,
-          content,
-          thinking: typeof message.thinking === "string" ? message.thinking : undefined,
-        };
-      })
-      .filter((message): message is ChatMessage => Boolean(message && chatMessageHasContent(message)))
-      .slice(-80);
-  } catch {
-    return [];
-  }
-};
-
-const buildBrainMessages = (systemPrompt: string, chatMessages: ChatMessage[], includeImages: boolean): BrainMessage[] => {
-  const recentMessages = chatMessages.slice(-MAX_BRAIN_HISTORY_MESSAGES);
-  const lastIndex = recentMessages.length - 1;
-  return [
-    { role: "system", content: systemPrompt },
-    ...recentMessages
-      .map((message, index) => compactMessageForBrain(message, index === lastIndex, includeImages))
-      .filter((message): message is BrainMessage => Boolean(message)),
-  ];
-};
-
-const TOOL_AGENT_HISTORY_MESSAGES = 14;
-const TOOL_AGENT_LATEST_TEXT_LIMIT = 6000;
-const TOOL_AGENT_USER_TEXT_LIMIT = 2400;
-const TOOL_AGENT_ASSISTANT_TEXT_LIMIT = 1600;
-
-const truncateForToolAgent = (text: string, limit: number) => {
-  if (text.length <= limit) return text;
-  return `${text.slice(0, limit).trimEnd()}\n[message truncated]`;
-};
-
-const compactToolAgentContent = (
-  content: BrainMessage["content"],
-  role: ChatMessage["role"],
-  isLatest: boolean,
-): BrainMessage["content"] => {
-  const limit = isLatest
-    ? TOOL_AGENT_LATEST_TEXT_LIMIT
-    : role === "user"
-      ? TOOL_AGENT_USER_TEXT_LIMIT
-      : TOOL_AGENT_ASSISTANT_TEXT_LIMIT;
-
-  if (typeof content === "string") {
-    return truncateForToolAgent(content, limit);
-  }
-
-  const parts = content
-    .filter((part) => part.type === "text")
-    .map((part) => ({
-      ...part,
-      text: truncateForToolAgent(part.text, limit),
-    }))
-    .filter((part) => part.text.trim());
-
-  return parts.map((part) => part.text).join("\n").trim();
-};
-
-const buildToolAgentMessages = (chatMessages: ChatMessage[]): BrainMessage[] => {
-  const recentMessages = chatMessages.slice(-TOOL_AGENT_HISTORY_MESSAGES);
-  const lastIndex = recentMessages.length - 1;
-  const compacted: BrainMessage[] = [];
-  recentMessages.forEach((message, index) => {
-    const content = compactToolAgentContent(
-      buildAgentMessageContent(message.content, false),
-      message.role,
-      index === lastIndex,
-    );
-    if (!extractAgentMessageText(content).trim()) return;
-    compacted.push({
-      role: message.role,
-      content,
-    });
-  });
-  return compacted;
-};
-
-const isGpuFitError = (error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  return /free device memory|failed to fit|n_gpu_layers|out of memory|oom/i.test(message);
-};
-
-const estimateTokens = (text: string) => Math.max(0, Math.ceil(text.length / 4));
-
-const extractShellToolRequest = (text: string): ShellToolRequest | null => {
-  const match = text.match(SHELL_TOOL_PATTERN);
-  if (!match) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(match[1]) as ShellToolRequest;
-  } catch {
-    return null;
-  }
-};
-
-const stripShellToolRequest = (text: string) =>
-  text.replace(SHELL_TOOL_PATTERN, "").trim();
-
-const withSpeechSentenceBreaks = (text: string) =>
-  text
-    .replace(/\r\n?/g, "\n")
-    .replace(/([.!?\u2026])\s*\n+\s*/g, "$1 ")
-    .replace(/([^.!?\u2026\s])\s*\n+\s*/g, "$1. ")
-    .replace(/\n+/g, ". ");
-
-const stripSpeechLeadingZero = (value: string) => {
-  const numeric = Number.parseInt(value, 10);
-  return Number.isFinite(numeric) ? String(numeric) : value;
-};
-
-const normalizeTextForSpeechReading = (text: string) => {
-  const vi = textLooksVietnamese(text);
-  return text
-    .replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g, (_, day, month, year) =>
-      vi ? `${stripSpeechLeadingZero(day)} tháng ${stripSpeechLeadingZero(month)} năm ${year}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}/${year}`,
-    )
-    .replace(/\b(\d{1,2})\/(\d{1,2})\b/g, (_, day, month) =>
-      vi ? `${stripSpeechLeadingZero(day)} tháng ${stripSpeechLeadingZero(month)}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}`,
-    )
-    .replace(/(-?\d+(?:[.,]\d+)?)\s*°\s*C\b/gi, (_, value) =>
-      vi ? `${value} độ Cê` : `${value} degrees Celsius`,
-    )
-    .replace(/(-?\d+(?:[.,]\d+)?)\s*°\s*F\b/gi, (_, value) =>
-      vi ? `${value} độ F` : `${value} degrees Fahrenheit`,
-    )
-    .replace(/(-?\d+(?:[.,]\d+)?)\s*km\/h\b/gi, (_, value) =>
-      vi ? `${value} ki lô mét trên giờ` : `${value} kilometers per hour`,
-    )
-    .replace(/(-?\d+(?:[.,]\d+)?)\s*km\b/gi, (_, value) =>
-      vi ? `${value} ki lô mét` : `${value} kilometers`,
-    )
-    .replace(/(-?\d+(?:[.,]\d+)?)\s*mm\b/gi, (_, value) =>
-      vi ? `${value} mi li mét` : `${value} millimeters`,
-    )
-    .replace(/(-?\d+(?:[.,]\d+)?)\s*cm\b/gi, (_, value) =>
-      vi ? `${value} xen ti mét` : `${value} centimeters`,
-    )
-    .replace(/(-?\d+(?:[.,]\d+)?)\s*%/g, (_, value) =>
-      vi ? `${value} phần trăm` : `${value} percent`,
-    )
-    .replace(/\$\s*([\d.,]+)/g, (_, value) => vi ? `${value} đô la` : `${value} dollars`)
-    .replace(/([\d.,]+)\s*(?:USD|usd)\b/g, (_, value) => vi ? `${value} đô la` : `${value} dollars`)
-    .replace(/([\d.,]+)\s*(?:VND|vnd|VNĐ|vnđ|₫)\b/g, (_, value) => vi ? `${value} đồng` : `${value} Vietnamese dong`)
-    .replace(/€\s*([\d.,]+)/g, (_, value) => vi ? `${value} euro` : `${value} euros`)
-    .replace(/£\s*([\d.,]+)/g, (_, value) => vi ? `${value} bảng Anh` : `${value} pounds`);
-};
-
-const sanitizeTextForSpeech = (text: string) => {
-  const speechReadyText = normalizeTextForSpeechReading(withSpeechSentenceBreaks(text));
-  const collapsed = speechReadyText
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]*)`/g, "$1")
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/\[[^\]]+\]/g, " ")
-    .replace(/https?:\/\/\S+/gi, " ")
-    .replace(/[#>*_~|]/g, " ")
-    .replace(/\[(?: |x|X)\]/g, " ")
-    .replace(/[()[\]{}<>]/g, ", ")
-    .replace(/["\u201C\u201D'\u2018\u2019]/g, "")
-    .replace(/[\u2022\u00B7\u00A6]/g, " ")
-    .replace(/&nbsp;|&#160;/gi, " ")
-    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, " ")
-    .replace(/\s*[-\u2013\u2014]\s*/g, ", ")
-    .replace(/\s*[\\/]\s*/g, ", ")
-    .replace(/[;,]{2,}/g, ", ")
-    .replace(/[.]{4,}/g, "...")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const withoutSymbolRuns = collapsed
-    .replace(/(^|[\s,.:;!?])[@#$%^&=+~]+(?=$|[\s,.:;!?])/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return (withoutSymbolRuns || speechReadyText.trim()).replace(/\s+/g, " ").trim();
-};
-
-const formatReactThinking = (result: AgentReactResult) => {
-  const thinking = result.thinking?.trim();
-  if (thinking) {
-    return thinking;
-  }
-  if (result.tool_trace?.length) {
-    return [
-      "Tool flow",
-      ...result.tool_trace.map(
-        (trace, index) =>
-          `${index + 1}. ${trace.tool} - ${trace.success ? "OK" : "Error"}: ${trace.summary}`,
-      ),
-    ].join("\n");
-  }
-  return "";
-};
-
-const includesAnyPhrase = (text: string, phrases: string[]) =>
-  phrases.some((phrase) => text.includes(phrase));
-
-const normalizeIntentText = (value: string) =>
-  value.toLowerCase();
-
-const getDefaultLocalContext = () => "unknown";
-const formatFileActionResult = (result: FileActionResult) =>
-  [
-    result.success ? "File action completed." : "File action could not be completed.",
-    result.message,
-    result.path ? `Path: ${result.path}` : "",
-  ].filter(Boolean).join("\n");
-
-const formatShellResult = (result: ShellExecutionResult) => {
-  const status = result.timed_out
-    ? "Timed out"
-    : result.exit_code === 0
-      ? "Finished successfully"
-      : `Finished with exit code ${result.exit_code ?? "unknown"}`;
-  const stdout = result.stdout.trim();
-  const stderr = result.stderr.trim();
-  return [
-    `System action ${status}.`,
-    `Time: ${Math.round(result.duration_ms)} ms`,
-    stdout ? `\nOutput:\n${stdout}` : "",
-    stderr ? `\nErrors:\n${stderr}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-};
-
-const formatToolRunTime = (createdAt: number) => {
-  if (!createdAt) return "";
-  return new Date(createdAt * 1000).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
-const formatToolDuration = (durationMs?: number) => {
-  if (!durationMs || durationMs < 0) return "0s";
-  if (durationMs < 1000) {
-    return `${Math.max(0.1, durationMs / 1000).toFixed(1)}s`;
-  }
-  const seconds = Math.round(durationMs / 1000);
-  return `${seconds}s`;
-};
-
-const parseToolJson = (value: string) => {
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
-};
-
-const readToolString = (record: Record<string, unknown>, key: string) => {
-  const value = record[key];
-  return typeof value === "string" ? value.trim() : "";
-};
-
-const toolRunDisplayName = (run: ToolRunRecord) => {
-  const input = parseToolJson(run.input_json);
-  if (run.tool_name === "propose_image_generation" || run.tool_name === "generate_image") {
-    const mode = readToolString(input, "mode");
-    if (mode === "image_to_image") return "img_to_image";
-    if (mode === "avatar_image") return "avatar_to_image";
-    if (mode === "user_avatar_image" || mode === "avatar_user_image") return "user_avatar_to_image";
-    if (mode === "user_character_image" || mode === "user_and_character_image" || mode === "both_avatars_image") return "user_character_to_image";
-    return "txt_to_image";
-  }
-  if (run.tool_name === "voice_speech") return "voice_speech";
-  if (run.tool_name === "voice_cached") return "voice_cached";
-  return run.tool_name;
-};
-
-const toolRunBrief = (run: ToolRunRecord) => {
-  const input = parseToolJson(run.input_json);
-  const prompt = readToolString(input, "prompt");
-  const query = readToolString(input, "query");
-  const location = readToolString(input, "location");
-  const path = readToolString(input, "path");
-  const purpose = readToolString(input, "purpose");
-  const text = readToolString(input, "text");
-  const summary = prompt || text || query || location || path || purpose || run.output_text || run.input_json;
-  return summary.replace(/\s+/g, " ").slice(0, 140);
-};
-
-const toLocalDateKey = (date: Date) => {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const monthTitle = (date: Date) =>
-  new Intl.DateTimeFormat(undefined, { month: "short" }).format(date).toUpperCase();
-
-const getLunarLabel = (date: Date) => {
-  try {
-    const parts = new Intl.DateTimeFormat("vi-VN-u-ca-chinese", {
-      day: "numeric",
-      month: "numeric",
-    }).formatToParts(date);
-    const day = parts.find((part) => part.type === "day")?.value;
-    const month = parts.find((part) => part.type === "month")?.value;
-    return day && month ? `${day}/${month}` : "";
-  } catch {
-    return "";
-  }
-};
-
-const buildMonthDays = (monthDate: Date) => {
-  const first = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
-  const start = new Date(first);
-  start.setDate(first.getDate() - first.getDay());
-
-  return Array.from({ length: 42 }, (_, index) => {
-    const date = new Date(start);
-    date.setDate(start.getDate() + index);
-    return date;
-  });
-};
-
-const googleEventMatchesDate = (event: GoogleCalendarEvent, dateKey: string) =>
-  event.start.slice(0, 10) === dateKey || event.end.slice(0, 10) === dateKey;
-
-const googleEventTimeLabel = (event: GoogleCalendarEvent | null, withDate = false) => {
-  if (!event) return "";
-  if (event.all_day) {
-    try {
-      const d = event.start ? new Date(event.start) : new Date();
-      return withDate ? `${toLocalDateKey(d)} - All day` : "All day";
-    } catch {
-      return "All day";
-    }
-  }
-  const start = new Date(event.start || "");
-  const end = new Date(event.end || "");
-  const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
-  if (Number.isNaN(start.getTime())) return "";
-  
-  const timeStr = Number.isNaN(end.getTime()) 
-    ? timeFormat.format(start) 
-    : `${timeFormat.format(start)} - ${timeFormat.format(end)}`;
-    
-  if (withDate) {
-    try {
-      const dateFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
-      return `${dateFormat.format(start)} - ${timeStr}`;
-    } catch {
-      return timeStr;
-    }
-  }
-  return timeStr;
-};
-
-const buildGoogleMonthRange = (monthDate: Date) => {
-  const first = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1, 0, 0, 0, 0);
-  const last = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1, 0, 0, 0, 0);
-  return { timeMin: first.toISOString(), timeMax: last.toISOString() };
-};
-
-const normalizeCalendarEventForDisplay = (event: GoogleCalendarEvent): GoogleCalendarEvent => {
-  if (event.all_day) {
-    return event;
-  }
-  const start = event.start && !/[zZ]|[+-]\d{2}:\d{2}$/.test(event.start) ? `${event.start}Z` : event.start;
-  const end = event.end && !/[zZ]|[+-]\d{2}:\d{2}$/.test(event.end) ? `${event.end}Z` : event.end;
-  return { ...event, start, end };
-};
-
-const buildAutomationSchedule = (
-  date: string,
-  time: string,
-  repeat: AutomationRepeat,
-  everyAmount = 15,
-  everyUnit: AutomationEveryUnit = "minutes",
-) => {
-  const safeEveryAmount = Math.max(1, Math.floor(everyAmount || 1));
-  const everySuffix = repeat === "every_hours" || everyUnit === "hours" ? "h" : "m";
-  const repeatPart =
-    repeat === "once"
-      ? ""
-      : repeat === "every_minutes" || repeat === "every_hours"
-        ? ` @every:${safeEveryAmount}${everySuffix}`
-          : ` @${repeat}`;
-  const timePart = time ? ` ${time}` : "";
-  return `${date}${repeatPart}${timePart}`.trim();
-};
-
-const automationRepeatLabel = (repeat: string) => {
-  const everyMatch = /^@?every:(\d+)(m|h)$/.exec(repeat);
-  if (everyMatch) {
-    const amount = Number(everyMatch[1]);
-    const unit = everyMatch[2] === "h" ? "hour" : "min";
-    return `Every ${amount} ${unit}${unit === "hour" && amount !== 1 ? "s" : ""}`;
-  }
-  if (repeat === "@5m" || repeat === "5m") return "Every 5 min";
-  if (repeat === "@15m" || repeat === "15m") return "Every 15 min";
-  if (repeat === "@30m" || repeat === "30m") return "Every 30 min";
-  if (repeat === "@hourly" || repeat === "hourly") return "Every 1 hour";
-  if (repeat === "@daily" || repeat === "daily") return "Daily";
-  if (repeat === "@weekly" || repeat === "weekly") return "Weekly";
-  if (repeat === "@monthly" || repeat === "monthly") return "Monthly";
-  return "Once";
-};
-
-const automationScheduleLabel = (value: string, selectedDate: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return `Once - ${selectedDate}`;
-  const parts = trimmed.split(/\s+/);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(parts[0])) {
-    const repeat = parts.find((part) => part.startsWith("@")) ?? "";
-    const time = parts.find((part) => /^\d{2}:\d{2}$/.test(part)) ?? "";
-    const day = parts[0];
-    const repeatLabel = repeat ? automationRepeatLabel(repeat) : `Once - ${day}`;
-    return `${repeatLabel}${time ? ` - ${time}` : ""}`;
-  }
-  if (/^\d{2}:\d{2}$/.test(trimmed)) return `Once - ${selectedDate} - ${trimmed}`;
-  if (trimmed.startsWith("@")) return automationRepeatLabel(trimmed);
-  return trimmed;
-};
-
-const parseAutomationSchedule = (schedule: string, fallbackDate: string) => {
-  const parts = schedule.trim().split(/\s+/).filter(Boolean);
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(parts[0] || "") ? parts[0] : fallbackDate;
-  const repeatToken = parts.find((part) => /^@(5m|15m|30m|hourly|daily|weekly|monthly|every:\d+[mh])$/.test(part));
-  const time = parts.find((part) => /^\d{2}:\d{2}$/.test(part)) || "";
-  if (!repeatToken) return { date, time, repeat: "once" as AutomationRepeat, everyAmount: 15, everyUnit: "minutes" as AutomationEveryUnit };
-  const everyMatch = /^@every:(\d+)(m|h)$/.exec(repeatToken);
-  if (everyMatch) {
-    const everyUnit = everyMatch[2] === "h" ? "hours" : "minutes";
-    return {
-      date,
-      time,
-      repeat: everyUnit === "hours" ? "every_hours" as AutomationRepeat : "every_minutes" as AutomationRepeat,
-      everyAmount: clampNumber(Number(everyMatch[1]), 1, everyUnit === "hours" ? 24 : 1440),
-      everyUnit: everyUnit as AutomationEveryUnit,
-    };
-  }
-  if (repeatToken === "@hourly") return { date, time, repeat: "every_hours" as AutomationRepeat, everyAmount: 1, everyUnit: "hours" as AutomationEveryUnit };
-  if (repeatToken === "@5m" || repeatToken === "@15m" || repeatToken === "@30m") {
-    return { date, time, repeat: "every_minutes" as AutomationRepeat, everyAmount: Number(repeatToken.slice(1, -1)), everyUnit: "minutes" as AutomationEveryUnit };
-  }
-  return { date, time, repeat: repeatToken.slice(1) as AutomationRepeat, everyAmount: 15, everyUnit: "minutes" as AutomationEveryUnit };
-};
-
-const compactAutomationSummary = (name: string, schedule: string, prompt: string, fallbackDate: string) => {
-  const scheduleText = automationScheduleLabel(schedule, fallbackDate);
-  const task = prompt.trim().replace(/\s+/g, " ");
-  return [name.trim(), scheduleText, task].filter(Boolean).join(" - ");
-};
-
-const parseTimeParts = (time = "") => {
-  const match = /^(\d{2}):(\d{2})$/.exec(time);
-  if (!match) return { hours: 0, minutes: 0 };
-  return { hours: Number(match[1]), minutes: Number(match[2]) };
-};
-
-const automationIntervalMinutes = (repeat: string) => {
-  const everyMatch = /^@every:(\d+)(m|h)$/.exec(repeat);
-  if (everyMatch) return Number(everyMatch[1]) * (everyMatch[2] === "h" ? 60 : 1);
-  if (repeat === "@5m") return 5;
-  if (repeat === "@15m") return 15;
-  if (repeat === "@30m") return 30;
-  if (repeat === "@hourly") return 60;
-  return 0;
-};
-
-const getAutomationDueAt = (job: AutomationJob, now: Date) => {
-  const parts = job.schedule.trim().split(/\s+/).filter(Boolean);
-  const datePart = parts[0];
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return null;
-
-  const repeat = parts.find((part) => /^@(5m|15m|30m|hourly|daily|weekly|monthly|every:\d+[mh])$/.test(part));
-  const timePart = parts.find((part) => /^\d{2}:\d{2}$/.test(part)) ?? "";
-  const anchor = new Date(`${datePart}T00:00:00`);
-  if (Number.isNaN(anchor.getTime()) || now < anchor) return null;
-
-  const { hours, minutes } = parseTimeParts(timePart);
-  const firstRun = new Date(anchor);
-  firstRun.setHours(hours, minutes, 0, 0);
-
-  const interval = repeat ? automationIntervalMinutes(repeat) : 0;
-  if (interval > 0) {
-    if (now < firstRun) return null;
-    const elapsed = now.getTime() - firstRun.getTime();
-    const intervalMs = interval * 60_000;
-    return firstRun.getTime() + Math.floor(elapsed / intervalMs) * intervalMs;
-  }
-
-  const candidate = new Date(now);
-  candidate.setHours(hours, minutes, 0, 0);
-
-  if (!repeat) {
-    candidate.setFullYear(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
-  } else if (repeat === "@weekly" && candidate.getDay() !== anchor.getDay()) {
-    return null;
-  } else if (repeat === "@monthly" && candidate.getDate() !== anchor.getDate()) {
-    return null;
-  }
-
-  if (now < candidate) return null;
-  return candidate.getTime();
-};
-const extractTextValue = (value: unknown): string => {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(extractTextValue).filter(Boolean).join("");
-  }
-
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return extractTextValue(
-      record.text ??
-        record.content ??
-        record.value ??
-        record.response ??
-        record.generated_text,
-    );
-  }
-
-  return "";
-};
-
-const extractChoiceText = (choice: unknown) => {
-  if (!choice || typeof choice !== "object") {
-    return { visible: "", fallback: "" };
-  }
-
-  const record = choice as Record<string, unknown>;
-  const delta = (record.delta ?? {}) as Record<string, unknown>;
-  const message = (record.message ?? {}) as Record<string, unknown>;
-  const visible = [
-    delta.content,
-    message.content,
-    record.content,
-    record.text,
-  ]
-    .map(extractTextValue)
-    .filter(Boolean)
-    .join("");
-  const fallback = [
-    delta.reasoning_content,
-    delta.reasoning,
-    message.reasoning_content,
-    message.reasoning,
-    record.reasoning_content,
-    record.reasoning,
-  ]
-    .map(extractTextValue)
-    .filter(Boolean)
-    .join("");
-
-  return { visible, fallback };
-};
-
-const extractChatResponseText = (data: unknown) => {
-  if (!data || typeof data !== "object") {
-    return "";
-  }
-
-  const record = data as Record<string, unknown>;
-  const choices = Array.isArray(record.choices) ? record.choices : [];
-  const choiceText = choices
-    .map((choice) => {
-      const extracted = extractChoiceText(choice);
-      return extracted.visible || extracted.fallback;
-    })
-    .filter(Boolean)
-    .join("");
-
-  return (
-    choiceText ||
-    extractTextValue(record.content) ||
-    extractTextValue(record.response) ||
-    extractTextValue(record.generated_text)
-  ).trim();
-};
-
-const stripThinkBlocks = (text: string) =>
-  text
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
-    .trim();
-
-const detectVoicePreviewText = (sample?: VoiceSample) => {
-  const voiceName = `${sample?.name ?? ""} ${sample?.label ?? ""} ${sample?.path ?? ""}`.toLowerCase();
-
-  if (/(^|[^a-z])(vi|vn|vie)([^a-z]|$)|vietnam|vietnamese|tieng viet|ti\u1ebfng vi\u1ec7t/.test(voiceName)) {
-    return "\u0110\u00e2y l\u00e0 m\u1eabu nghe th\u1eed gi\u1ecdng n\u00f3i.";
-  }
-  if (/(^|[^a-z])(en|eng)([^a-z]|$)|english/.test(voiceName)) {
-    return "This is a preview of the voice.";
-  }
-  if (/(^|[^a-z])th([^a-z]|$)|thai/.test(voiceName)) {
-    return "\u0e19\u0e35\u0e48\u0e04\u0e37\u0e2d\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07\u0e40\u0e2a\u0e35\u0e22\u0e07\u0e1e\u0e39\u0e14";
-  }
-  if (/(^|[^a-z])(ja|jp)([^a-z]|$)|japanese/.test(voiceName)) {
-    return "\u3053\u308c\u306f\u97f3\u58f0\u30b5\u30f3\u30d7\u30eb\u3067\u3059\u3002";
-  }
-  if (/(^|[^a-z])(ko|kr)([^a-z]|$)|korean/.test(voiceName)) {
-    return "\uc774\uac83\uc740 \uc74c\uc131 \uc0d8\ud50c\uc785\ub2c8\ub2e4.";
-  }
-  if (/(^|[^a-z])(zh|cn)([^a-z]|$)|chinese|mandarin/.test(voiceName)) {
-    return "\u8fd9\u662f\u8bed\u97f3\u793a\u4f8b\u3002";
-  }
-
-  const browserLanguage = navigator.language.toLowerCase();
-  return previewTextForDetectedLanguage(browserLanguage);
-};
-
-const previewTextForDetectedLanguage = (language?: string | null) => {
-  const normalized = (language || "").trim().toLowerCase();
-  if (normalized.startsWith("vi")) return "\u0110\u00e2y l\u00e0 m\u1eabu nghe th\u1eed gi\u1ecdng n\u00f3i.";
-  if (normalized.startsWith("th")) return "\u0e19\u0e35\u0e48\u0e04\u0e37\u0e2d\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07\u0e40\u0e2a\u0e35\u0e22\u0e07\u0e1e\u0e39\u0e14";
-  if (normalized.startsWith("ja")) return "\u3053\u308c\u306f\u97f3\u58f0\u30b5\u30f3\u30d7\u30eb\u3067\u3059\u3002";
-  if (normalized.startsWith("ko")) return "\uc774\uac83\uc740 \uc74c\uc131 \uc0d8\ud50c\uc785\ub2c8\ub2e4.";
-  if (normalized.startsWith("zh")) return "\u8fd9\u662f\u8bed\u97f3\u793a\u4f8b\u3002";
-  if (normalized.startsWith("es")) return "Esta es una muestra de voz.";
-  if (normalized.startsWith("fr")) return "Voici un \u00e9chantillon de voix.";
-  if (normalized.startsWith("de")) return "Das ist eine Stimmprobe.";
-  return "This is a preview of the voice.";
-};
-
+import { SetupScreen } from "./components/SetupScreen";
+import { StartupScreen, SettingsLoadErrorScreen } from "./components/AppScreens";
+import { ImageStudioSection } from "./components/ImageStudioSection";
+import { ToolActivitySection } from "./components/ToolActivitySection";
+import { ProfilePickerSection } from "./components/ProfilePickerSection";
+import { WorkspaceSection } from "./components/WorkspaceSection";
+import { AutomationSection } from "./components/AutomationSection";
+import { clampNumber, getVietnameseLunarDate } from "./utils";
+import {
+  AgentReactResult,
+  AppSettings,
+  AudioSynthesisResult,
+  AutomationEveryUnit,
+  AutomationJob,
+  AutomationRepeat,
+  CharacterFiles,
+  CharacterSettings,
+  DEFAULT_SETTINGS,
+  DisplayLanguage,
+  FileActionResult,
+  GoogleCalendarEvent,
+  GoogleConnectionStatus,
+  LocalImageDataUrl,
+  MemoryItem,
+  ModelLibraryEntry,
+  ModelStatus,
+  OmniVoiceVramEstimate,
+  PendingShellAction,
+  PersonalityPreset,
+  SendOptions,
+  SetupCatalog,
+  SetupInstallProgress,
+  SetupInstallResult,
+  SetupTier,
+  SPEECH_CACHE_LIMIT,
+  ShellExecutionResult,
+  TelegramBotStatus,
+  TelegramGuest,
+  THEME_SWATCHS,
+  ToolRunRecord,
+  UserProfilePreset,
+  VoiceSample,
+  SystemInfo,
+  VramMemoryStatus,
+  automationScheduleLabel,
+  buildAutomationSchedule,
+  buildBrainMessages,
+  buildGoogleMonthRange,
+  buildMonthDays,
+  buildToolAgentMessages,
+  compactAutomationSummary,
+  compactChatSessionForStorage,
+  compactSessionFingerprint,
+  conversationWantsVietnamese,
+  createMessageId,
+  detectDisplayLanguage,
+  detectVoicePreviewText,
+  estimateTokens,
+  extractChatResponseText,
+  extractChoiceText,
+  extractMessageText,
+  extractShellToolRequest,
+  extractTextValue,
+  findPendingActionProposal,
+  findPendingImageProposal,
+  formatFileActionResult,
+  formatReactThinking,
+  formatShellResult,
+  getAutomationDueAt,
+  getDefaultLocalContext,
+  getLunarLabel,
+  googleEventMatchesDate,
+  googleEventTimeLabel,
+  includesAnyPhrase,
+  isExplicitApprovalText,
+  isGpuFitError,
+  monthTitle,
+  normalizeCalendarEventForDisplay,
+  normalizeIntentText,
+  parseAutomationSchedule,
+  parseStoredChatSession,
+  parseTimeParts,
+  sanitizeTextForSpeech,
+  setupTierFromSystem,
+  sleep,
+  splitAssistantMessageForChat,
+  stripShellToolRequest,
+  stripThinkBlocks,
+  syncSoulCoreIdentity,
+  textLooksVietnamese,
+  toLocalDateKey,
+} from "./appCore";
 function App() {
   const [brainStatus, setBrainStatus] = useState<"Idle" | "Loading" | "Ready" | "Thinking" | "Error">("Idle");
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
@@ -1629,6 +197,7 @@ function App() {
   const [settingsReadyForSave, setSettingsReadyForSave] = useState(false);
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
   const [setupCompleted, setSetupCompleted] = useState(DEFAULT_SETTINGS.setup_completed);
+  const [setupScreenOpen, setSetupScreenOpen] = useState(false);
   const [setupTierOverride, setSetupTierOverride] = useState<SetupTier | null>(null);
   const [setupCatalog, setSetupCatalog] = useState<SetupCatalog | null>(null);
   const [setupInstalling, setSetupInstalling] = useState(false);
@@ -4533,7 +3102,10 @@ ${personalityMemory.trim()}`
 
     const loadSettings = async () => {
       try {
-        const stored = await invoke<AppSettings>("load_app_settings");
+        const [stored, defaultVoiceFolder] = await Promise.all([
+          invoke<AppSettings>("load_app_settings"),
+          invoke<string>("default_voice_samples_folder").catch(() => ""),
+        ]);
         if (!active) return;
 
         const nextUserAvatar = await compressAvatarDataUrl(stored.user_avatar || "");
@@ -4601,7 +3173,7 @@ ${personalityMemory.trim()}`
         setGoogleRedirectUri(stored.google_redirect_uri || DEFAULT_SETTINGS.google_redirect_uri);
         setImageWidth(clampNumber(stored.image_width ?? DEFAULT_SETTINGS.image_width, 256, 2048));
         setImageHeight(clampNumber(stored.image_height ?? DEFAULT_SETTINGS.image_height, 256, 2048));
-        setVoiceFolder(stored.voice_folder || "");
+        setVoiceFolder(stored.voice_folder || defaultVoiceFolder || "");
         setSelectedVoicePath(stored.selected_voice_path || "");
         setCreativity(clampNumber(stored.creativity, 0, 100));
         setSamplingTemperature(clampNumber(stored.sampling_temperature ?? DEFAULT_SETTINGS.sampling_temperature, 0, 2));
@@ -5568,7 +4140,7 @@ ${personalityMemory.trim()}`
   const hardwareRamLabel = systemInfo ? `${(systemInfo.total_ram_mb / 1024).toFixed(1)} GB` : "Unknown";
   const detectedSetupTier = setupTierFromSystem(systemInfo);
   const activeSetupTier = setupTierOverride ?? detectedSetupTier;
-  const firstStartupSetupNeeded = !setupCompleted && !selectedModelPath;
+  const firstStartupSetupNeeded = setupScreenOpen || (!setupCompleted && !selectedModelPath);
   const activeSetupPartKey = setupProgress?.part_key || "";
   const conversationLogoClass = messages.length === 0
     ? "hidden"
@@ -5906,271 +4478,70 @@ ${personalityMemory.trim()}`
   );
 
   const workspaceSection = (
-    <details
-      className="overflow-hidden rounded-[20px] border border-[#282a2c] bg-[#1e1f20] shadow-sm"
+    <WorkspaceSection
       open={workspaceOpen}
-      onToggle={(event) => setWorkspaceOpen(event.currentTarget.open)}
-    >
-      <summary className="grid h-12 cursor-pointer list-none grid-cols-[minmax(0,1fr)_86px_16px] items-center gap-1 px-3 [&::-webkit-details-marker]:hidden">
-        <div className="text-xs font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">Workspace</div>
-        <div className="flex min-w-0 items-center justify-start gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9aa0a6]">
-          <span>
-            <span className="font-bold text-[#e3e3e3]">{linkedFolders.length}</span>{" "}
-            <span>linked</span>
-          </span>
-        </div>
-        <ChevronDownIcon className="details-chevron h-4 w-4 shrink-0 text-[#c4c7c5]" />
-      </summary>
-      <div className="border-t border-[#282a2c] px-3 py-3 space-y-2.5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-xs text-[#9aa0a6]">
-            Manage the workspace folders the assistant can use.
-          </div>
-          <button
-            type="button"
-            title="Add workspace folder"
-            onClick={() => handleAddLinkedFolder().catch((error) => console.error(error))}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#282a2c] bg-[#1e1f20] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
-          >
-            <PlusIcon className="h-4.5 w-4.5" />
-          </button>
-        </div>
-        {linkedFolders.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[#3a3b3d] bg-[#131314] px-4 py-4 text-sm text-[#c4c7c5]">
-            No workspace folder selected.
-          </div>
-        ) : (
-          linkedFolders.map((folder) => (
-            <div
-              key={folder}
-              className="flex items-center gap-2 rounded-2xl border border-[#282a2c] bg-[#131314] px-3 py-2"
-            >
-              <div className="min-w-0 flex-1 truncate text-sm text-[#e3e3e3]" title={folder}>{folder}</div>
-              <button
-                type="button"
-                title="Remove workspace folder"
-                onClick={() => handleRemoveLinkedFolder(folder)}
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#282a2c] bg-rose-500/15 text-rose-200 transition hover:bg-rose-500/25"
-              >
-                <CloseIcon className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))
-        )}
-      </div>
-    </details>
+      linkedFolders={linkedFolders}
+      onToggle={setWorkspaceOpen}
+      onAdd={() => handleAddLinkedFolder().catch((error) => console.error(error))}
+      onRemove={handleRemoveLinkedFolder}
+    />
   );
 
   const imageStudioSection = (
-    <details
-      className="rounded-[20px] border border-[#282a2c] bg-[#1e1f20] shadow-sm"
+    <ImageStudioSection
       open={imageStudioOpen}
-      onToggle={(event) => setImageStudioOpen(event.currentTarget.open)}
-    >
-      <summary className="grid h-12 cursor-pointer list-none grid-cols-[minmax(0,1fr)_86px_16px] items-center gap-1 px-3 [&::-webkit-details-marker]:hidden">
-        <div className="text-xs font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">Image Studio</div>
-        <div className={`flex min-w-0 items-center justify-start gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] ${imageStudioDrawing ? "text-[var(--accent-color)]" : "text-[#c4c7c5]"}`}>
-          <span
-            className={`h-2.5 w-2.5 shrink-0 rounded-full ${imageStudioDrawing ? "animate-pulse bg-[var(--accent-color)] shadow-[0_0_10px_var(--accent-color)]" : "bg-[#79d06f]"}`}
-          />
-          <span className="min-w-0 truncate">{imageStudioDrawing ? "Drawing" : "Ready"}</span>
-        </div>
-        <ChevronDownIcon className="details-chevron h-4 w-4 shrink-0 text-[#c4c7c5]" />
-      </summary>
-      <div className="space-y-3 border-t border-[#282a2c] px-4 py-3">
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">Quick prompt</span>
-          <textarea
-            value={quickImagePrompt}
-            onChange={(event) => setQuickImagePrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                event.preventDefault();
-                void handleQuickImageGenerate();
-              }
-            }}
-            rows={3}
-            placeholder="Describe an image..."
-            className="w-full resize-none rounded-2xl border border-[#282a2c] bg-[#131314] px-3 py-2 text-sm leading-relaxed text-[#e3e3e3] outline-none transition placeholder:text-[#9aa0a6] focus:border-[var(--accent-color)]"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => void handleQuickImageGenerate()}
-          disabled={!quickImagePrompt.trim() || isGeneratingImage}
-          className="h-10 w-full rounded-2xl border border-[#282a2c] bg-[#131314] text-sm font-bold text-[#e3e3e3] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)] disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          {isGeneratingImage ? "Drawing..." : "Generate"}
-        </button>
-        <div className="grid grid-cols-2 gap-2.5">
-          <label className="min-w-0">
-            <span className="mb-1 block text-xs font-semibold text-[#c4c7c5]">Width</span>
-            <NumberStepper
-              value={imageWidth}
-              min={256}
-              max={2048}
-              step={256}
-              onChange={(value) => setImageWidth(clampNumber(value, 256, 2048))}
-              className="w-full min-w-[112px]"
-            />
-          </label>
-          <label className="min-w-0">
-            <span className="mb-1 block text-xs font-semibold text-[#c4c7c5]">Height</span>
-            <NumberStepper
-              value={imageHeight}
-              min={256}
-              max={2048}
-              step={256}
-              onChange={(value) => setImageHeight(clampNumber(value, 256, 2048))}
-              className="w-full min-w-[112px]"
-            />
-          </label>
-        </div>
-      </div>
-    </details>
+      drawing={imageStudioDrawing}
+      quickPrompt={quickImagePrompt}
+      imageWidth={imageWidth}
+      imageHeight={imageHeight}
+      isGeneratingImage={isGeneratingImage}
+      onToggle={setImageStudioOpen}
+      onQuickPromptChange={setQuickImagePrompt}
+      onGenerate={() => void handleQuickImageGenerate()}
+      onImageWidthChange={setImageWidth}
+      onImageHeightChange={setImageHeight}
+    />
   );
 
   const automationSection = (
-    <details
-      className="overflow-hidden rounded-[20px] border border-[#282a2c] bg-[#1e1f20] shadow-sm"
+    <AutomationSection
       open={automationOpen}
-      onToggle={(event) => setAutomationOpen(event.currentTarget.open)}
-    >
-      <summary className="grid h-12 cursor-pointer list-none grid-cols-[minmax(0,1fr)_86px_16px] items-center gap-1 px-3 [&::-webkit-details-marker]:hidden">
-        <div className="text-xs font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">Automation</div>
-        <div className="flex min-w-0 items-center justify-start gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[#c4c7c5]">
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${activeAutomationCount ? "bg-[#79d06f]" : "bg-[#3a3b3d]"}`} />
-          <span className="min-w-0 truncate">{activeAutomationCount ? `${activeAutomationCount} active` : "Idle"}</span>
-        </div>
-        <ChevronDownIcon className="details-chevron h-4 w-4 shrink-0 text-[#c4c7c5]" />
-      </summary>
-      <div className="space-y-3 border-t border-[#282a2c] px-3 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-[#e3e3e3]">Scheduled tasks</div>
-            <div className="mt-0.5 text-xs text-[#9aa0a6]">{automationJobs.length} saved</div>
-          </div>
-          <button
-            type="button"
-            onClick={() => openAutomationEditor()}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314] text-[#e3e3e3] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-            title="Add automation"
-          >
-            <PlusIcon className="h-4.5 w-4.5" />
-          </button>
-        </div>
-
-        <div className="no-scrollbar max-h-[238px] space-y-1.5 overflow-y-auto rounded-2xl bg-[#131314] p-1.5 ring-1 ring-[#282a2c]">
-          {recentAutomationJobs.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[#3a3b3d] px-4 py-4 text-sm text-[#c4c7c5]">
-              No automations yet.
-            </div>
-          ) : (
-            recentAutomationJobs.map((job) => {
-              const scheduleLabel = automationScheduleLabel(job.schedule, selectedAutomationDate);
-              return (
-              <article key={job.id} className="rounded-xl bg-[#1e1f20] px-2.5 py-2 ring-1 ring-[#282a2c]">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className={`h-2 w-2 shrink-0 rounded-full ${job.enabled ? "bg-[var(--accent-color)] shadow-[0_0_8px_var(--accent-color)]" : "bg-[#73777f]"}`} />
-                      <div className="truncate text-sm font-semibold text-[#e3e3e3]">{job.name}</div>
-                    </div>
-                    <div className="mt-0.5 truncate text-[11px] font-semibold text-[var(--accent-color)]">
-                      {scheduleLabel}
-                    </div>
-                    <div className="mt-0.5 truncate text-[11px] text-[#9aa0a6]">{job.prompt}</div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1 pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => toggleAutomationJob(job).catch((error) => console.error("Automation toggle error:", error))}
-                      className={`h-6 rounded-lg px-1.5 text-[9px] font-bold uppercase tracking-[0.1em] transition ${job.enabled ? "bg-[var(--accent-soft)] text-[var(--accent-color)]" : "bg-[#282a2c] text-[#c4c7c5]"}`}
-                      title={job.enabled ? "Pause automation" : "Start automation"}
-                    >
-                      {job.enabled ? "On" : "Off"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openAutomationEditor(job)}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-[#131314] text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                      title="Edit automation"
-                    >
-                      <EditIcon className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteAutomationJob(job.id).catch((error) => console.error("Automation delete error:", error))}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-[#131314] text-rose-200 transition hover:bg-rose-500/25"
-                      title="Delete automation"
-                    >
-                      <TrashIcon className="h-3 w-3" />
-                    </button>
-                  </div>
-                </div>
-              </article>
-            )})
-          )}
-        </div>
-      </div>
-    </details>
+      activeCount={activeAutomationCount}
+      jobs={automationJobs}
+      recentJobs={recentAutomationJobs}
+      selectedDate={selectedAutomationDate}
+      onToggle={setAutomationOpen}
+      onAdd={() => openAutomationEditor()}
+      onEdit={openAutomationEditor}
+      onToggleJob={(job) => toggleAutomationJob(job).catch((error) => console.error("Automation toggle error:", error))}
+      onDelete={(id) => deleteAutomationJob(id).catch((error) => console.error("Automation delete error:", error))}
+    />
   );
 
   const leftPanelContent = (
     <div className="space-y-3 p-3">
-      <section className="overflow-visible rounded-[20px] border border-[#282a2c] bg-[#1e1f20] p-2.5 shadow-sm">
-        <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">User</div>
-        <div className="mt-2 flex items-center gap-2">
-          <div className="relative min-w-0 flex-1" data-dropdown-root>
-            <div className="flex h-11 items-center gap-2 overflow-hidden rounded-[16px] border border-[#282a2c] bg-[#131314] p-1 text-sm text-[#e3e3e3] transition focus-within:border-[var(--accent-color)] hover:bg-[#282a2c]">
-              <button
-                type="button"
-                onClick={openUserProfile}
-                className="group relative h-9 w-9 shrink-0 overflow-hidden rounded-[12px] ring-1 ring-[#282a2c]"
-                title="Edit user profile"
-              >
-                <AvatarImage src={userAvatar} fallback={userName || "You"} className="h-full w-full rounded-[12px]" />
-                <span className="absolute inset-0 hidden items-center justify-center bg-black/45 text-[#e3e3e3] group-hover:flex">
-                  <EditIcon className="h-4 w-4" />
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !userProfileMenuOpen;
-                  setModelMenuOpen(false);
-                  setPersonalityMenuOpen(false);
-                  setQuickModelMenuOpen(false);
-                  setThemePickerOpen(false);
-                  setUserProfileMenuOpen(next);
-                }}
-                className="flex h-9 min-w-0 flex-1 items-center justify-between gap-3 px-1.5 text-left outline-none"
-              >
-                <span className="min-w-0 flex-1 truncate font-semibold">{selectedUserProfile?.name || "You"}</span>
-                <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[#c4c7c5] transition ${userProfileMenuOpen ? "rotate-180" : ""}`} />
-              </button>
-            </div>
-            {userProfileMenuOpen && (
-              <div className="dropdown-scroll absolute left-0 right-0 top-full z-50 mt-1.5 max-h-56 overflow-y-auto rounded-[18px] border border-[#282a2c] bg-[#131314] p-1.5 shadow-2xl">
-                {userProfiles.map((profile) => (
-                  <button
-                    key={profile.id}
-                    type="button"
-                    onClick={() => selectUserProfile(profile.id)}
-                    className={`flex w-full items-center gap-2 rounded-[16px] px-2 py-1.5 text-left transition ${selectedUserProfileId === profile.id ? "bg-[var(--accent-soft)] ring-1 ring-[var(--accent-soft-strong)]" : "hover:bg-[#1e1f20]"}`}
-                  >
-                    <AvatarImage src={profile.avatar} fallback={profile.name} className="h-8 w-8 rounded-[12px]" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#e3e3e3]">{profile.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <IconButton size="lg" title="Create user profile" onClick={createUserProfile}>
-            <PlusIcon className="h-5 w-5" />
-          </IconButton>
-        </div>
-      </section>
+      <ProfilePickerSection
+        title="User"
+        selectedId={selectedUserProfileId}
+        selectedName={selectedUserProfile?.name || "You"}
+        selectedAvatar={userAvatar}
+        selectedFallback={userName || "You"}
+        options={userProfiles}
+        menuOpen={userProfileMenuOpen}
+        createTitle="Create user profile"
+        avatarTitle="Edit user profile"
+        onAvatarClick={openUserProfile}
+        onToggleMenu={() => {
+          const next = !userProfileMenuOpen;
+          setModelMenuOpen(false);
+          setPersonalityMenuOpen(false);
+          setQuickModelMenuOpen(false);
+          setThemePickerOpen(false);
+          setUserProfileMenuOpen(next);
+        }}
+        onSelect={selectUserProfile}
+        onCreate={createUserProfile}
+      />
 
       <details
         className="overflow-hidden rounded-[20px] border border-[#282a2c] bg-[#1e1f20] shadow-sm"
@@ -6486,117 +4857,41 @@ ${personalityMemory.trim()}`
   );
 
   const toolActivitySection = (
-    <details
-      className="overflow-hidden rounded-[20px] border border-[#282a2c] bg-[#1e1f20] shadow-sm"
+    <ToolActivitySection
       open={toolRunsOpen}
-      onToggle={(event) => setToolRunsOpen(event.currentTarget.open)}
-    >
-      <summary className="grid h-12 cursor-pointer list-none grid-cols-[minmax(0,1fr)_16px] items-center gap-2 px-3 [&::-webkit-details-marker]:hidden">
-        <div className="text-xs font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">Tool Activity</div>
-        <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[#c4c7c5] transition ${toolRunsOpen ? "rotate-180" : ""}`} />
-      </summary>
-      <div className="border-t border-[#282a2c] p-3">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="text-xs font-bold uppercase tracking-[0.14em] text-[#c4c7c5]">
-            {toolRuns.length ? `${Math.min(toolRuns.length, 10)} recent calls` : "No calls yet"}
-          </div>
-          <IconButton
-            title="Refresh tool activity"
-            onClick={() => refreshToolRuns().catch((error) => console.error("Tool activity refresh error:", error))}
-            size="sm"
-          >
-            <RefreshIcon className="h-4 w-4" />
-          </IconButton>
-        </div>
-        <div className="rounded-2xl bg-[#131314] p-2 ring-1 ring-[#282a2c]">
-          <div className="panel-scroll max-h-[228px] space-y-1.5 overflow-y-auto">
-            {toolRuns.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-[#3a3b3d] px-3 py-2 text-xs text-[#9aa0a6]">
-                Tool calls will appear here after the assistant uses voice, images, Gmail, Calendar, files, web, media, or system actions.
-              </div>
-            ) : (
-              toolRuns.slice(0, 10).map((run) => (
-                <div key={run.id} className="rounded-xl bg-[#1e1f20] px-2.5 py-2 ring-1 ring-[#282a2c]">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0 truncate text-xs font-bold text-[#e3e3e3]">{toolRunDisplayName(run)}</div>
-                    <div className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] ${run.success ? "bg-[#79d06f]/15 text-[#b8f5b2]" : "bg-rose-500/15 text-rose-200"}`}>
-                      {run.success ? "OK" : "Error"}
-                    </div>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[#9aa0a6]">
-                    <span className="min-w-0 truncate">Done {formatToolRunTime(run.created_at)}</span>
-                    <span className="shrink-0">{formatToolDuration(run.duration_ms)}</span>
-                  </div>
-                  <div className="mt-1 truncate text-[11px] leading-4 text-[#c4c7c5]">{toolRunBrief(run)}</div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-    </details>
+      toolRuns={toolRuns}
+      onToggle={setToolRunsOpen}
+      onRefresh={() => refreshToolRuns().catch((error) => console.error("Tool activity refresh error:", error))}
+    />
   );
 
   const rightPanelContent = (
     <div className="space-y-3 p-3">
-      <section className="overflow-visible rounded-[20px] border border-[#282a2c] bg-[#1e1f20] p-2.5 shadow-sm">
-        <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">Personality</div>
-        <div className="mt-2 flex items-center gap-2">
-          <div className="relative min-w-0 flex-1" data-dropdown-root>
-            <div className="flex h-11 items-center gap-2 overflow-hidden rounded-[16px] border border-[#282a2c] bg-[#131314] p-1 text-sm text-[#e3e3e3] transition focus-within:border-[var(--accent-color)] hover:bg-[#282a2c]">
-              <button
-                type="button"
-                onClick={openPersonalityProfile}
-                className="group relative h-9 w-9 shrink-0 overflow-hidden rounded-[12px] ring-1 ring-[#282a2c]"
-                title="Edit character profile"
-              >
-                <AvatarImage src={selectedPersonalityPreset?.avatar || personalityAvatar} fallback={selectedPersonalityPreset?.name || "AI"} className="h-full w-full rounded-[12px]" />
-                <span className="absolute inset-0 hidden items-center justify-center bg-black/45 text-[#e3e3e3] group-hover:flex">
-                  <EditIcon className="h-4 w-4" />
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !personalityMenuOpen;
-                  setModelMenuOpen(false);
-                  setUserProfileMenuOpen(false);
-                  setQuickModelMenuOpen(false);
-                  setThemePickerOpen(false);
-                  setPersonalityMenuOpen(next);
-                }}
-                className="flex h-9 min-w-0 flex-1 items-center justify-between gap-3 px-1.5 text-left outline-none"
-              >
-                <span className="min-w-0 flex-1 truncate font-semibold">
-                  {selectedPersonalityPreset?.name ?? "Choose personality"}
-                </span>
-                <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[#c4c7c5] transition ${personalityMenuOpen ? "rotate-180" : ""}`} />
-              </button>
-            </div>
-            {personalityMenuOpen && (
-              <div className="dropdown-scroll absolute left-0 right-0 top-full z-50 mt-1.5 max-h-56 overflow-y-auto rounded-[18px] border border-[#282a2c] bg-[#131314] p-1.5 shadow-2xl">
-                {personalityPresets.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => {
-                      selectPersonalityPreset(preset.id);
-                      setPersonalityMenuOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-2 rounded-[16px] px-2 py-1.5 text-left transition ${selectedPersonalityId === preset.id ? "bg-[var(--accent-soft)] ring-1 ring-[var(--accent-soft-strong)]" : "hover:bg-[#1e1f20]"}`}
-                  >
-                    <AvatarImage src={preset.avatar} fallback={preset.name} className="h-8 w-8 rounded-[12px]" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#e3e3e3]">{preset.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <IconButton size="lg" title="Create assistant profile" onClick={saveCurrentPersonalityPreset}>
-            <PlusIcon className="h-5 w-5" />
-          </IconButton>
-        </div>
-      </section>
+      <ProfilePickerSection
+        title="Personality"
+        selectedId={selectedPersonalityId}
+        selectedName={selectedPersonalityPreset?.name ?? "Choose personality"}
+        selectedAvatar={selectedPersonalityPreset?.avatar || personalityAvatar}
+        selectedFallback={selectedPersonalityPreset?.name || "AI"}
+        options={personalityPresets}
+        menuOpen={personalityMenuOpen}
+        createTitle="Create assistant profile"
+        avatarTitle="Edit character profile"
+        onAvatarClick={openPersonalityProfile}
+        onToggleMenu={() => {
+          const next = !personalityMenuOpen;
+          setModelMenuOpen(false);
+          setUserProfileMenuOpen(false);
+          setQuickModelMenuOpen(false);
+          setThemePickerOpen(false);
+          setPersonalityMenuOpen(next);
+        }}
+        onSelect={(id) => {
+          selectPersonalityPreset(id);
+          setPersonalityMenuOpen(false);
+        }}
+        onCreate={saveCurrentPersonalityPreset}
+      />
 
       {brainSection}
 
@@ -7185,6 +5480,7 @@ ${personalityMemory.trim()}`
       setModelFolder(result.catalog.brain_model_folder);
       setSelectedModelPath(result.catalog.selected_brain_model_path);
       setSetupCompleted(true);
+      setSetupScreenOpen(false);
       setLeftPanelOpen(true);
       setRightPanelOpen(true);
       setSetupNotice(result.message);
@@ -7202,194 +5498,37 @@ ${personalityMemory.trim()}`
   };
 
   if (!settingsLoaded) {
-    return (
-      <div className="startup-screen" role="status" aria-live="polite">
-        <div className="startup-card">
-          <div className="startup-logo">
-            <img src={brandLogo} alt="" aria-hidden="true" />
-          </div>
-          <div className="startup-kicker">Galaxy AI Hub</div>
-          <div className="startup-title">Starting up</div>
-          <div className="startup-message">Loading saved settings...</div>
-          <div className="startup-bar" />
-        </div>
-      </div>
-    );
+    return <StartupScreen />;
   }
 
   if (settingsLoadError) {
-    return (
-      <div className="grid min-h-screen place-items-center bg-[#131314] px-6 text-[#e3e3e3]">
-        <div className="max-w-xl rounded-[28px] border border-rose-500/30 bg-[#1e1f20] px-6 py-5 shadow-2xl">
-          <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-rose-300">
-            Settings Load Error
-          </div>
-          <div className="mt-2 text-sm leading-6 text-[#c4c7c5]">
-            The app could not load saved settings, so it stopped before showing editable defaults.
-          </div>
-          <pre className="mt-4 whitespace-pre-wrap rounded-2xl border border-[#282a2c] bg-[#131314] p-3 text-xs text-rose-100">
-            {settingsLoadError}
-          </pre>
-        </div>
-      </div>
-    );
+    return <SettingsLoadErrorScreen error={settingsLoadError} />;
   }
 
   if (firstStartupSetupNeeded) {
     return (
-      <div
-        className="setup-screen"
-        style={
-          {
-            "--accent-color": selectedThemeSwatch.accent,
-            "--accent-hover": selectedThemeSwatch.hover,
-            "--accent-soft": selectedThemeSwatch.soft,
-            "--accent-soft-strong": `${selectedThemeSwatch.accent}44`,
-          } as React.CSSProperties
-        }
-      >
-        <div className="setup-shell">
-          <div className="setup-hero">
-            <div className="setup-logo">
-              <img src={brandLogo} alt="" aria-hidden="true" />
-            </div>
-            <div className="min-w-0">
-              <div className="setup-kicker">Welcome to Galaxy</div>
-              <h1 className="setup-title">Build your local AI companion</h1>
-              <p className="setup-copy">
-                Galaxy needs three local parts before it can chat, speak, and create images.
-                Pick the setup that fits this PC, then let the app prepare everything in this folder.
-              </p>
-            </div>
-          </div>
-
-          <div className="setup-grid">
-            <section className="setup-card setup-hardware-card">
-              <div className="setup-card-title">Recommended setup</div>
-              <div className="setup-tier-badge">
-                <span>{setupTierLabel(activeSetupTier)}</span>
-                <small>{setupTierOverride ? "Selected by you" : "Picked for this PC"}</small>
-              </div>
-              <p className="setup-muted">{setupTierDescription(activeSetupTier)}</p>
-              <div className="setup-spec-list">
-                <div>
-                  <span>CPU</span>
-                  <strong>{systemInfo?.cpu_name || "Checking..."}</strong>
-                </div>
-                <div>
-                  <span>GPU</span>
-                  <strong>{hardwareGpuLabel || "Checking..."}</strong>
-                </div>
-                <div>
-                  <span>RAM</span>
-                  <strong>{hardwareRamLabel}</strong>
-                </div>
-                <div>
-                  <span>VRAM</span>
-                  <strong>{systemInfo ? `${(systemInfo.total_vram_mb / 1024).toFixed(1)} GB` : "Checking..."}</strong>
-                </div>
-              </div>
-              <div className="setup-tier-row">
-                {(["light", "balanced", "high"] as SetupTier[]).map((tier) => (
-                  <button
-                    key={tier}
-                    type="button"
-                    className={`setup-tier-button ${activeSetupTier === tier ? "active" : ""}`}
-                    onClick={() => setSetupTierOverride(tier)}
-                  >
-                    <span>{setupTierLabel(tier)}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="setup-size-note">{setupTotalSizeLabel(setupCatalog)}</div>
-            </section>
-
-            <section className="setup-card setup-parts-card">
-              <div className="setup-card-title">What will be installed</div>
-              <div className="setup-parts">
-                {SETUP_PARTS.map((part) => (
-                  (() => {
-                    const catalogPart = setupCatalog?.parts.find((item) => item.key === part.key);
-                    const sizeLabel = catalogPart?.files.map((file) => file.size_hint).join(" + ") || part.note;
-                    const isActivePart = setupInstalling && activeSetupPartKey === part.key;
-                    const partState = catalogPart?.installed
-                      ? "Ready"
-                      : isActivePart
-                        ? setupProgress?.stage === "ready" ? "Ready" : "Installing"
-                        : setupInstalling
-                          ? "Queued"
-                          : "Needed";
-                    return (
-                  <div key={part.key} className={`setup-part ${catalogPart?.installed ? "installed" : ""} ${isActivePart ? "active" : ""}`}>
-                    <div className="setup-part-icon">
-                      {part.icon === "brain" ? (
-                        <BrainIcon className="h-5 w-5" />
-                      ) : part.icon === "voice" ? (
-                        <SpeakerIcon className="h-5 w-5" />
-                      ) : (
-                        <BrushIcon className="h-5 w-5" />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="setup-part-title">{part.title}</div>
-                      <div className="setup-part-intro">{setupPartIntro(part)}</div>
-                      <div className="setup-part-model">{setupPartModel(part, activeSetupTier)}</div>
-                      <div className="setup-part-size">{sizeLabel}</div>
-                    </div>
-                    <div className="setup-part-state">{partState}</div>
-                  </div>
-                    );
-                  })()
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <div className="setup-footer">
-            <div className="setup-footer-info">
-              <div className="setup-footer-note">
-                {setupNotice || "You can change models later. First startup only prepares a working default setup."}
-              </div>
-              {(setupInstalling || setupProgress) && (
-                <div className="setup-progress" role="status" aria-live="polite">
-                  <div className="setup-progress-meta">
-                    <span>{setupProgress?.label || "Preparing installer"}</span>
-                    <strong>{setupProgress?.file_count ? `${setupProgress.file_index}/${setupProgress.file_count}` : "0%"}</strong>
-                  </div>
-                  <div className="setup-progress-track">
-                    <div
-                      className="setup-progress-fill"
-                      style={{ width: `${Math.max(3, setupProgress?.percent ?? 0)}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="setup-actions">
-              <button
-                type="button"
-                className="setup-secondary-button"
-                onClick={() => {
-                  setSetupCompleted(true);
-                  setLeftPanelOpen(true);
-                  setRightPanelOpen(true);
-                }}
-                disabled={setupInstalling}
-              >
-                Choose files myself
-              </button>
-              <button
-                type="button"
-                className="setup-primary-button"
-                onClick={() => void handleInstallSetupBundle()}
-                disabled={setupInstalling}
-              >
-                {setupInstalling ? "Installing..." : "Install recommended setup"}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SetupScreen
+        theme={selectedThemeSwatch}
+        brandLogo={brandLogo}
+        systemInfo={systemInfo}
+        hardwareGpuLabel={hardwareGpuLabel}
+        hardwareRamLabel={hardwareRamLabel}
+        activeSetupTier={activeSetupTier}
+        setupTierOverride={setupTierOverride}
+        setSetupTierOverride={setSetupTierOverride}
+        setupCatalog={setupCatalog}
+        setupInstalling={setupInstalling}
+        activeSetupPartKey={activeSetupPartKey}
+        setupProgress={setupProgress}
+        setupNotice={setupNotice}
+        onChooseFiles={() => {
+          setSetupCompleted(true);
+          setSetupScreenOpen(false);
+          setLeftPanelOpen(true);
+          setRightPanelOpen(true);
+        }}
+        onInstall={() => void handleInstallSetupBundle()}
+      />
     );
   }
 
@@ -7920,9 +6059,14 @@ ${personalityMemory.trim()}`
         >
           <div className="flex h-14 items-center justify-between border-b border-[#282a2c] px-4">
             <div className="text-sm font-semibold text-[#e3e3e3]">App Settings</div>
-            <IconButton size="sm" title="Close app settings" onClick={() => setLeftPanelOpen(false)}>
-              <CloseIcon />
-            </IconButton>
+            <div className="flex items-center gap-2">
+              <IconButton size="sm" title="Download models" onClick={() => setSetupScreenOpen(true)}>
+                <DownloadIcon />
+              </IconButton>
+              <IconButton size="sm" title="Close app settings" onClick={() => setLeftPanelOpen(false)}>
+                <CloseIcon />
+              </IconButton>
+            </div>
           </div>
           <div className="panel-scroll min-h-0 flex-1 overflow-y-auto">{leftPanelContent}</div>
         </aside>
@@ -8766,3 +6910,5 @@ ${personalityMemory.trim()}`
 }
 
 export default App;
+
+

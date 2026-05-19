@@ -617,6 +617,7 @@ fn relaunch_model(
     )?;
     command.stdout(std::process::Stdio::from(log_file));
     command.stderr(std::process::Stdio::from(err_file));
+    crate::process_util::hide_window(&mut command);
 
     let child = command
         .spawn()
