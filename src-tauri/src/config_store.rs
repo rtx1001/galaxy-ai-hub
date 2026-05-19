@@ -111,6 +111,8 @@ pub struct TelegramGuest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
+    #[serde(default)]
+    pub setup_completed: bool,
     #[serde(default = "default_user_name")]
     pub user_name: String,
     #[serde(default = "default_user_avatar")]
@@ -200,6 +202,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            setup_completed: false,
             user_name: default_user_name(),
             user_avatar: default_user_avatar(),
             user_description: String::new(),

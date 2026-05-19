@@ -202,6 +202,7 @@ type SendOptions = {
 };
 
 type AppSettings = {
+  setup_completed: boolean;
   user_name: string;
   user_avatar: string;
   user_description: string;
@@ -309,6 +310,7 @@ type BrainMessage = {
 const MAX_BRAIN_HISTORY_MESSAGES = 18;
 
 const DEFAULT_SETTINGS: AppSettings = {
+  setup_completed: false,
   user_name: "You",
   user_avatar: "",
   user_description: "",
@@ -375,6 +377,78 @@ const DEFAULT_SETTINGS: AppSettings = {
   ui_google_open: false,
   ui_tool_activity_open: false,
   ui_sampling_open: false,
+};
+
+type SetupTier = "light" | "balanced" | "high";
+type SetupPartKey = "brain" | "voice" | "image";
+
+type SetupPart = {
+  key: SetupPartKey;
+  title: string;
+  icon: "brain" | "voice" | "image";
+  purpose: string;
+  light: string;
+  balanced: string;
+  high: string;
+  note: string;
+};
+
+const SETUP_PARTS: SetupPart[] = [
+  {
+    key: "brain",
+    title: "Brain",
+    icon: "brain",
+    purpose: "Main chat, reasoning, memory, and tool use.",
+    light: "Gemma 4 E2B GGUF Q4/Q5",
+    balanced: "Gemma 4 E4B GGUF Q5/Q6",
+    high: "Gemma 4 E4B or larger Qwen/Gemma GGUF",
+    note: "The app always gives the LLM first priority.",
+  },
+  {
+    key: "voice",
+    title: "Voice",
+    icon: "voice",
+    purpose: "Local character speech and one-shot voice samples.",
+    light: "Q8 voice model, loaded only when needed",
+    balanced: "Q8 voice model, kept ready when VRAM allows",
+    high: "Q8 voice model, persistent beside the LLM when possible",
+    note: "Starter samples are included for new users.",
+  },
+  {
+    key: "image",
+    title: "Image Studio",
+    icon: "image",
+    purpose: "Text-to-image and image editing from chat.",
+    light: "Optional, smaller resolution first",
+    balanced: "Qwen Image Edit Q4 at 1024px",
+    high: "Qwen Image Edit Q4 at 1024-1536px",
+    note: "Image files stay outside Git and will be downloaded by setup.",
+  },
+];
+
+const setupTierFromSystem = (info: SystemInfo | null): SetupTier => {
+  if (!info) return "balanced";
+  if (info.total_ram_mb >= 60000 && info.total_vram_mb >= 12000) return "high";
+  if (info.total_ram_mb >= 30000 && info.total_vram_mb >= 8000) return "balanced";
+  return "light";
+};
+
+const setupTierLabel = (tier: SetupTier) => {
+  if (tier === "high") return "High";
+  if (tier === "balanced") return "Balanced";
+  return "Light";
+};
+
+const setupTierDescription = (tier: SetupTier) => {
+  if (tier === "high") return "Best for larger context, smoother voice, and heavier image work.";
+  if (tier === "balanced") return "Best default for local chat, voice, and 1024px image generation.";
+  return "Best for lighter PCs. Chat comes first and other models swap when needed.";
+};
+
+const setupPartModel = (part: SetupPart, tier: SetupTier) => {
+  if (tier === "high") return part.high;
+  if (tier === "balanced") return part.balanced;
+  return part.light;
 };
 
 
@@ -1504,6 +1578,8 @@ function App() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [settingsReadyForSave, setSettingsReadyForSave] = useState(false);
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
+  const [setupCompleted, setSetupCompleted] = useState(DEFAULT_SETTINGS.setup_completed);
+  const [setupTierOverride, setSetupTierOverride] = useState<SetupTier | null>(null);
   const [collapsedImageParts, setCollapsedImageParts] = useState<Record<string, boolean>>({});
   const [imageViewer, setImageViewer] = useState<{ url: string; localPath?: string; zoom: number; x: number; y: number } | null>(null);
   const [liveConversation, setLiveConversation] = useState(DEFAULT_SETTINGS.live_conversation);
@@ -4374,6 +4450,7 @@ ${personalityMemory.trim()}`
         if (!active) return;
 
         const nextUserAvatar = await compressAvatarDataUrl(stored.user_avatar || "");
+        setSetupCompleted(Boolean(stored.setup_completed));
         const sourceUserProfiles = stored.user_profiles?.length
           ? stored.user_profiles
           : [{
@@ -4687,6 +4764,7 @@ ${personalityMemory.trim()}`
       invoke("save_app_settings", {
         settings: {
           live_conversation: liveConversation,
+          setup_completed: setupCompleted,
           user_name: userName,
           user_avatar: userAvatar,
           user_description: userDescription,
@@ -4741,6 +4819,7 @@ ${personalityMemory.trim()}`
   }, [
     settingsLoaded,
     settingsReadyForSave,
+    setupCompleted,
     userName,
     userAvatar,
     userDescription,
@@ -5400,6 +5479,9 @@ ${personalityMemory.trim()}`
   const assistantAvatar = selectedPersonalityPreset?.avatar || personalityAvatar || "";
   const hardwareGpuLabel = systemInfo?.gpu_details.replace(/\s*\(([^)]+)\)\s*$/, " - $1") ?? "";
   const hardwareRamLabel = systemInfo ? `${(systemInfo.total_ram_mb / 1024).toFixed(1)} GB` : "Unknown";
+  const detectedSetupTier = setupTierFromSystem(systemInfo);
+  const activeSetupTier = setupTierOverride ?? detectedSetupTier;
+  const firstStartupSetupNeeded = !setupCompleted && !selectedModelPath;
   const conversationLogoClass = messages.length === 0
     ? "hidden"
     : "pointer-events-none absolute left-1/2 top-1/2 z-0 w-[min(52vw,360px)] -translate-x-1/2 -translate-y-1/2 opacity-[0.045]";
@@ -7023,6 +7105,132 @@ ${personalityMemory.trim()}`
           <pre className="mt-4 whitespace-pre-wrap rounded-2xl border border-[#282a2c] bg-[#131314] p-3 text-xs text-rose-100">
             {settingsLoadError}
           </pre>
+        </div>
+      </div>
+    );
+  }
+
+  if (firstStartupSetupNeeded) {
+    return (
+      <div
+        className="setup-screen"
+        style={
+          {
+            "--accent-color": selectedThemeSwatch.accent,
+            "--accent-hover": selectedThemeSwatch.hover,
+            "--accent-soft": selectedThemeSwatch.soft,
+            "--accent-soft-strong": `${selectedThemeSwatch.accent}44`,
+          } as React.CSSProperties
+        }
+      >
+        <div className="setup-shell">
+          <div className="setup-hero">
+            <div className="setup-logo">
+              <img src={brandLogo} alt="" aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <div className="setup-kicker">First Startup</div>
+              <h1 className="setup-title">Install your local AI companion</h1>
+              <p className="setup-copy">
+                Galaxy will prepare the Brain, Voice, and Image Studio models for this PC.
+                This setup screen is now in place; download wiring is the next implementation step.
+              </p>
+            </div>
+          </div>
+
+          <div className="setup-grid">
+            <section className="setup-card setup-hardware-card">
+              <div className="setup-card-title">Hardware check</div>
+              <div className="setup-tier-badge">{setupTierLabel(activeSetupTier)} setup</div>
+              <p className="setup-muted">{setupTierDescription(activeSetupTier)}</p>
+              <div className="setup-spec-list">
+                <div>
+                  <span>CPU</span>
+                  <strong>{systemInfo?.cpu_name || "Checking..."}</strong>
+                </div>
+                <div>
+                  <span>GPU</span>
+                  <strong>{hardwareGpuLabel || "Checking..."}</strong>
+                </div>
+                <div>
+                  <span>RAM</span>
+                  <strong>{hardwareRamLabel}</strong>
+                </div>
+                <div>
+                  <span>VRAM</span>
+                  <strong>{systemInfo ? `${(systemInfo.total_vram_mb / 1024).toFixed(1)} GB` : "Checking..."}</strong>
+                </div>
+              </div>
+              <div className="setup-tier-row">
+                {(["light", "balanced", "high"] as SetupTier[]).map((tier) => (
+                  <button
+                    key={tier}
+                    type="button"
+                    className={`setup-tier-button ${activeSetupTier === tier ? "active" : ""}`}
+                    onClick={() => setSetupTierOverride(tier)}
+                  >
+                    {setupTierLabel(tier)}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="setup-card setup-parts-card">
+              <div className="setup-card-title">Companion parts</div>
+              <div className="setup-parts">
+                {SETUP_PARTS.map((part) => (
+                  <div key={part.key} className="setup-part">
+                    <div className="setup-part-icon">
+                      {part.icon === "brain" ? (
+                        <BrainIcon className="h-5 w-5" />
+                      ) : part.icon === "voice" ? (
+                        <SpeakerIcon className="h-5 w-5" />
+                      ) : (
+                        <BrushIcon className="h-5 w-5" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="setup-part-title">{part.title}</div>
+                      <div className="setup-part-model">{setupPartModel(part, activeSetupTier)}</div>
+                      <div className="setup-part-purpose">{part.purpose}</div>
+                    </div>
+                    <div className="setup-part-state">Planned</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <div className="setup-footer">
+            <div className="setup-footer-note">
+              Next: these cards will download, verify, and register the model files automatically.
+            </div>
+            <div className="setup-actions">
+              <button
+                type="button"
+                className="setup-secondary-button"
+                onClick={() => {
+                  setSetupCompleted(true);
+                  setLeftPanelOpen(true);
+                  setRightPanelOpen(true);
+                }}
+              >
+                Manual setup for now
+              </button>
+              <button
+                type="button"
+                className="setup-primary-button"
+                onClick={() => {
+                  setSetupCompleted(true);
+                  setLeftPanelOpen(true);
+                  setRightPanelOpen(true);
+                  setModelMenuOpen(false);
+                }}
+              >
+                Continue to app
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
