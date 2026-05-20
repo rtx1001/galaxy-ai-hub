@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -6,38 +6,42 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import brandLogo from "./assets/logo-gah.svg";
 import { ChatContentPart, ChatMessage, ChatSessions, EngineInfo, ModelLoadStatus, VoiceSetupStatus, ActionProposal, FilePreviewResult } from "./types";
-import { MicIcon, SendIcon, StopIcon, ImageIcon, FolderIcon, SpeakerIcon, EraserIcon, CloseIcon, ChevronDownIcon, ChevronUpIcon, PlayIcon, CameraIcon, BrainIcon, EyeIcon, GearIcon, MenuIcon, TrashIcon, BrushIcon, RepeatIcon, SaveIcon, DownloadIcon } from "./components/Icons";
-import { IconButton, NumberStepper, AvatarImage } from "./components/UI";
+import { CloseIcon, GearIcon, MenuIcon, DownloadIcon } from "./components/Icons";
+import { IconButton } from "./components/UI";
 import { ResourceHeader } from "./components/ResourceHeader";
 import { SetupScreen } from "./components/SetupScreen";
 import { StartupScreen, SettingsLoadErrorScreen } from "./components/AppScreens";
-import { ImageStudioSection } from "./components/ImageStudioSection";
-import { ToolActivitySection } from "./components/ToolActivitySection";
-import { ProfilePickerSection } from "./components/ProfilePickerSection";
-import { WorkspaceSection } from "./components/WorkspaceSection";
-import { AutomationSection } from "./components/AutomationSection";
-import { BrainSection } from "./components/BrainSection";
-import { CalendarSection } from "./components/CalendarSection";
-import { TelegramSection } from "./components/TelegramSection";
-import { GoogleSection } from "./components/GoogleSection";
-import { SamplingSection } from "./components/SamplingSection";
+import { AutomationEditorModal } from "./components/AutomationEditorModal";
+import { LeftPanelContent, RightPanelContent } from "./components/SidePanelContent";
 import { ConversationPane } from "./components/ConversationPane";
+import { ChatComposer } from "./components/ChatComposer";
 import { FreshChatConfirmModal, GoogleEventModals, ImageViewerOverlay } from "./components/AppOverlays";
+import { useAvailableUpdate } from "./hooks/useAvailableUpdate";
+import { useDateTimeLine } from "./hooks/useDateTimeLine";
+import { useTelegramGuests } from "./hooks/useTelegramGuests";
+import { useToolRuns } from "./hooks/useToolRuns";
+import { useVoiceSamples } from "./hooks/useVoiceSamples";
+import { useAudioPlayback } from "./hooks/useAudioPlayback";
+import { useImageAttachments } from "./hooks/useImageAttachments";
+import { useAutomations } from "./hooks/useAutomations";
+import { useGoogleCalendar } from "./hooks/useGoogleCalendar";
+import { useSetupFlow } from "./hooks/useSetupFlow";
+import { useSamplingSettings } from "./hooks/useSamplingSettings";
+import { usePanelState } from "./hooks/usePanelState";
+import { useWorkspaceFolders } from "./hooks/useWorkspaceFolders";
+import { useImageStudioSettings } from "./hooks/useImageStudioSettings";
+import { useCompactLayout } from "./hooks/useCompactLayout";
 import { clampNumber } from "./utils";
 import {
   AgentReactResult,
   AppSettings,
   AudioSynthesisResult,
-  AutomationEveryUnit,
   AutomationJob,
-  AutomationRepeat,
   CharacterFiles,
   CharacterSettings,
   DEFAULT_SETTINGS,
   DisplayLanguage,
   FileActionResult,
-  GoogleCalendarEvent,
-  GoogleConnectionStatus,
   LocalImageDataUrl,
   MemoryItem,
   ModelLibraryEntry,
@@ -46,27 +50,17 @@ import {
   PendingShellAction,
   PersonalityPreset,
   SendOptions,
-  SetupCatalog,
-  SetupInstallProgress,
   SetupInstallResult,
-  SetupTier,
   SPEECH_CACHE_LIMIT,
   ShellExecutionResult,
   TelegramBotStatus,
-  TelegramGuest,
   THEME_SWATCHS,
-  ToolRunRecord,
   UserProfilePreset,
   VoiceSample,
   SystemInfo,
   VramMemoryStatus,
-  automationScheduleLabel,
-  buildAutomationSchedule,
   buildBrainMessages,
-  buildGoogleMonthRange,
-  buildMonthDays,
   buildToolAgentMessages,
-  compactAutomationSummary,
   compactChatSessionForStorage,
   compactSessionFingerprint,
   conversationWantsVietnamese,
@@ -90,57 +84,21 @@ import {
   includesAnyPhrase,
   isExplicitApprovalText,
   isGpuFitError,
-  normalizeCalendarEventForDisplay,
   normalizeIntentText,
-  parseAutomationSchedule,
   parseStoredChatSession,
-  parseTimeParts,
   sanitizeTextForSpeech,
-  setupTierFromSystem,
   sleep,
   splitAssistantMessageForChat,
   stripShellToolRequest,
   stripThinkBlocks,
   syncSoulCoreIdentity,
   textLooksVietnamese,
-  toLocalDateKey,
 } from "./appCore";
 
-const CURRENT_APP_VERSION = "0.1.2";
-const GITHUB_RELEASES_API = "https://api.github.com/repos/rtx1001/galaxy-ai-hub/releases?per_page=10";
-const GITHUB_RELEASES_PAGE = "https://github.com/rtx1001/galaxy-ai-hub/releases";
 const MIN_CHAT_CONTEXT_SIZE = 8192;
-
-type AvailableUpdate = {
-  version: string;
-  url: string;
-};
-
-const versionParts = (version: string) =>
-  version
-    .replace(/^v/i, "")
-    .split(/[.-]/)
-    .map((part) => {
-      const value = Number.parseInt(part, 10);
-      return Number.isFinite(value) ? value : 0;
-    });
-
-const isNewerVersion = (candidate: string, current: string) => {
-  const next = versionParts(candidate);
-  const installed = versionParts(current);
-  const length = Math.max(next.length, installed.length);
-  for (let index = 0; index < length; index += 1) {
-    const nextPart = next[index] ?? 0;
-    const installedPart = installed[index] ?? 0;
-    if (nextPart > installedPart) return true;
-    if (nextPart < installedPart) return false;
-  }
-  return false;
-};
 
 function App() {
   const [brainStatus, setBrainStatus] = useState<"Idle" | "Loading" | "Ready" | "Thinking" | "Error">("Idle");
-  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [engineStatus, setEngineStatus] = useState<"initializing" | "downloading" | "ready" | "error">("initializing");
   const [engineErrorMsg, setEngineErrorMsg] = useState("");
@@ -189,40 +147,97 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
-  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const {
+    isAudioPlaying,
+    ensureAudioPlaybackUnlocked,
+    playAudioBase64,
+    stopActiveAudio,
+  } = useAudioPlayback();
   const [pendingShellActions, setPendingShellActions] = useState<PendingShellAction[]>([]);
   const [executingShellActionId, setExecutingShellActionId] = useState<number | null>(null);
-  const [toolRuns, setToolRuns] = useState<ToolRunRecord[]>([]);
-  const [toolRunsOpen, setToolRunsOpen] = useState(DEFAULT_SETTINGS.ui_tool_activity_open);
-  const [automationJobs, setAutomationJobs] = useState<AutomationJob[]>([]);
-  const [automationOpen, setAutomationOpen] = useState(DEFAULT_SETTINGS.ui_automation_open);
-  const [workspaceOpen, setWorkspaceOpen] = useState(DEFAULT_SETTINGS.ui_workspace_open);
-  const [imageStudioOpen, setImageStudioOpen] = useState(DEFAULT_SETTINGS.ui_image_studio_open);
-  const [calendarOpen, setCalendarOpen] = useState(DEFAULT_SETTINGS.ui_calendar_open);
-  const [telegramPanelOpen, setTelegramPanelOpen] = useState(DEFAULT_SETTINGS.ui_telegram_open);
-  const [googlePanelOpen, setGooglePanelOpen] = useState(DEFAULT_SETTINGS.ui_google_open);
-  const [samplingOpen, setSamplingOpen] = useState(DEFAULT_SETTINGS.ui_sampling_open);
-  const [automationName, setAutomationName] = useState("");
-  const [automationPrompt, setAutomationPrompt] = useState("");
-  const [automationDate, setAutomationDate] = useState(() => toLocalDateKey(new Date()));
-  const [automationTime, setAutomationTime] = useState("");
-  const [automationRepeat, setAutomationRepeat] = useState<AutomationRepeat>("once");
-  const [automationEveryAmount, setAutomationEveryAmount] = useState(15);
-  const [automationEveryUnit, setAutomationEveryUnit] = useState<AutomationEveryUnit>("minutes");
-  const [automationTimeMenuOpen, setAutomationTimeMenuOpen] = useState(false);
-  const [automationDateMenuOpen, setAutomationDateMenuOpen] = useState(false);
-  const [automationMonthMenuOpen, setAutomationMonthMenuOpen] = useState(false);
-  const [automationEveryUnitMenuOpen, setAutomationEveryUnitMenuOpen] = useState(false);
-  const [automationEditorMonth, setAutomationEditorMonth] = useState(() => new Date());
-  const [automationMonth, setAutomationMonth] = useState(() => new Date());
-  const [selectedAutomationDate, setSelectedAutomationDate] = useState(() => toLocalDateKey(new Date()));
-  const [automationEditorOpen, setAutomationEditorOpen] = useState(false);
-  const [editingAutomationId, setEditingAutomationId] = useState<number | null>(null);
-  const [image, setImage] = useState<string | null>(null);
-  const [imagePath, setImagePath] = useState<string | null>(null);
+  const { toolRuns, toolRunsOpen, setToolRunsOpen, refreshToolRuns } = useToolRuns(DEFAULT_SETTINGS.ui_tool_activity_open);
+  const {
+    automationOpen,
+    setAutomationOpen,
+    workspaceOpen,
+    setWorkspaceOpen,
+    imageStudioOpen,
+    setImageStudioOpen,
+    calendarOpen,
+    setCalendarOpen,
+    telegramPanelOpen,
+    setTelegramPanelOpen,
+    googlePanelOpen,
+    setGooglePanelOpen,
+    samplingOpen,
+    setSamplingOpen,
+    leftPanelOpen,
+    setLeftPanelOpen,
+    rightPanelOpen,
+    setRightPanelOpen,
+  } = usePanelState();
   const [freshChatConfirmOpen, setFreshChatConfirmOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [composerNotice, setComposerNotice] = useState("");
+  const {
+    automationJobs,
+    setAutomationJobs,
+    automationName,
+    setAutomationName,
+    automationPrompt,
+    setAutomationPrompt,
+    automationDate,
+    setAutomationDate,
+    automationTime,
+    setAutomationTime,
+    automationRepeat,
+    setAutomationRepeat,
+    automationEveryAmount,
+    setAutomationEveryAmount,
+    automationEveryUnit,
+    setAutomationEveryUnit,
+    automationTimeMenuOpen,
+    setAutomationTimeMenuOpen,
+    automationDateMenuOpen,
+    setAutomationDateMenuOpen,
+    automationMonthMenuOpen,
+    setAutomationMonthMenuOpen,
+    automationEveryUnitMenuOpen,
+    setAutomationEveryUnitMenuOpen,
+    automationEditorMonth,
+    setAutomationEditorMonth,
+    automationMonth,
+    setAutomationMonth,
+    selectedAutomationDate,
+    selectedAutomationDateObj,
+    selectedAutomationLabel,
+    automationEditorOpen,
+    setAutomationEditorOpen,
+    editingAutomationId,
+    setEditingAutomationId,
+    automationMonthDays,
+    activeAutomationCount,
+    recentAutomationJobs,
+    refreshAutomationJobs,
+    openAutomationEditor,
+    saveAutomationJob,
+    toggleAutomationJob,
+    deleteAutomationJob,
+    selectAutomationDate,
+  } = useAutomations({ setComposerNotice });
+  const {
+    image,
+    imagePath,
+    imageViewer,
+    setImageViewer,
+    clearImage,
+    attachImageFromFile,
+    chooseImageForComposer,
+    compressAvatarDataUrl,
+    readAvatarImage,
+    revealImageLocation,
+    openImageViewer,
+  } = useImageAttachments({ setComposerNotice });
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [themeSwatchId, setThemeSwatchId] = useState(DEFAULT_SETTINGS.theme_swatch_id);
@@ -230,52 +245,87 @@ function App() {
   const [clearSessionToo, setClearSessionToo] = useState(false);
   const [deletePersonalityConfirmOpen, setDeletePersonalityConfirmOpen] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const availableUpdate = useAvailableUpdate(settingsLoaded);
   const [settingsReadyForSave, setSettingsReadyForSave] = useState(false);
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
-  const [setupCompleted, setSetupCompleted] = useState(DEFAULT_SETTINGS.setup_completed);
-  const [setupScreenOpen, setSetupScreenOpen] = useState(false);
-  const [setupTierOverride, setSetupTierOverride] = useState<SetupTier | null>(null);
-  const [setupCatalog, setSetupCatalog] = useState<SetupCatalog | null>(null);
-  const [setupInstalling, setSetupInstalling] = useState(false);
-  const [setupNotice, setSetupNotice] = useState("");
-  const [setupProgress, setSetupProgress] = useState<SetupInstallProgress | null>(null);
   const [collapsedImageParts, setCollapsedImageParts] = useState<Record<string, boolean>>({});
-  const [imageViewer, setImageViewer] = useState<{ url: string; localPath?: string; zoom: number; x: number; y: number } | null>(null);
   const [liveConversation, setLiveConversation] = useState(DEFAULT_SETTINGS.live_conversation);
   const [telegramBotToken, setTelegramBotToken] = useState(DEFAULT_SETTINGS.telegram_bot_token);
   const [telegramOwnerId, setTelegramOwnerId] = useState(DEFAULT_SETTINGS.telegram_owner_id);
-  const [telegramGuests, setTelegramGuests] = useState<TelegramGuest[]>(DEFAULT_SETTINGS.telegram_guests);
-  const [telegramGuestDraft, setTelegramGuestDraft] = useState<TelegramGuest | null>(null);
   const [telegramStatus, setTelegramStatus] = useState("");
   const [telegramRunning, setTelegramRunning] = useState(false);
-  const [googleClientId, setGoogleClientId] = useState(DEFAULT_SETTINGS.google_client_id);
-  const [googleClientSecret, setGoogleClientSecret] = useState(DEFAULT_SETTINGS.google_client_secret);
-  const [googleRedirectUri, setGoogleRedirectUri] = useState(DEFAULT_SETTINGS.google_redirect_uri);
-  const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus>({
-    connected: false,
-    email: null,
-    expires_at: null,
+  const {
+    telegramGuests,
+    setTelegramGuests,
+    telegramGuestDraft,
+    setTelegramGuestDraft,
+    addTelegramGuest,
+    removeTelegramGuest,
+  } = useTelegramGuests({
+    initialGuests: DEFAULT_SETTINGS.telegram_guests,
+    settingsLoaded,
+    telegramRunning,
   });
-  const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
-  const [googleBusy, setGoogleBusy] = useState(false);
-  const [googleNotice, setGoogleNotice] = useState("");
-  const [selectedGoogleEvent, setSelectedGoogleEvent] = useState<GoogleCalendarEvent | null>(null);
-  const [googleDeleteTarget, setGoogleDeleteTarget] = useState<GoogleCalendarEvent | null>(null);
-  const [imageWidth, setImageWidth] = useState(DEFAULT_SETTINGS.image_width);
-  const [imageHeight, setImageHeight] = useState(DEFAULT_SETTINGS.image_height);
-  const [quickImagePrompt, setQuickImagePrompt] = useState("");
+  const {
+    googleClientId,
+    setGoogleClientId,
+    googleClientSecret,
+    setGoogleClientSecret,
+    googleRedirectUri,
+    setGoogleRedirectUri,
+    googleStatus,
+    googleCalendarEvents,
+    googleBusy,
+    googleNotice,
+    selectedGoogleEvent,
+    setSelectedGoogleEvent,
+    googleDeleteTarget,
+    setGoogleDeleteTarget,
+    refreshGoogleStatus,
+    refreshGoogleCalendarEvents,
+    connectGoogle,
+    disconnectGoogle,
+    deleteGoogleEvent,
+    openDeleteGoogleEventConfirm,
+  } = useGoogleCalendar({
+    automationMonth,
+    initialClientId: DEFAULT_SETTINGS.google_client_id,
+    initialClientSecret: DEFAULT_SETTINGS.google_client_secret,
+    initialRedirectUri: DEFAULT_SETTINGS.google_redirect_uri,
+  });
+  const {
+    imageWidth,
+    setImageWidth,
+    imageHeight,
+    setImageHeight,
+    quickImagePrompt,
+    setQuickImagePrompt,
+  } = useImageStudioSettings();
   const [voiceFolder, setVoiceFolder] = useState(DEFAULT_SETTINGS.voice_folder);
   const [selectedVoicePath, setSelectedVoicePath] = useState(DEFAULT_SETTINGS.selected_voice_path);
-  const [creativity, setCreativity] = useState(DEFAULT_SETTINGS.creativity);
-  const [samplingTemperature, setSamplingTemperature] = useState(DEFAULT_SETTINGS.sampling_temperature);
-  const [topK, setTopK] = useState(DEFAULT_SETTINGS.top_k);
-  const [topP, setTopP] = useState(DEFAULT_SETTINGS.top_p);
-  const [minP, setMinP] = useState(DEFAULT_SETTINGS.min_p);
-  const [repeatLastN, setRepeatLastN] = useState(DEFAULT_SETTINGS.repeat_last_n);
-  const [repeatPenalty, setRepeatPenalty] = useState(DEFAULT_SETTINGS.repeat_penalty);
-  const [memorySize, setMemorySize] = useState(DEFAULT_SETTINGS.memory_size);
-  const [replyLength, setReplyLength] = useState(DEFAULT_SETTINGS.reply_length);
-  const [intelligenceQuality, setIntelligenceQuality] = useState(DEFAULT_SETTINGS.intelligence_quality);
+  const {
+    creativity,
+    setCreativity,
+    samplingTemperature,
+    setSamplingTemperature,
+    topK,
+    setTopK,
+    topP,
+    setTopP,
+    minP,
+    setMinP,
+    repeatLastN,
+    setRepeatLastN,
+    repeatPenalty,
+    setRepeatPenalty,
+    memorySize,
+    setMemorySize,
+    replyLength,
+    setReplyLength,
+    intelligenceQuality,
+    setIntelligenceQuality,
+    resetSamplingDefaults,
+  } = useSamplingSettings();
   const [personality, setPersonality] = useState(DEFAULT_SETTINGS.personality);
   const [personalityAvatar, setPersonalityAvatar] = useState(DEFAULT_SETTINGS.personality_presets[0].avatar ?? "");
   const [personalityPresets, setPersonalityPresets] = useState<PersonalityPreset[]>(DEFAULT_SETTINGS.personality_presets);
@@ -284,31 +334,56 @@ function App() {
   const [characterSoul, setCharacterSoul] = useState("");
   const [characterFolder, setCharacterFolder] = useState("");
   const [modelFolder, setModelFolder] = useState(DEFAULT_SETTINGS.model_folder);
-  const [linkedFolders, setLinkedFolders] = useState<string[]>(DEFAULT_SETTINGS.linked_folders);
-  const [voiceSamples, setVoiceSamples] = useState<VoiceSample[]>([]);
+  const {
+    linkedFolders,
+    setLinkedFolders,
+    handleAddLinkedFolder,
+    handleRemoveLinkedFolder,
+  } = useWorkspaceFolders();
   const [availableModels, setAvailableModels] = useState<ModelLibraryEntry[]>([]);
   const [selectedModelPath, setSelectedModelPath] = useState(DEFAULT_SETTINGS.selected_model_path);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [hasVision, setHasVision] = useState(false);
   const [activeTaskType, setActiveTaskType] = useState<"none" | "llm" | "voice" | "image">("none");
   const [pendingAutoLoadPath, setPendingAutoLoadPath] = useState<string | null>(null);
-  const [leftPanelOpen, setLeftPanelOpen] = useState(DEFAULT_SETTINGS.ui_left_panel_open);
-  const [rightPanelOpen, setRightPanelOpen] = useState(DEFAULT_SETTINGS.ui_right_panel_open);
+  const {
+    setupCompleted,
+    setSetupCompleted,
+    setupScreenOpen,
+    setSetupScreenOpen,
+    setupTierOverride,
+    setupCatalog,
+    setSetupCatalog,
+    setupInstalling,
+    setSetupInstalling,
+    setupNotice,
+    setSetupNotice,
+    setupProgress,
+    setSetupProgress,
+    activeSetupTier,
+    firstStartupSetupNeeded,
+    activeSetupPartKey,
+    chooseSetupTier,
+  } = useSetupFlow({
+    initialSetupCompleted: DEFAULT_SETTINGS.setup_completed,
+    settingsLoaded,
+    selectedModelPath,
+    systemInfo,
+  });
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [quickModelMenuOpen, setQuickModelMenuOpen] = useState(false);
   const [personalityMenuOpen, setPersonalityMenuOpen] = useState(false);
   const [personalityProfileOpen, setPersonalityProfileOpen] = useState(false);
   const [personalityNameDraft, setPersonalityNameDraft] = useState(DEFAULT_SETTINGS.personality_presets[0].name);
-  const [dateTimeLine, setDateTimeLine] = useState("");
+  const dateTimeLine = useDateTimeLine();
   const [, setLastTokenSpeed] = useState(0);
   const [, setLastContextTokens] = useState(0);
   const [previewingVoicePath, setPreviewingVoicePath] = useState<string | null>(null);
   const [thinkingEnabled, setThinkingEnabled] = useState(DEFAULT_SETTINGS.thinking_enabled);
-  const [isCompactLayout, setIsCompactLayout] = useState(
-    typeof window !== "undefined"
-      ? window.innerWidth - 292 * 2 < 482
-      : false,
-  );
+  const isCompactLayout = useCompactLayout({
+    setLeftPanelOpen,
+    setRightPanelOpen,
+  });
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -316,8 +391,6 @@ function App() {
   const userAvatarPickerRef = useRef<HTMLInputElement | null>(null);
   const personalityAvatarPickerRef = useRef<HTMLInputElement | null>(null);
   const avatarTargetPersonalityIdRef = useRef<string | null>(null);
-  const selectedVoiceRowRef = useRef<HTMLDivElement | null>(null);
-  const selectedUserVoiceRowRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastComposerInputAtRef = useRef(0);
   const lastUiInteractionAtRef = useRef(0);
@@ -331,11 +404,6 @@ function App() {
   const personalityMemoryShadowRef = useRef<Record<string, string>>({});
   const systemDefaultsAppliedRef = useRef(false);
   const speechCacheRef = useRef<Map<string, AudioSynthesisResult>>(new Map());
-  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
-  const activeAudioUrlRef = useRef<string | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const activeAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const audioPlaybackUnlockedRef = useRef(false);
   const voicePlaybackRequestRef = useRef(0);
   const lastAutoSpokenAssistantIdRef = useRef<string | null>(null);
   const autoSpeechEligibleAssistantIdsRef = useRef<Set<string>>(new Set());
@@ -354,106 +422,32 @@ function App() {
   const currentModelEntry =
     availableModels.find((model) => model.path === selectedModelPath) ?? null;
   const localContext = getDefaultLocalContext();
-  const selectedVoiceSample =
-    voiceSamples.find((sample) => sample.path === selectedVoicePath) ?? null;
   const selectedUserProfile =
     userProfiles.find((profile) => profile.id === selectedUserProfileId) ?? userProfiles[0] ?? DEFAULT_SETTINGS.user_profiles[0];
   const selectedUserVoicePath = selectedUserProfile?.voice_path || "";
+  const {
+    voiceSamples,
+    selectedVoiceRowRef,
+    selectedUserVoiceRowRef,
+  } = useVoiceSamples({
+    settingsLoaded,
+    voiceFolder,
+    personalityProfileOpen,
+    userProfileOpen,
+    selectedVoicePath,
+    selectedUserVoicePath,
+  });
+  const selectedVoiceSample =
+    voiceSamples.find((sample) => sample.path === selectedVoicePath) ?? null;
   const selectedUserVoiceSample =
     voiceSamples.find((sample) => sample.path === selectedUserVoicePath) ?? null;
   const selectedThemeSwatch =
     THEME_SWATCHS.find((swatch) => swatch.id === themeSwatchId) ?? THEME_SWATCHS[0];
-  const setupRepairPromptedRef = useRef(false);
   const voiceAutoPrepareStartedRef = useRef(false);
-  const installedSetupTierFromModel = (path: string | null): SetupTier | null => {
-    const normalized = (path || "").replace(/\\/g, "/").toLowerCase();
-    if (normalized.includes("gemma-4-e2b")) return "light";
-    if (normalized.includes("gemma-4-e4b") && normalized.includes("q8")) return "high";
-    if (normalized.includes("gemma-4-e4b")) return "balanced";
-    return null;
-  };
 
   useEffect(() => {
     activeTaskTypeRef.current = activeTaskType;
   }, [activeTaskType]);
-
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    listen<SetupInstallProgress>("setup-install-progress", (event) => {
-      if (disposed) return;
-      setSetupProgress(event.payload);
-      setSetupNotice(event.payload.message);
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        unlisten = cleanup;
-      })
-      .catch((error) => console.error("Setup progress listener error:", error));
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    let cancelled = false;
-    const controller = new AbortController();
-    const checkForAppUpdate = async () => {
-      try {
-        const response = await fetch(GITHUB_RELEASES_API, {
-          signal: controller.signal,
-          headers: { Accept: "application/vnd.github+json" },
-        });
-        if (!response.ok) return;
-        const releases = (await response.json()) as Array<{
-          tag_name?: string;
-          html_url?: string;
-          draft?: boolean;
-        }>;
-        const latest = releases.find((release) => !release.draft && release.tag_name);
-        if (!latest?.tag_name || cancelled) return;
-        if (isNewerVersion(latest.tag_name, CURRENT_APP_VERSION)) {
-          setAvailableUpdate({
-            version: latest.tag_name.replace(/^v/i, ""),
-            url: latest.html_url || GITHUB_RELEASES_PAGE,
-          });
-        }
-      } catch (error) {
-        if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
-          console.warn("Update check failed:", error);
-        }
-      }
-    };
-    void checkForAppUpdate();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [settingsLoaded]);
-
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    const tier = setupTierOverride ?? installedSetupTierFromModel(selectedModelPath) ?? setupTierFromSystem(systemInfo);
-    invoke<SetupCatalog>("get_setup_catalog", {
-      tier,
-      hasNvidiaGpu: systemInfo?.has_nvidia_gpu ?? false,
-    })
-      .then(setSetupCatalog)
-      .catch((error) => {
-        console.error("Setup catalog error:", error);
-        setSetupNotice(error instanceof Error ? error.message : String(error));
-      });
-  }, [settingsLoaded, setupTierOverride, systemInfo, selectedModelPath]);
-
-  const chooseSetupTier = (tier: SetupTier) => {
-    setSetupTierOverride(tier);
-    setSetupNotice(`Selected ${tier} setup. Galaxy will use this tier when its files are installed.`);
-  };
 
   const recommendedThreads = systemInfo
     ? clampNumber(Math.min(systemInfo.cpu_threads, 8), 2, Math.max(2, systemInfo.cpu_threads))
@@ -655,257 +649,6 @@ function App() {
     }
   };
 
-  const refreshAutomationJobs = async () => {
-    try {
-      const jobs = await invoke<AutomationJob[]>("list_automation_jobs", { includeDisabled: true });
-      setAutomationJobs(jobs);
-    } catch (error) {
-      console.error("Automation load error:", error);
-    }
-  };
-
-  const refreshGoogleStatus = async () => {
-    try {
-      const status = await invoke<GoogleConnectionStatus>("get_google_connection_status");
-      setGoogleStatus(status);
-      return status;
-    } catch (error) {
-      console.error("Google status error:", error);
-      setGoogleNotice(error instanceof Error ? error.message : String(error));
-      return null;
-    }
-  };
-
-  const refreshGoogleCalendarEvents = async (monthOverride = automationMonth, statusOverride = googleStatus) => {
-    if (!statusOverride.connected || !googleClientId.trim() || !googleClientSecret.trim()) {
-      setGoogleCalendarEvents([]);
-      return;
-    }
-
-    try {
-      const { timeMin, timeMax } = buildGoogleMonthRange(monthOverride);
-      const events = await invoke<GoogleCalendarEvent[]>("list_google_calendar_events", {
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        timeMin,
-        timeMax,
-      });
-      setGoogleCalendarEvents(events);
-      setGoogleNotice(events.length ? `Loaded ${events.length} Google Calendar event${events.length === 1 ? "" : "s"}.` : "Google Calendar is connected. No events this month.");
-    } catch (error) {
-      console.error("Google Calendar load error:", error);
-      setGoogleNotice(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const connectGoogle = async () => {
-    if (!googleClientId.trim() || !googleClientSecret.trim() || !googleRedirectUri.trim()) {
-      setGoogleNotice("Add your Google OAuth Client ID and Secret first.");
-      return;
-    }
-
-    setGoogleBusy(true);
-    setGoogleNotice("Opening Google sign-in...");
-    try {
-      const status = await invoke<GoogleConnectionStatus>("connect_google_calendar", {
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        redirectUri: googleRedirectUri,
-      });
-      setGoogleStatus(status);
-      setGoogleNotice(status.email ? `Connected as ${status.email}.` : "Google Calendar connected.");
-      await refreshGoogleCalendarEvents(automationMonth, status);
-    } catch (error) {
-      console.error("Google connect error:", error);
-      setGoogleNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setGoogleBusy(false);
-    }
-  };
-
-  const disconnectGoogle = async () => {
-    setGoogleBusy(true);
-    try {
-      const status = await invoke<GoogleConnectionStatus>("disconnect_google_calendar");
-      setGoogleStatus(status);
-      setGoogleCalendarEvents([]);
-      setGoogleNotice("Google Calendar disconnected.");
-    } catch (error) {
-      console.error("Google disconnect error:", error);
-      setGoogleNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setGoogleBusy(false);
-    }
-  };
-
-  const deleteGoogleEvent = async (id: string) => {
-    setGoogleBusy(true);
-    try {
-      await invoke("delete_google_calendar_event", {
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        id: id,
-      });
-      refreshGoogleCalendarEvents();
-    } catch (error) {
-      console.error("Delete failed:", error);
-      setGoogleNotice("Delete failed. Please check connection.");
-    } finally {
-      setGoogleBusy(false);
-    }
-  };
-
-  const openDeleteGoogleEventConfirm = (event: GoogleCalendarEvent) => {
-    setSelectedGoogleEvent(null);
-    setGoogleDeleteTarget(normalizeCalendarEventForDisplay(event));
-  };
-
-  const openAutomationEditor = (job?: AutomationJob) => {
-    if (job) {
-      const parsed = parseAutomationSchedule(job.schedule, selectedAutomationDate);
-      setEditingAutomationId(job.id);
-      setAutomationName(job.name);
-      setAutomationPrompt(job.prompt);
-      setAutomationDate(parsed.date);
-      setAutomationEditorMonth(new Date(`${parsed.date}T00:00:00`));
-      setAutomationTime(parsed.time);
-      setAutomationRepeat(parsed.repeat);
-      setAutomationEveryAmount(parsed.everyAmount);
-      setAutomationEveryUnit(parsed.everyUnit);
-    } else {
-      setEditingAutomationId(null);
-      setAutomationName("");
-      setAutomationPrompt("");
-      setAutomationDate(selectedAutomationDate);
-      setAutomationEditorMonth(new Date(`${selectedAutomationDate}T00:00:00`));
-      setAutomationTime("");
-      setAutomationRepeat("once");
-      setAutomationEveryAmount(15);
-      setAutomationEveryUnit("minutes");
-    }
-    setAutomationEditorOpen(true);
-  };
-
-  const saveAutomationJob = async () => {
-    const scheduleDate = automationDate || selectedAutomationDate;
-    const schedule = buildAutomationSchedule(scheduleDate, automationTime, automationRepeat, automationEveryAmount, automationEveryUnit);
-    if (!automationName.trim() || !automationPrompt.trim() || !schedule) {
-      setComposerNotice("Add an event title and task.");
-      return;
-    }
-
-    try {
-      const payload = {
-        name: automationName,
-        prompt: automationPrompt,
-        schedule,
-        enabled: true,
-      };
-      const job = editingAutomationId
-        ? await invoke<AutomationJob>("update_automation_job", {
-            id: editingAutomationId,
-            ...payload,
-          })
-        : await invoke<AutomationJob>("create_automation_job", payload);
-      setAutomationJobs((prev) => [job, ...prev.filter((item) => item.id !== job.id)]);
-      setSelectedAutomationDate(scheduleDate);
-      setAutomationMonth(new Date(`${scheduleDate}T00:00:00`));
-      setEditingAutomationId(null);
-      setAutomationName("");
-      setAutomationPrompt("");
-      setAutomationDate(scheduleDate);
-      setAutomationTime("");
-      setAutomationRepeat("once");
-      setAutomationEveryAmount(15);
-      setAutomationEveryUnit("minutes");
-      setAutomationEditorOpen(false);
-      setComposerNotice(editingAutomationId ? "Automation updated." : "Automation saved.");
-    } catch (error) {
-      setComposerNotice(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const toggleAutomationJob = async (job: AutomationJob) => {
-    const updated = await invoke<AutomationJob>("set_automation_job_enabled", {
-      id: job.id,
-      enabled: !job.enabled,
-    });
-    setAutomationJobs((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-  };
-
-  const deleteAutomationJob = async (id: number) => {
-    await invoke<boolean>("delete_automation_job", { id });
-    setAutomationJobs((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const selectAutomationDate = (date: Date) => {
-    const key = toLocalDateKey(date);
-    setSelectedAutomationDate(key);
-    setAutomationMonth(new Date(date.getFullYear(), date.getMonth(), 1));
-  };
-
-  const automationDateLabel = (() => {
-    const date = new Date(`${automationDate}T00:00:00`);
-    return Number.isNaN(date.getTime())
-      ? automationDate || "Choose date"
-      : new Intl.DateTimeFormat(undefined, {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        }).format(date);
-  })();
-  const automationTimeParts = parseTimeParts(automationTime || "09:00");
-  const automationPeriod = automationTimeParts.hours >= 12 ? "PM" : "AM";
-  const automationHour12 = automationTimeParts.hours % 12 || 12;
-  const formatAutomationTime = (hours: number, minutes: number) =>
-    `${String((hours + 24) % 24).padStart(2, "0")}:${String((minutes + 60) % 60).padStart(2, "0")}`;
-  const setAutomationTimeFromParts = (hours: number, minutes: number) => {
-    const total = ((hours * 60 + minutes) % 1440 + 1440) % 1440;
-    setAutomationTime(formatAutomationTime(Math.floor(total / 60), total % 60));
-  };
-  const setAutomationTimeFromClock = (hour12: number, minutes: number, period: string) => {
-    const normalizedHour = clampNumber(Math.floor(hour12 || 12), 1, 12);
-    const normalizedMinute = clampNumber(Math.floor(minutes || 0), 0, 59);
-    const hours = period === "PM"
-      ? (normalizedHour % 12) + 12
-      : normalizedHour % 12;
-    setAutomationTimeFromParts(hours, normalizedMinute);
-  };
-  const adjustAutomationTime = (minutesDelta: number) => {
-    const total = automationTimeParts.hours * 60 + automationTimeParts.minutes + minutesDelta;
-    setAutomationTimeFromParts(Math.floor(total / 60), total % 60);
-  };
-  const automationHourOptions = Array.from({ length: 12 }, (_, index) => index + 1);
-  const automationMinuteOptions = Array.from({ length: 60 }, (_, index) => index);
-  const automationEditorMonthDays = (() => {
-    const first = new Date(automationEditorMonth.getFullYear(), automationEditorMonth.getMonth(), 1);
-    const start = new Date(first);
-    const mondayOffset = (first.getDay() + 6) % 7;
-    start.setDate(first.getDate() - mondayOffset);
-    return Array.from({ length: 42 }, (_, index) => {
-      const date = new Date(start);
-      date.setDate(start.getDate() + index);
-      return date;
-    });
-  })();
-  const automationEditorMonthTitle = new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    year: "numeric",
-  }).format(automationEditorMonth);
-  const automationEditorYearOptions = Array.from({ length: 5 }, (_, index) => automationEditorMonth.getFullYear() + index);
-  const automationEditorMonthOptions = Array.from({ length: 12 }, (_, index) => ({
-    index,
-    label: new Intl.DateTimeFormat(undefined, { month: "short" }).format(new Date(automationEditorMonth.getFullYear(), index, 1)),
-  }));
-  const setAutomationEditorDate = (date: Date) => {
-    const key = toLocalDateKey(date);
-    setAutomationDate(key);
-    setAutomationEditorMonth(new Date(date.getFullYear(), date.getMonth(), 1));
-    setAutomationDateMenuOpen(false);
-    setAutomationMonthMenuOpen(false);
-  };
-
   const handleShellToolRequest = async (assistantMessageId: string, replyText: string) => {
     const request = extractShellToolRequest(replyText);
     if (!request?.command?.trim()) {
@@ -935,15 +678,6 @@ function App() {
     );
     setComposerNotice("A system action is waiting for approval.");
     return finalReply;
-  };
-
-  const refreshToolRuns = async () => {
-    try {
-      const runs = await invoke<ToolRunRecord[]>("list_agent_tool_runs", { limit: 10 });
-      setToolRuns(runs);
-    } catch (error) {
-      console.error("Tool activity load error:", error);
-    }
   };
 
   const recordClientToolRun = async (
@@ -1033,117 +767,6 @@ function App() {
     }
 
     return { visibleText, fallbackText };
-  };
-
-  const stopActiveAudio = () => {
-    setIsAudioPlaying(false);
-    const activeSource = activeAudioSourceRef.current;
-    if (activeSource) {
-      activeAudioSourceRef.current = null;
-      activeSource.onended = null;
-      try {
-        activeSource.stop();
-      } catch {
-        // no-op
-      }
-      try {
-        activeSource.disconnect();
-      } catch {
-        // no-op
-      }
-    }
-
-    const activeAudio = activeAudioRef.current;
-    if (activeAudio) {
-      activeAudioRef.current = null;
-      activeAudio.pause();
-      activeAudio.dispatchEvent(new Event("ended"));
-      activeAudio.src = "";
-    }
-
-    if (activeAudioUrlRef.current) {
-      URL.revokeObjectURL(activeAudioUrlRef.current);
-      activeAudioUrlRef.current = null;
-    }
-  };
-
-  const ensureAudioPlaybackUnlocked = async () => {
-    if (typeof window === "undefined") return null;
-    const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextCtor) return null;
-
-    const context = audioContextRef.current ?? new AudioContextCtor();
-    audioContextRef.current = context;
-
-    if (context.state === "suspended") {
-      await context.resume();
-    }
-
-    if (!audioPlaybackUnlockedRef.current) {
-      const buffer = context.createBuffer(1, 1, Math.max(8_000, context.sampleRate));
-      const source = context.createBufferSource();
-      source.buffer = buffer;
-      source.connect(context.destination);
-      source.start(0);
-      source.disconnect();
-      audioPlaybackUnlockedRef.current = true;
-    }
-
-    return context;
-  };
-
-  const playAudioBase64 = async (audioBase64: string, mimeType: string) => {
-    const binaryString = atob(audioBase64);
-    const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
-    stopActiveAudio();
-    await ensureAudioPlaybackUnlocked().catch(() => null);
-
-    const blob = new Blob([bytes], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    activeAudioUrlRef.current = url;
-
-    try {
-      const audio = new Audio(url);
-      audio.preload = "auto";
-      activeAudioRef.current = audio;
-      await new Promise<void>(async (resolve, reject) => {
-        const cleanup = () => {
-          audio.onended = null;
-          audio.onerror = null;
-        };
-        audio.onended = () => {
-          setIsAudioPlaying(false);
-          cleanup();
-          resolve();
-        };
-        audio.onerror = () => {
-          setIsAudioPlaying(false);
-          cleanup();
-          reject(new Error("Playback failed."));
-        };
-        try {
-          setIsAudioPlaying(true);
-          await audio.play();
-        } catch (error) {
-          setIsAudioPlaying(false);
-          cleanup();
-          reject(
-            error instanceof Error
-              ? error
-              : new Error("Playback could not start."),
-          );
-        }
-      });
-    } finally {
-      setIsAudioPlaying(false);
-      if (activeAudioRef.current?.src === url) {
-        activeAudioRef.current = null;
-      }
-      if (activeAudioUrlRef.current === url) {
-        URL.revokeObjectURL(url);
-        activeAudioUrlRef.current = null;
-      }
-    }
   };
 
   const unloadLlmForTask = async (taskType: "voice" | "image") => {
@@ -1881,27 +1504,6 @@ ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
     updateActiveCharacterVoicePath("");
   };
 
-  const handleAddLinkedFolder = async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "Add a folder for future file tools",
-      defaultPath: linkedFolders[0] || undefined,
-    });
-
-    if (typeof selected !== "string") {
-      return;
-    }
-
-    setLinkedFolders((prev) =>
-      prev.includes(selected) ? prev : [...prev, selected],
-    );
-  };
-
-  const handleRemoveLinkedFolder = (folderPath: string) => {
-    setLinkedFolders((prev) => prev.filter((folder) => folder !== folderPath));
-  };
-
   const handleTestTelegram = async () => {
     setTelegramStatus("Checking Telegram...");
     try {
@@ -2051,155 +1653,6 @@ User location: ${localContext}`,
     }
     setLiveConversation(enabled);
   };
-
-  const handleImageSelected = (dataUrl: string, localPath: string | null = null) => {
-    setComposerNotice("");
-    setImage(dataUrl);
-    setImagePath(localPath);
-  };
-
-  const attachImageFromFile = (file: File | null | undefined) => {
-    if (!file || !file.type.startsWith("image/")) {
-      setComposerNotice("Please choose a picture file.");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const localPath = typeof (file as File & { path?: string }).path === "string"
-        ? (file as File & { path?: string }).path ?? null
-        : null;
-      handleImageSelected(event.target?.result as string, localPath);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const chooseImageForComposer = async () => {
-    const selected = await open({
-      directory: false,
-      multiple: false,
-      title: "Choose an image",
-      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif"] }],
-    });
-    if (typeof selected !== "string") return;
-    try {
-      const result = await invoke<LocalImageDataUrl>("read_local_image_data_url", { path: selected });
-      handleImageSelected(result.data_url, result.path);
-    } catch (error) {
-      setComposerNotice(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const revealImageLocation = async (localPath: string) => {
-    try {
-      await invoke("reveal_file_location", { path: localPath });
-    } catch (error) {
-      console.error("Reveal image location error:", error);
-      setComposerNotice(`Image saved at: ${localPath}`);
-    }
-  };
-
-  const refreshTelegramGuests = async () => {
-    try {
-      const guests = await invoke<TelegramGuest[]>("list_telegram_guests");
-      setTelegramGuests(Array.isArray(guests) ? guests : []);
-    } catch (error) {
-      console.error("Telegram guest refresh error:", error);
-    }
-  };
-
-  const addTelegramGuest = () => {
-    const id = telegramGuestDraft?.id.trim() ?? "";
-    if (!id) return;
-    const name = telegramGuestDraft?.name.trim() || id;
-    setTelegramGuests((prev) => {
-      if (prev.some((guest) => guest.id === id)) {
-        return prev.map((guest) => (guest.id === id ? { id, name } : guest));
-      }
-      return [...prev, { id, name }];
-    });
-    setTelegramGuestDraft(null);
-  };
-
-  const removeTelegramGuest = (id: string) => {
-    setTelegramGuests((prev) => prev.filter((guest) => guest.id !== id));
-  };
-
-  const openImageViewer = (url: string, localPath?: string) => {
-    if (!url) return;
-    setImageViewer({ url, localPath, zoom: 1, x: 0, y: 0 });
-  };
-
-  useEffect(() => {
-    if (!imageViewer) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setImageViewer(null);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [imageViewer]);
-
-  const readAvatarImage = (
-    file: File | null | undefined,
-    onReady: (dataUrl: string) => void,
-  ) => {
-    if (!file || !file.type.startsWith("image/")) {
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const originalDataUrl = event.target?.result as string;
-      const imageElement = new Image();
-      imageElement.onload = () => {
-        const maxSide = 512;
-        const scale = Math.min(1, maxSide / Math.max(imageElement.width, imageElement.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(imageElement.width * scale));
-        canvas.height = Math.max(1, Math.round(imageElement.height * scale));
-        const context = canvas.getContext("2d");
-        if (!context) {
-          onReady(originalDataUrl);
-          return;
-        }
-        context.drawImage(imageElement, 0, 0, canvas.width, canvas.height);
-        onReady(canvas.toDataURL("image/jpeg", 0.82));
-      };
-      imageElement.onerror = () => onReady(originalDataUrl);
-      imageElement.src = originalDataUrl;
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const compressAvatarDataUrl = (dataUrl: string) =>
-    new Promise<string>((resolve) => {
-      if (!/^data:image\//i.test(dataUrl) || dataUrl.length < 220_000) {
-        resolve(dataUrl);
-        return;
-      }
-
-      const imageElement = new Image();
-      imageElement.onload = () => {
-        const maxSide = 512;
-        const scale = Math.min(1, maxSide / Math.max(imageElement.width, imageElement.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(imageElement.width * scale));
-        canvas.height = Math.max(1, Math.round(imageElement.height * scale));
-        const context = canvas.getContext("2d");
-        if (!context) {
-          resolve(dataUrl);
-          return;
-        }
-        context.fillStyle = "#131314";
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(imageElement, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.82));
-      };
-      imageElement.onerror = () => resolve(dataUrl);
-      imageElement.src = dataUrl;
-    });
 
   const personalityMemoryKind = (id = selectedPersonalityId) => `personality:${id}`;
 
@@ -2624,8 +2077,7 @@ User location: ${localContext}`,
     const newMessages: ChatMessage[] = [...messages, userMessage];
     setMessages((prev) => [...prev, { id: assistantMessageId, role: "assistant", content: "" }]);
     if (attachedImage && !options.imageDataUrl) {
-      setImage(null);
-      setImagePath(null);
+      clearImage();
     }
     setIsStreaming(true);
     setBrainStatus("Loading");
@@ -3128,8 +2580,7 @@ ${personalityMemory.trim()}`
       if (liveConversationRef.current && naturalReply.trim()) {
         autoSpeechEligibleAssistantIdsRef.current.add(assistantMessageId);
       }
-      setImage(null);
-      setImagePath(null);
+      clearImage();
       setComposerNotice("");
       recordClientToolRun(
         "generate_image",
@@ -3449,18 +2900,6 @@ ${personalityMemory.trim()}`
   }, []);
 
   useEffect(() => {
-    return () => {
-      stopActiveAudio();
-      const context = audioContextRef.current;
-      audioContextRef.current = null;
-      activeAudioSourceRef.current = null;
-      if (context) {
-        context.close().catch(() => undefined);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
     liveConversationRef.current = liveConversation;
     if (!liveConversation) {
       autoSpeechEligibleAssistantIdsRef.current.clear();
@@ -3474,13 +2913,6 @@ ${personalityMemory.trim()}`
     if (!telegramBotToken.trim()) return;
     handleStartTelegram().catch((error) => console.error("Telegram auto-start error:", error));
   }, [settingsLoaded, telegramBotToken]);
-
-  useEffect(() => {
-    if (!settingsLoaded || !telegramRunning) return;
-    refreshTelegramGuests();
-    const handle = window.setInterval(refreshTelegramGuests, 5000);
-    return () => window.clearInterval(handle);
-  }, [settingsLoaded, telegramRunning]);
 
   useEffect(() => {
     let disposed = false;
@@ -4106,46 +3538,6 @@ ${personalityMemory.trim()}`
     };
   }, []);
 
-  const refreshVoiceSamples = useCallback(async () => {
-    const samples = await invoke<VoiceSample[]>("list_voice_samples", {
-      folder: voiceFolder || null,
-    });
-
-    setVoiceSamples(samples);
-
-    if (!selectedVoicePath && samples.length > 0) {
-      updateActiveCharacterVoicePath(samples[0].path);
-      return;
-    }
-
-    if (
-      selectedVoicePath &&
-      !samples.some((sample) => sample.path === selectedVoicePath)
-    ) {
-      updateActiveCharacterVoicePath(samples[0]?.path ?? "");
-    }
-  }, [selectedVoicePath, voiceFolder]);
-
-  useEffect(() => {
-    if (!settingsLoaded) {
-      return;
-    }
-
-    refreshVoiceSamples().catch((error) => {
-      console.error("Voice sample load error:", error);
-    });
-  }, [settingsLoaded, refreshVoiceSamples]);
-
-  useEffect(() => {
-    if (!settingsLoaded || (!personalityProfileOpen && !userProfileOpen)) {
-      return;
-    }
-
-    refreshVoiceSamples().catch((error) => {
-      console.error("Voice sample refresh error:", error);
-    });
-  }, [settingsLoaded, personalityProfileOpen, userProfileOpen, refreshVoiceSamples]);
-
   useEffect(() => {
     if (!settingsLoaded || !settingsReadyForSave) {
       return;
@@ -4164,22 +3556,6 @@ ${personalityMemory.trim()}`
       updateActiveCharacterVoicePath(voiceSamples[0].path);
     }
   }, [settingsLoaded, selectedVoicePath, voiceSamples]);
-
-  useEffect(() => {
-    if (!personalityProfileOpen) return;
-    const handle = window.setTimeout(() => {
-      selectedVoiceRowRef.current?.scrollIntoView({ block: "center" });
-    }, 80);
-    return () => window.clearTimeout(handle);
-  }, [personalityProfileOpen, selectedVoicePath, voiceSamples.length]);
-
-  useEffect(() => {
-    if (!userProfileOpen) return;
-    const handle = window.setTimeout(() => {
-      selectedUserVoiceRowRef.current?.scrollIntoView({ block: "center" });
-    }, 80);
-    return () => window.clearTimeout(handle);
-  }, [userProfileOpen, selectedUserVoicePath, voiceSamples.length]);
 
   useEffect(() => {
     if (messages.length === lastMessageCountRef.current) {
@@ -4254,25 +3630,6 @@ ${personalityMemory.trim()}`
   }, [messages.length, selectedPersonalityId]);
 
   useEffect(() => {
-    const onResize = () => {
-      const sideWidth = 292;
-      const compact = window.innerWidth - sideWidth * 2 < 482;
-      setIsCompactLayout(compact);
-      if (compact) {
-        setLeftPanelOpen(false);
-        setRightPanelOpen(false);
-      } else {
-        setLeftPanelOpen(true);
-        setRightPanelOpen(true);
-      }
-    };
-
-    onResize();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  useEffect(() => {
     const closeOpenDropdowns = (event: PointerEvent) => {
       const target = event.target as Element | null;
       if (target?.closest("[data-dropdown-root]")) {
@@ -4305,24 +3662,6 @@ ${personalityMemory.trim()}`
   }, [settingsLoaded, modelFolder]);
 
   useEffect(() => {
-    const updateDateTime = () => {
-      setDateTimeLine(
-        new Intl.DateTimeFormat(undefined, {
-          weekday: "long",
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        }).format(new Date()),
-      );
-    };
-    updateDateTime();
-    const handle = window.setInterval(updateDateTime, 60_000);
-    return () => window.clearInterval(handle);
-  }, []);
-
-  useEffect(() => {
     if (engineStatus !== "ready" || !pendingAutoLoadPath) {
       return;
     }
@@ -4332,25 +3671,9 @@ ${personalityMemory.trim()}`
     );
   }, [engineStatus, pendingAutoLoadPath]);
 
-  const automationMonthDays = buildMonthDays(automationMonth);
-  const activeAutomationCount = automationJobs.filter((job) => job.enabled).length;
-  const recentAutomationJobs = [...automationJobs]
-    .sort((a, b) => {
-      if (a.created_at !== b.created_at) return b.created_at - a.created_at;
-      return b.id - a.id;
-    })
-    .slice(0, 10);
   const selectedGoogleEvents = googleCalendarEvents.filter((event) =>
     googleEventMatchesDate(event, selectedAutomationDate),
   );
-  const selectedAutomationDateObj = new Date(`${selectedAutomationDate}T00:00:00`);
-  const selectedAutomationLabel = Number.isNaN(selectedAutomationDateObj.getTime())
-    ? selectedAutomationDate
-    : new Intl.DateTimeFormat(undefined, {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-      }).format(selectedAutomationDateObj);
   const currentModelName =
     currentModelEntry?.name || selectedModel || (selectedModelPath ? "Selected brain" : "No model selected");
   const selectedPersonalityPreset =
@@ -4358,11 +3681,6 @@ ${personalityMemory.trim()}`
   const assistantAvatar = selectedPersonalityPreset?.avatar || personalityAvatar || "";
   const hardwareGpuLabel = systemInfo?.gpu_details.replace(/\s*\(([^)]+)\)\s*$/, " - $1") ?? "";
   const hardwareRamLabel = systemInfo ? `${(systemInfo.total_ram_mb / 1024).toFixed(1)} GB` : "Unknown";
-  const detectedSetupTier = setupTierFromSystem(systemInfo);
-  const activeSetupTier = setupTierOverride ?? installedSetupTierFromModel(selectedModelPath) ?? detectedSetupTier;
-  const setupHasMissingFiles = Boolean(setupCatalog?.parts.some((part) => !part.installed));
-  const firstStartupSetupNeeded = setupScreenOpen || (!setupCompleted && !selectedModelPath);
-  const activeSetupPartKey = setupProgress?.part_key || "";
   const conversationLogoClass = messages.length === 0
     ? "hidden"
     : "pointer-events-none absolute left-1/2 top-1/2 z-0 w-[min(52vw,360px)] -translate-x-1/2 -translate-y-1/2 opacity-[0.045]";
@@ -4381,15 +3699,6 @@ ${personalityMemory.trim()}`
     (voiceSetupStatus.state !== "idle" && !voiceSetupStatus.ready ? `Voice input: ${voiceSetupStatus.message || "preparing"}` : "") ||
     (engineStatus === "downloading" ? "Engine: preparing model runtime" : "") ||
     (selectedModelPath ? `Ready: ${currentModelName}` : "No model loaded");
-
-  useEffect(() => {
-    if (!settingsLoaded || !setupCompleted || setupScreenOpen || !setupCatalog || !setupHasMissingFiles || setupRepairPromptedRef.current) {
-      return;
-    }
-    setupRepairPromptedRef.current = true;
-    setSetupNotice("Some local AI files are missing. Galaxy can download only the missing parts and keep existing files.");
-    setSetupScreenOpen(true);
-  }, [settingsLoaded, setupCompleted, setupScreenOpen, setupCatalog, setupHasMissingFiles]);
 
   useEffect(() => {
     if (!settingsLoaded || !setupScreenOpen || !setupCatalog || setupCatalog.tier !== activeSetupTier) {
@@ -4477,15 +3786,6 @@ ${personalityMemory.trim()}`
     }
   };
 
-  const resetSamplingDefaults = () => {
-    setSamplingTemperature(DEFAULT_SETTINGS.sampling_temperature);
-    setTopK(DEFAULT_SETTINGS.top_k);
-    setTopP(DEFAULT_SETTINGS.top_p);
-    setMinP(DEFAULT_SETTINGS.min_p);
-    setRepeatLastN(DEFAULT_SETTINGS.repeat_last_n);
-    setRepeatPenalty(DEFAULT_SETTINGS.repeat_penalty);
-  };
-
   useEffect(() => {
     const node = composerInputRef.current;
     if (!node) return;
@@ -4512,8 +3812,7 @@ ${personalityMemory.trim()}`
     }
     loadChatSessionForPersonality(preset.id);
     setComposerText("");
-    setImage(null);
-    setImagePath(null);
+    clearImage();
     setComposerNotice("");
   };
 
@@ -4665,8 +3964,109 @@ ${personalityMemory.trim()}`
     });
   };
 
-  const brainSection = (
-    <BrainSection
+  const leftPanelContent = (
+    <LeftPanelContent
+      selectedUserProfileId={selectedUserProfileId}
+      selectedUserName={selectedUserProfile?.name || "You"}
+      userAvatar={userAvatar}
+      userName={userName}
+      userProfiles={userProfiles}
+      userProfileMenuOpen={userProfileMenuOpen}
+      calendarOpen={calendarOpen}
+      automationMonth={automationMonth}
+      automationMonthDays={automationMonthDays}
+      selectedAutomationDate={selectedAutomationDate}
+      selectedAutomationDateObj={selectedAutomationDateObj}
+      selectedAutomationLabel={selectedAutomationLabel}
+      googleCalendarEvents={googleCalendarEvents}
+      selectedGoogleEvents={selectedGoogleEvents}
+      automationOpen={automationOpen}
+      activeAutomationCount={activeAutomationCount}
+      automationJobs={automationJobs}
+      recentAutomationJobs={recentAutomationJobs}
+      workspaceOpen={workspaceOpen}
+      linkedFolders={linkedFolders}
+      imageStudioOpen={imageStudioOpen}
+      imageStudioDrawing={imageStudioDrawing}
+      quickImagePrompt={quickImagePrompt}
+      imageWidth={imageWidth}
+      imageHeight={imageHeight}
+      isGeneratingImage={isGeneratingImage}
+      telegramPanelOpen={telegramPanelOpen}
+      telegramRunning={telegramRunning}
+      telegramBotToken={telegramBotToken}
+      telegramOwnerId={telegramOwnerId}
+      telegramStatus={telegramStatus}
+      telegramGuests={telegramGuests}
+      telegramGuestDraft={telegramGuestDraft}
+      googlePanelOpen={googlePanelOpen}
+      googleStatus={googleStatus}
+      googleNotice={googleNotice}
+      googleBusy={googleBusy}
+      googleClientId={googleClientId}
+      googleClientSecret={googleClientSecret}
+      googleRedirectUri={googleRedirectUri}
+      onOpenUserProfile={openUserProfile}
+      onToggleUserMenu={() => {
+        const next = !userProfileMenuOpen;
+        setModelMenuOpen(false);
+        setPersonalityMenuOpen(false);
+        setQuickModelMenuOpen(false);
+        setThemePickerOpen(false);
+        setUserProfileMenuOpen(next);
+      }}
+      onSelectUserProfile={selectUserProfile}
+      onCreateUserProfile={createUserProfile}
+      onToggleCalendar={setCalendarOpen}
+      onAutomationMonthChange={setAutomationMonth}
+      onSelectAutomationDate={selectAutomationDate}
+      onSelectGoogleEvent={setSelectedGoogleEvent}
+      onDeleteGoogleEvent={openDeleteGoogleEventConfirm}
+      onToggleAutomation={setAutomationOpen}
+      onAddAutomation={() => openAutomationEditor()}
+      onEditAutomation={openAutomationEditor}
+      onToggleAutomationJob={(job) => toggleAutomationJob(job).catch((error) => console.error("Automation toggle error:", error))}
+      onDeleteAutomationJob={(id) => deleteAutomationJob(id).catch((error) => console.error("Automation delete error:", error))}
+      onToggleWorkspace={setWorkspaceOpen}
+      onAddLinkedFolder={() => handleAddLinkedFolder().catch((error) => console.error(error))}
+      onRemoveLinkedFolder={handleRemoveLinkedFolder}
+      onToggleImageStudio={setImageStudioOpen}
+      onQuickImagePromptChange={setQuickImagePrompt}
+      onGenerateQuickImage={() => void handleQuickImageGenerate()}
+      onImageWidthChange={setImageWidth}
+      onImageHeightChange={setImageHeight}
+      onToggleTelegram={setTelegramPanelOpen}
+      onTelegramBotTokenChange={setTelegramBotToken}
+      onTelegramOwnerIdChange={setTelegramOwnerId}
+      onTelegramGuestDraftChange={setTelegramGuestDraft}
+      onSaveTelegramGuest={addTelegramGuest}
+      onRemoveTelegramGuest={removeTelegramGuest}
+      onTestTelegram={() => handleTestTelegram().catch((error) => console.error("Telegram error:", error))}
+      onStartStopTelegram={() =>
+        (telegramRunning ? handleStopTelegram() : handleStartTelegram()).catch((error) =>
+          console.error(telegramRunning ? "Telegram stop error:" : "Telegram start error:", error),
+        )
+      }
+      onToggleGoogle={setGooglePanelOpen}
+      onGoogleClientIdChange={setGoogleClientId}
+      onGoogleClientSecretChange={setGoogleClientSecret}
+      onGoogleRedirectUriChange={setGoogleRedirectUri}
+      onConnectToggleGoogle={() =>
+        (googleStatus.connected ? disconnectGoogle() : connectGoogle()).catch((error) =>
+          console.error(googleStatus.connected ? "Google disconnect error:" : "Google connect error:", error),
+        )
+      }
+      onRefreshGoogleCalendar={() => refreshGoogleCalendarEvents().catch((error) => console.error("Google Calendar refresh error:", error))}
+    />
+  );
+
+  const rightPanelContent = (
+    <RightPanelContent
+      selectedPersonalityId={selectedPersonalityId}
+      selectedPersonalityPreset={selectedPersonalityPreset}
+      personalityAvatar={personalityAvatar}
+      personalityPresets={personalityPresets}
+      personalityMenuOpen={personalityMenuOpen}
       brainStatus={brainStatus}
       modelMenuOpen={modelMenuOpen}
       availableModels={availableModels}
@@ -4676,6 +4076,54 @@ ${personalityMemory.trim()}`
       theme={selectedThemeSwatch}
       isAudioPlaying={isAudioPlaying}
       waveformProcessing={waveformProcessing}
+      clearMemoryOpen={clearMemoryConfirmOpen}
+      clearSessionToo={clearSessionToo}
+      userProfileOpen={userProfileOpen}
+      userName={userName}
+      userAvatar={userAvatar}
+      userDescription={userDescription}
+      userProfiles={userProfiles}
+      selectedUserProfile={selectedUserProfile}
+      selectedUserVoicePath={selectedUserVoicePath}
+      selectedUserVoiceSample={selectedUserVoiceSample}
+      deleteUserProfileConfirmOpen={deleteUserProfileConfirmOpen}
+      personalityProfileOpen={personalityProfileOpen}
+      personalityNameDraft={personalityNameDraft}
+      personality={personality}
+      memorySize={memorySize}
+      replyLength={replyLength}
+      minContextSize={MIN_CHAT_CONTEXT_SIZE}
+      selectedVoicePath={selectedVoicePath}
+      selectedVoiceSample={selectedVoiceSample}
+      deletePersonalityConfirmOpen={deletePersonalityConfirmOpen}
+      voiceFolder={voiceFolder}
+      voiceSamples={voiceSamples}
+      previewingVoicePath={previewingVoicePath}
+      selectedUserVoiceRowRef={selectedUserVoiceRowRef}
+      selectedVoiceRowRef={selectedVoiceRowRef}
+      toolRunsOpen={toolRunsOpen}
+      toolRuns={toolRuns}
+      samplingOpen={samplingOpen}
+      samplingTemperature={samplingTemperature}
+      topK={topK}
+      topP={topP}
+      minP={minP}
+      repeatLastN={repeatLastN}
+      repeatPenalty={repeatPenalty}
+      onOpenPersonalityProfile={openPersonalityProfile}
+      onTogglePersonalityMenu={() => {
+        const next = !personalityMenuOpen;
+        setModelMenuOpen(false);
+        setUserProfileMenuOpen(false);
+        setQuickModelMenuOpen(false);
+        setThemePickerOpen(false);
+        setPersonalityMenuOpen(next);
+      }}
+      onSelectPersonality={(id) => {
+        selectPersonalityPreset(id);
+        setPersonalityMenuOpen(false);
+      }}
+      onCreatePersonality={saveCurrentPersonalityPreset}
       onChooseModelFolder={() => handleChooseModelFolder().catch((error) => console.error("Folder error:", error))}
       onToggleModelMenu={() => {
         const next = !modelMenuOpen;
@@ -4690,677 +4138,70 @@ ${personalityMemory.trim()}`
         setSelectedModelPath(path);
         loadModelPath(path).catch((error) => console.error("Model select error:", error));
       }}
+      onToggleClearSession={setClearSessionToo}
+      onConfirmClearMemory={() => handleClearPersonalityMemory().catch(console.error)}
+      onCancelClearMemory={() => {
+        setClearMemoryConfirmOpen(false);
+        setClearSessionToo(false);
+      }}
+      onCloseUserProfile={() => setUserProfileOpen(false)}
+      onChooseUserAvatar={() => userAvatarPickerRef.current?.click()}
+      onUserNameChange={setUserName}
+      onUserDescriptionChange={setUserDescription}
+      onChooseVoiceFolder={() => handleChooseVoiceFolder().catch((error) => console.error("Voice folder error:", error))}
+      onPreviewUserVoice={(sample) => void previewUserVoiceSample(sample)}
+      onSelectUserVoice={updateActiveUserVoicePath}
+      onToggleUserAutoSpeech={() => updateActiveUserProfile({ auto_speech: !(selectedUserProfile?.auto_speech ?? true) })}
+      onRequestDeleteUser={() => {
+        setUserProfileOpen(false);
+        setDeleteUserProfileConfirmOpen(true);
+      }}
+      onSaveUserProfile={saveActiveUserProfile}
+      onConfirmDeleteUser={() => {
+        deleteSelectedUserProfile();
+        setDeleteUserProfileConfirmOpen(false);
+      }}
+      onCancelDeleteUser={() => setDeleteUserProfileConfirmOpen(false)}
+      onClosePersonalityProfile={() => setPersonalityProfileOpen(false)}
+      onChoosePersonalityAvatar={() => {
+        avatarTargetPersonalityIdRef.current = selectedPersonalityId;
+        personalityAvatarPickerRef.current?.click();
+      }}
+      onPersonalityNameChange={setPersonalityNameDraft}
+      onPersonalityChange={setPersonality}
+      onPreviewCharacterVoice={(sample) => void previewVoiceSample(sample)}
+      onSelectCharacterVoice={updateActiveCharacterVoicePath}
+      onMemorySizeChange={setMemorySize}
+      onReplyLengthChange={setReplyLength}
+      onRequestDeletePersonality={() => {
+        setPersonalityProfileOpen(false);
+        setDeletePersonalityConfirmOpen(true);
+      }}
+      onRequestClearPersonalityMemory={() => {
+        setPersonalityProfileOpen(false);
+        setClearMemoryConfirmOpen(true);
+      }}
+      onSavePersonality={() => {
+        updateSelectedPersonalityPreset();
+        setPersonalityProfileOpen(false);
+      }}
+      onConfirmDeletePersonality={() => {
+        deleteSelectedPersonalityPreset();
+        setDeletePersonalityConfirmOpen(false);
+      }}
+      onCancelDeletePersonality={() => setDeletePersonalityConfirmOpen(false)}
+      onToggleToolRuns={setToolRunsOpen}
+      onRefreshToolRuns={() => refreshToolRuns().catch((error) => console.error("Tool activity refresh error:", error))}
+      onToggleSampling={setSamplingOpen}
+      onResetSampling={resetSamplingDefaults}
+      onTemperatureChange={setSamplingTemperature}
+      onTopKChange={setTopK}
+      onTopPChange={setTopP}
+      onMinPChange={setMinP}
+      onRepeatLastNChange={setRepeatLastN}
+      onRepeatPenaltyChange={setRepeatPenalty}
     />
   );
-
-  const workspaceSection = (
-    <WorkspaceSection
-      open={workspaceOpen}
-      linkedFolders={linkedFolders}
-      onToggle={setWorkspaceOpen}
-      onAdd={() => handleAddLinkedFolder().catch((error) => console.error(error))}
-      onRemove={handleRemoveLinkedFolder}
-    />
-  );
-
-  const imageStudioSection = (
-    <ImageStudioSection
-      open={imageStudioOpen}
-      drawing={imageStudioDrawing}
-      quickPrompt={quickImagePrompt}
-      imageWidth={imageWidth}
-      imageHeight={imageHeight}
-      isGeneratingImage={isGeneratingImage}
-      onToggle={setImageStudioOpen}
-      onQuickPromptChange={setQuickImagePrompt}
-      onGenerate={() => void handleQuickImageGenerate()}
-      onImageWidthChange={setImageWidth}
-      onImageHeightChange={setImageHeight}
-    />
-  );
-
-  const automationSection = (
-    <AutomationSection
-      open={automationOpen}
-      activeCount={activeAutomationCount}
-      jobs={automationJobs}
-      recentJobs={recentAutomationJobs}
-      selectedDate={selectedAutomationDate}
-      onToggle={setAutomationOpen}
-      onAdd={() => openAutomationEditor()}
-      onEdit={openAutomationEditor}
-      onToggleJob={(job) => toggleAutomationJob(job).catch((error) => console.error("Automation toggle error:", error))}
-      onDelete={(id) => deleteAutomationJob(id).catch((error) => console.error("Automation delete error:", error))}
-    />
-  );
-
-  const leftPanelContent = (
-    <div className="space-y-3 p-3">
-      <ProfilePickerSection
-        title="User"
-        selectedId={selectedUserProfileId}
-        selectedName={selectedUserProfile?.name || "You"}
-        selectedAvatar={userAvatar}
-        selectedFallback={userName || "You"}
-        options={userProfiles}
-        menuOpen={userProfileMenuOpen}
-        createTitle="Create user profile"
-        avatarTitle="Edit user profile"
-        onAvatarClick={openUserProfile}
-        onToggleMenu={() => {
-          const next = !userProfileMenuOpen;
-          setModelMenuOpen(false);
-          setPersonalityMenuOpen(false);
-          setQuickModelMenuOpen(false);
-          setThemePickerOpen(false);
-          setUserProfileMenuOpen(next);
-        }}
-        onSelect={selectUserProfile}
-        onCreate={createUserProfile}
-      />
-
-      <CalendarSection
-        open={calendarOpen}
-        month={automationMonth}
-        monthDays={automationMonthDays}
-        selectedDate={selectedAutomationDate}
-        selectedDateObj={selectedAutomationDateObj}
-        selectedLabel={selectedAutomationLabel}
-        googleEvents={googleCalendarEvents}
-        selectedGoogleEvents={selectedGoogleEvents}
-        onToggle={setCalendarOpen}
-        onMonthChange={setAutomationMonth}
-        onSelectDate={selectAutomationDate}
-        onSelectGoogleEvent={setSelectedGoogleEvent}
-        onDeleteGoogleEvent={openDeleteGoogleEventConfirm}
-      />
-      {automationSection}
-      {workspaceSection}
-      {imageStudioSection}
-
-      <TelegramSection
-        open={telegramPanelOpen}
-        running={telegramRunning}
-        botToken={telegramBotToken}
-        ownerName={userName.trim() || "Owner"}
-        ownerId={telegramOwnerId}
-        status={telegramStatus}
-        guests={telegramGuests}
-        guestDraft={telegramGuestDraft}
-        onToggle={setTelegramPanelOpen}
-        onBotTokenChange={setTelegramBotToken}
-        onOwnerIdChange={setTelegramOwnerId}
-        onGuestDraftChange={setTelegramGuestDraft}
-        onSaveGuest={addTelegramGuest}
-        onRemoveGuest={removeTelegramGuest}
-        onTest={() => handleTestTelegram().catch((error) => console.error("Telegram error:", error))}
-        onStartStop={() =>
-          (telegramRunning ? handleStopTelegram() : handleStartTelegram()).catch((error) =>
-            console.error(telegramRunning ? "Telegram stop error:" : "Telegram start error:", error),
-          )
-        }
-      />
-      <GoogleSection
-        open={googlePanelOpen}
-        status={googleStatus}
-        notice={googleNotice}
-        busy={googleBusy}
-        clientId={googleClientId}
-        clientSecret={googleClientSecret}
-        redirectUri={googleRedirectUri}
-        onToggle={setGooglePanelOpen}
-        onClientIdChange={setGoogleClientId}
-        onClientSecretChange={setGoogleClientSecret}
-        onRedirectUriChange={setGoogleRedirectUri}
-        onConnectToggle={() =>
-          (googleStatus.connected ? disconnectGoogle() : connectGoogle()).catch((error) =>
-            console.error(googleStatus.connected ? "Google disconnect error:" : "Google connect error:", error),
-          )
-        }
-        onRefreshCalendar={() => refreshGoogleCalendarEvents().catch((error) => console.error("Google Calendar refresh error:", error))}
-      />
-    </div>
-  );
-
-  const toolActivitySection = (
-    <ToolActivitySection
-      open={toolRunsOpen}
-      toolRuns={toolRuns}
-      onToggle={setToolRunsOpen}
-      onRefresh={() => refreshToolRuns().catch((error) => console.error("Tool activity refresh error:", error))}
-    />
-  );
-
-  const rightPanelContent = (
-    <div className="space-y-3 p-3">
-      <ProfilePickerSection
-        title="Personality"
-        selectedId={selectedPersonalityId}
-        selectedName={selectedPersonalityPreset?.name ?? "Choose personality"}
-        selectedAvatar={selectedPersonalityPreset?.avatar || personalityAvatar}
-        selectedFallback={selectedPersonalityPreset?.name || "AI"}
-        options={personalityPresets}
-        menuOpen={personalityMenuOpen}
-        createTitle="Create assistant profile"
-        avatarTitle="Edit character profile"
-        onAvatarClick={openPersonalityProfile}
-        onToggleMenu={() => {
-          const next = !personalityMenuOpen;
-          setModelMenuOpen(false);
-          setUserProfileMenuOpen(false);
-          setQuickModelMenuOpen(false);
-          setThemePickerOpen(false);
-          setPersonalityMenuOpen(next);
-        }}
-        onSelect={(id) => {
-          selectPersonalityPreset(id);
-          setPersonalityMenuOpen(false);
-        }}
-        onCreate={saveCurrentPersonalityPreset}
-      />
-
-      {brainSection}
-
-      {/* Clear Memory Confirmation Modal */}
-      {clearMemoryConfirmOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setClearMemoryConfirmOpen(false)}>
-          <div className="mx-4 w-full max-w-sm rounded-[24px] border border-[#282a2c] bg-[#1e1f20] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-3 mb-4">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-300">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-              </span>
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-300">Clear Memory</div>
-                <div className="text-sm font-bold text-[#f1f3f4]">Clear Memory</div>
-                <div className="text-xs text-[#9aa0a6]">
-                  {selectedPersonalityPreset?.name ?? "This character"}
-                </div>
-              </div>
-            </div>
-            <p className="text-sm leading-6 text-[#c4c7c5] mb-4">
-              This will erase everything this character has learned about your preferences and style. The character description itself stays untouched.
-            </p>
-            <label className="flex items-center gap-2.5 rounded-xl bg-[#131314] px-3 py-2.5 mb-5 cursor-pointer ring-1 ring-[#282a2c]">
-              <input
-                type="checkbox"
-                checked={clearSessionToo}
-                onChange={(e) => setClearSessionToo(e.target.checked)}
-                className="h-4 w-4 rounded accent-[var(--accent-color)]"
-              />
-              <span className="text-xs text-[#c4c7c5]">Also clear chat history for this character</span>
-            </label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => handleClearPersonalityMemory().catch(console.error)}
-                className="flex-1 rounded-2xl border py-2.5 text-xs font-bold transition hover:brightness-110"
-                style={{
-                  borderColor: "#8a6722",
-                  backgroundColor: "#4d3a16",
-                  color: "#f3d274",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
-                }}
-              >
-                Clear Memory
-              </button>
-              <button
-                type="button"
-                onClick={() => { setClearMemoryConfirmOpen(false); setClearSessionToo(false); }}
-                className="flex-1 rounded-2xl border border-[#282a2c] bg-[#131314] py-2.5 text-xs font-bold text-[#e3e3e3] transition hover:bg-[#282a2c]"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {userProfileOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={() => setUserProfileOpen(false)}>
-          <div className="max-h-[92vh] w-full max-w-[780px] overflow-hidden rounded-[24px] border border-[#282a2c] bg-[#1e1f20] shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between gap-3 border-b border-[#282a2c] px-5 py-4">
-              <div className="min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--accent-color)" }}>User Profile</div>
-                <div className="mt-1 truncate text-lg font-bold text-[#f1f3f4]">{userName.trim() || "You"}</div>
-              </div>
-              <IconButton title="Close profile editor" onClick={() => setUserProfileOpen(false)}>
-                <CloseIcon />
-              </IconButton>
-            </div>
-
-            <div className="grid min-h-0 gap-4 px-5 py-4 md:h-[620px] md:grid-cols-[minmax(0,0.9fr)_minmax(320px,1fr)]">
-              <div className="flex min-h-0 flex-col gap-3 rounded-2xl border border-[#282a2c] bg-[#1b1c1e] p-4">
-                <div className="flex justify-center">
-                  <button
-                    type="button"
-                    onClick={() => userAvatarPickerRef.current?.click()}
-                    className="group relative h-40 w-40 shrink-0 overflow-hidden rounded-[20px] ring-1 ring-[#282a2c]"
-                    title="Change avatar"
-                  >
-                    <AvatarImage src={userAvatar} fallback={userName || "You"} className="h-full w-full rounded-[20px]" />
-                    <span className="absolute inset-0 hidden items-center justify-center bg-black/45 text-[#e3e3e3] group-hover:flex">
-                      <CameraIcon className="h-6 w-6" />
-                    </span>
-                  </button>
-                </div>
-
-                <label className="block">
-                  <span className="mb-2 block text-xs font-semibold text-[#c4c7c5]">Profile name</span>
-                  <input
-                    value={userName}
-                    onChange={(event) => setUserName(event.target.value)}
-                    className="h-11 w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 text-sm font-semibold text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]"
-                    placeholder="Your name"
-                  />
-                </label>
-
-                <label className="flex min-h-0 flex-1 flex-col">
-                  <span className="mb-2 block text-xs font-semibold text-[#c4c7c5]">About you</span>
-                  <textarea
-                    value={userDescription}
-                    onChange={(event) => setUserDescription(event.target.value)}
-                    rows={8}
-                    className="min-h-[250px] flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-3 text-sm leading-6 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]"
-                    placeholder="Details the assistant should remember about you."
-                  />
-                </label>
-              </div>
-
-              <div className="flex min-h-0 flex-col rounded-2xl border border-[#282a2c] bg-[#0f1011] p-3">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-[#e3e3e3]">User voice</div>
-                  <div className="shrink-0 text-xs font-semibold text-[#c4c7c5]">{voiceSamples.length} samples</div>
-                </div>
-
-                <div className="mb-3 flex items-center gap-2 rounded-2xl border border-[#282a2c] bg-[#131314] px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9aa0a6]">Voice folder</div>
-                    <div className="mt-1 truncate text-xs text-[#c4c7c5]" title={voiceFolder || "Default voices folder"}>
-                      {voiceFolder || "Default voices folder"}
-                    </div>
-                  </div>
-                  <IconButton title="Choose voice samples folder" onClick={() => handleChooseVoiceFolder().catch((error) => console.error("Voice folder error:", error))} size="sm">
-                    <FolderIcon className="h-4 w-4" />
-                  </IconButton>
-                </div>
-
-                <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="font-semibold text-[#c4c7c5]">Selected voice sample</span>
-                  {selectedUserVoiceSample && <span className="max-w-[160px] truncate text-[var(--accent-color)]">{selectedUserVoiceSample.label}</span>}
-                </div>
-                <div className="min-h-0 flex-1 overflow-hidden border-t border-[var(--accent-soft-strong)] pt-1">
-                  <div className="profile-voice-list h-full space-y-1.5 overflow-y-auto pr-3" data-voice-menu>
-                    {voiceSamples.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-[#282a2c] px-3 py-8 text-center text-sm text-[#c4c7c5]">No voice samples found.</div>
-                    ) : (
-                      voiceSamples.map((sample) => {
-                        const selected = selectedUserVoicePath === sample.path;
-                        const previewing = previewingVoicePath === sample.path;
-                        return (
-                          <div
-                            key={sample.path}
-                            ref={selected ? selectedUserVoiceRowRef : undefined}
-                            data-selected-voice={selected ? "true" : undefined}
-                            className={`flex items-center gap-2 rounded-xl px-2 py-1.5 transition ${selected ? "bg-[var(--accent-soft)] ring-1 ring-[var(--accent-soft-strong)]" : "hover:bg-[#1e1f20]"}`}
-                          >
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                previewUserVoiceSample(sample);
-                              }}
-                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#282a2c] bg-[#1e1f20] text-[var(--accent-color)] transition hover:bg-[#282a2c]"
-                              title={`Preview ${sample.label}`}
-                            >
-                              {previewing ? <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent-color)]" /> : <PlayIcon />}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => updateActiveUserVoicePath(sample.path)}
-                              className="min-w-0 flex-1 text-left"
-                              title={sample.name}
-                            >
-                              <div className="truncate text-[13px] font-semibold text-[#e3e3e3]">{sample.label}</div>
-                              <div className="truncate text-[10px] leading-4 text-[#9aa0a6]">Preview</div>
-                            </button>
-                            <span className={`h-2 w-2 shrink-0 rounded-full ${selected ? "bg-[var(--accent-color)]" : "bg-[#3a3b3d]"}`} />
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[#282a2c] px-5 py-2">
-              <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-[#c4c7c5]" title="Play your messages with this profile voice when main Auto voice is on">
-                <button
-                  type="button"
-                  onClick={() => updateActiveUserProfile({ auto_speech: !(selectedUserProfile?.auto_speech ?? true) })}
-                  className={`relative h-5 w-9 shrink-0 rounded-full transition ${(selectedUserProfile?.auto_speech ?? true) ? "bg-[var(--accent-color)]" : "bg-[#3a3b3d]"}`}
-                  aria-pressed={selectedUserProfile?.auto_speech ?? true}
-                >
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-[#0f1011] transition ${(selectedUserProfile?.auto_speech ?? true) ? "left-[18px]" : "left-0.5"}`} />
-                </button>
-                <span className="truncate">Auto speech</span>
-              </label>
-              <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                disabled={userProfiles.length <= 1}
-                onClick={() => {
-                  setUserProfileOpen(false);
-                  setDeleteUserProfileConfirmOpen(true);
-                }}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#282a2c] bg-[#131314] text-rose-200 transition hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-40"
-                title="Delete user profile"
-              >
-                <TrashIcon className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={saveActiveUserProfile}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[var(--accent-color)] bg-[var(--accent-color)] text-[#131314] transition hover:brightness-110"
-                title="Save user profile"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => setUserProfileOpen(false)}
-                className="h-10 rounded-2xl border border-[#282a2c] bg-[#131314] px-4 text-xs font-bold text-[#e3e3e3] transition hover:bg-[#282a2c]"
-              >
-                Close
-              </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteUserProfileConfirmOpen && (
-        <div className="fixed inset-0 z-[205] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={() => setDeleteUserProfileConfirmOpen(false)}>
-          <div className="mx-4 w-full max-w-sm rounded-[24px] border border-[#282a2c] bg-[#1e1f20] p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="mb-4 flex items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-500/15 text-rose-200">
-                <TrashIcon className="h-5 w-5" />
-              </span>
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-300">Delete User Profile</div>
-                <div className="text-sm font-bold text-[#f1f3f4]">{userName.trim() || "This profile"}</div>
-              </div>
-            </div>
-            <p className="mb-5 text-sm leading-6 text-[#c4c7c5]">
-              This will delete this saved user profile. Chat history and assistant profiles stay untouched.
-            </p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={userProfiles.length <= 1}
-                onClick={() => {
-                  deleteSelectedUserProfile();
-                  setDeleteUserProfileConfirmOpen(false);
-                }}
-                className="flex-1 rounded-2xl border border-rose-500/30 bg-rose-500/15 py-2.5 text-xs font-bold text-rose-100 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Delete
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeleteUserProfileConfirmOpen(false)}
-                className="flex-1 rounded-2xl border border-[#282a2c] bg-[#131314] py-2.5 text-xs font-bold text-[#e3e3e3] transition hover:bg-[#282a2c]"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {personalityProfileOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={() => setPersonalityProfileOpen(false)}>
-          <div className="max-h-[92vh] w-full max-w-[780px] overflow-hidden rounded-[24px] border border-[#282a2c] bg-[#1e1f20] shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between gap-3 border-b border-[#282a2c] px-5 py-4">
-              <div className="min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--accent-color)" }}>Assistant Profile</div>
-                <div className="mt-1 truncate text-lg font-bold text-[#f1f3f4]">{selectedPersonalityPreset?.name || "Assistant"}</div>
-              </div>
-              <IconButton title="Close profile editor" onClick={() => setPersonalityProfileOpen(false)}>
-                <CloseIcon />
-              </IconButton>
-            </div>
-
-            <div className="grid min-h-0 gap-4 px-5 py-4 md:h-[620px] md:grid-cols-[minmax(0,0.9fr)_minmax(320px,1fr)]">
-              <div className="flex min-h-0 flex-col gap-3 rounded-2xl border border-[#282a2c] bg-[#1b1c1e] p-4">
-                <div className="flex justify-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      avatarTargetPersonalityIdRef.current = selectedPersonalityId;
-                      personalityAvatarPickerRef.current?.click();
-                    }}
-                    className="group relative h-40 w-40 shrink-0 overflow-hidden rounded-[20px] ring-1 ring-[#282a2c]"
-                    title="Change avatar"
-                  >
-                    <AvatarImage src={selectedPersonalityPreset?.avatar || personalityAvatar} fallback={selectedPersonalityPreset?.name || "AI"} className="h-full w-full rounded-[20px]" />
-                    <span className="absolute inset-0 hidden items-center justify-center bg-black/45 text-[#e3e3e3] group-hover:flex">
-                      <CameraIcon className="h-6 w-6" />
-                    </span>
-                  </button>
-                </div>
-
-                <label className="block">
-                  <span className="mb-2 block text-xs font-semibold text-[#c4c7c5]">Character name</span>
-                  <input
-                    value={personalityNameDraft}
-                    onChange={(event) => setPersonalityNameDraft(event.target.value)}
-                    className="h-11 w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 text-sm font-semibold text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]"
-                    placeholder="Assistant name"
-                  />
-                </label>
-
-                <label className="flex min-h-0 flex-1 flex-col">
-                  <span className="mb-2 block text-xs font-semibold text-[#c4c7c5]">Personality</span>
-                  <textarea
-                    value={personality}
-                    onChange={(event) => setPersonality(event.target.value)}
-                    rows={8}
-                    className="min-h-[250px] flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-3 text-sm leading-6 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]"
-                    placeholder="Describe how this assistant should think, speak, and behave."
-                  />
-                </label>
-
-              </div>
-
-              <div className="flex min-h-0 flex-col rounded-2xl border border-[#282a2c] bg-[#0f1011] p-3">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-[#e3e3e3]">Character voice</div>
-                  </div>
-                  <div className="shrink-0 text-xs font-semibold text-[#c4c7c5]">{voiceSamples.length} samples</div>
-                </div>
-
-                <div className="mb-3 flex items-center gap-2 rounded-2xl border border-[#282a2c] bg-[#131314] px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9aa0a6]">Voice folder</div>
-                    <div className="mt-1 truncate text-xs text-[#c4c7c5]" title={voiceFolder || "Default voices folder"}>
-                      {voiceFolder || "Default voices folder"}
-                    </div>
-                  </div>
-                  <IconButton title="Choose voice samples folder" onClick={() => handleChooseVoiceFolder().catch((error) => console.error("Voice folder error:", error))} size="sm">
-                    <FolderIcon className="h-4 w-4" />
-                  </IconButton>
-                </div>
-
-                <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="font-semibold text-[#c4c7c5]">Selected voice sample</span>
-                  {selectedVoiceSample && <span className="max-w-[160px] truncate text-[var(--accent-color)]">{selectedVoiceSample.label}</span>}
-                </div>
-                <div className="min-h-0 flex-1 overflow-hidden border-t border-[var(--accent-soft-strong)] pt-1">
-                  <div className="profile-voice-list h-full space-y-1.5 overflow-y-auto pr-3" data-voice-menu>
-                    {voiceSamples.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-[#282a2c] px-3 py-8 text-center text-sm text-[#c4c7c5]">No voice samples found.</div>
-                    ) : (
-                      voiceSamples.map((sample) => {
-                        const selected = selectedVoicePath === sample.path;
-                        const previewing = previewingVoicePath === sample.path;
-                        return (
-                          <div
-                            key={sample.path}
-                            ref={selected ? selectedVoiceRowRef : undefined}
-                            data-selected-voice={selected ? "true" : undefined}
-                            className={`flex items-center gap-2 rounded-xl px-2 py-1.5 transition ${selected ? "bg-[var(--accent-soft)] ring-1 ring-[var(--accent-soft-strong)]" : "hover:bg-[#1e1f20]"}`}
-                          >
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                previewVoiceSample(sample);
-                              }}
-                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#282a2c] bg-[#1e1f20] text-[var(--accent-color)] transition hover:bg-[#282a2c]"
-                              title={`Preview ${sample.label}`}
-                            >
-                              {previewing ? <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent-color)]" /> : <PlayIcon />}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => updateActiveCharacterVoicePath(sample.path)}
-                              className="min-w-0 flex-1 text-left"
-                              title={sample.name}
-                            >
-                              <div className="truncate text-[13px] font-semibold text-[#e3e3e3]">{sample.label}</div>
-                              <div className="truncate text-[10px] leading-4 text-[#9aa0a6]">Preview</div>
-                            </button>
-                            <span className={`h-2 w-2 shrink-0 rounded-full ${selected ? "bg-[var(--accent-color)]" : "bg-[#3a3b3d]"}`} />
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-end justify-between gap-4 border-t border-[#282a2c] px-5 py-2">
-              <div className="flex min-w-0 items-end gap-3">
-                <label className="block w-[132px] shrink-0">
-                  <div className="mb-1 text-[11px] font-semibold text-[#c4c7c5]">Context size</div>
-                  <NumberStepper value={memorySize} min={MIN_CHAT_CONTEXT_SIZE} max={32768} step={512} onChange={setMemorySize} className="w-[132px]" />
-                </label>
-                <label className="block w-[132px] shrink-0">
-                  <div className="mb-1 text-[11px] font-semibold text-[#c4c7c5]">Reply size</div>
-                  <NumberStepper value={replyLength} min={64} max={4096} step={64} onChange={setReplyLength} className="w-[132px]" />
-                </label>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                disabled={personalityPresets.length <= 1}
-                onClick={() => {
-                  setPersonalityProfileOpen(false);
-                  setDeletePersonalityConfirmOpen(true);
-                }}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#282a2c] bg-[#131314] text-rose-200 transition hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-40"
-                title="Delete profile"
-              >
-                <TrashIcon className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPersonalityProfileOpen(false);
-                  setClearMemoryConfirmOpen(true);
-                }}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#282a2c] bg-[#131314] text-amber-300 transition hover:bg-amber-500/15"
-                title="Clear learned memory"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  updateSelectedPersonalityPreset();
-                  setPersonalityProfileOpen(false);
-                }}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[var(--accent-color)] bg-[var(--accent-color)] text-[#131314] transition hover:brightness-110"
-                title="Save profile"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPersonalityProfileOpen(false)}
-                className="h-10 rounded-2xl border border-[#282a2c] bg-[#131314] px-4 text-xs font-bold text-[#e3e3e3] transition hover:bg-[#282a2c]"
-              >
-                Close
-              </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deletePersonalityConfirmOpen && (
-        <div className="fixed inset-0 z-[205] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={() => setDeletePersonalityConfirmOpen(false)}>
-          <div className="mx-4 w-full max-w-sm rounded-[24px] border border-[#282a2c] bg-[#1e1f20] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-500/15 text-rose-200">
-                <TrashIcon className="h-5 w-5" />
-              </span>
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-300">Delete Character</div>
-                <div className="text-sm font-bold text-[#f1f3f4]">{selectedPersonalityPreset?.name ?? "This character"}</div>
-              </div>
-            </div>
-            <p className="mb-5 text-sm leading-6 text-[#c4c7c5]">
-              This will delete this character profile, its learned memory, and its saved chat history.
-            </p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={personalityPresets.length <= 1}
-                onClick={() => {
-                  deleteSelectedPersonalityPreset();
-                  setDeletePersonalityConfirmOpen(false);
-                }}
-                className="flex-1 rounded-2xl border border-rose-500/30 bg-rose-500/15 py-2.5 text-xs font-bold text-rose-100 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Delete
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeletePersonalityConfirmOpen(false)}
-                className="flex-1 rounded-2xl border border-[#282a2c] bg-[#131314] py-2.5 text-xs font-bold text-[#e3e3e3] transition hover:bg-[#282a2c]"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {toolActivitySection}
-
-      <SamplingSection
-        open={samplingOpen}
-        temperature={samplingTemperature}
-        topK={topK}
-        topP={topP}
-        minP={minP}
-        repeatLastN={repeatLastN}
-        repeatPenalty={repeatPenalty}
-        onToggle={setSamplingOpen}
-        onReset={resetSamplingDefaults}
-        onTemperatureChange={setSamplingTemperature}
-        onTopKChange={setTopK}
-        onTopPChange={setTopP}
-        onMinPChange={setMinP}
-        onRepeatLastNChange={setRepeatLastN}
-        onRepeatPenaltyChange={setRepeatPenalty}
-      />    </div>
-  );
-
   const handleInstallSetupBundle = async () => {
     if (setupInstalling) return;
     setSetupInstalling(true);
@@ -5501,434 +4342,46 @@ ${personalityMemory.trim()}`
             setChatSessions((prev) => ({ ...prev, [selectedPersonalityId]: [] }));
           }
           setComposerText("");
-          setImage(null);
-          setImagePath(null);
+          clearImage();
           setComposerNotice("");
           setFreshChatConfirmOpen(false);
         }}
       />
 
-      {automationEditorOpen && (
-        <div className="fixed inset-0 z-[86] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={() => setAutomationEditorOpen(false)}>
-          <div className="w-full max-w-2xl overflow-hidden rounded-[28px] bg-[#1e1f20] shadow-2xl ring-1 ring-[#282a2c]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0 px-5 pt-5">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-[var(--accent-color)]">
-                  <RepeatIcon className="h-4 w-4" />
-                  Automation
-                </div>
-                <h3 className="mt-1 font-title text-2xl text-[#e3e3e3]">{editingAutomationId ? "Edit automation" : "Schedule a task"}</h3>
-                <p className="mt-1 text-sm leading-6 text-[#c4c7c5]">Choose the timing and keep the task instruction short and clear.</p>
-              </div>
-              <div className="px-5 pt-5">
-                <IconButton title="Close" onClick={() => setAutomationEditorOpen(false)}>
-                  <CloseIcon />
-                </IconButton>
-              </div>
-            </div>
-
-            <div className="grid gap-4 px-5 py-4 lg:grid-cols-[1fr_280px]">
-              <div className="space-y-3">
-                <label className="block">
-                  <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.16em] text-[#9aa0a6]">Task name</span>
-                  <input
-                    value={automationName}
-                    onChange={(event) => setAutomationName(event.target.value)}
-                    className="w-full rounded-2xl border border-[#282a2c] bg-[#131314] px-4 py-3 text-sm font-semibold text-[#e3e3e3] outline-none transition placeholder:text-[#73777f] focus:border-[var(--accent-color)]"
-                    placeholder="Morning weather brief"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.16em] text-[#9aa0a6]">What should happen?</span>
-                  <textarea
-                    value={automationPrompt}
-                    onChange={(event) => setAutomationPrompt(event.target.value)}
-                    rows={6}
-                    className="max-h-52 min-h-[152px] w-full resize-none overflow-y-auto rounded-3xl border border-[#282a2c] bg-[#131314] px-4 py-3 text-sm leading-6 text-[#e3e3e3] outline-none transition placeholder:text-[#73777f] focus:border-[var(--accent-color)]"
-                    placeholder="Check tomorrow's weather and tell me if I should bring an umbrella."
-                  />
-                </label>
-                <div className="px-1 text-xs leading-5 text-[#c4c7c5]">
-                  <div className="font-bold uppercase tracking-[0.16em] text-[var(--accent-color)]">Job preview</div>
-                  <div className="mt-1 text-sm font-semibold leading-6 text-[#e3e3e3]/90">
-                    {compactAutomationSummary(automationName || "Untitled task", buildAutomationSchedule(automationDate, automationTime, automationRepeat, automationEveryAmount, automationEveryUnit), automationPrompt || "No instruction yet", automationDate)}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-[24px] bg-[#1b1c1e] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent-color)]">Schedule</div>
-                  <div className="mt-2 w-full truncate rounded-2xl bg-[var(--accent-soft)] px-3 py-2 text-xs font-bold text-[var(--accent-color)]">
-                    {automationScheduleLabel(buildAutomationSchedule(automationDate, automationTime, automationRepeat, automationEveryAmount, automationEveryUnit), automationDate)}
-                  </div>
-                </div>
-
-                <div className="mt-4 space-y-3">
-                  <div>
-                    <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[#9aa0a6]">Date</div>
-                    <div className="relative" data-dropdown-root>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAutomationDateMenuOpen((open) => !open);
-                          setAutomationMonthMenuOpen(false);
-                        }}
-                        className="flex h-11 w-full items-center justify-between rounded-2xl bg-[var(--accent-soft)] px-3 text-left text-sm font-semibold text-[var(--accent-color)] shadow-inner shadow-black/20 ring-1 ring-[var(--accent-soft-strong)] transition hover:brightness-110"
-                      >
-                        <span className="min-w-0 truncate">{automationDateLabel}</span>
-                        <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--accent-color)] transition ${automationDateMenuOpen ? "rotate-180" : ""}`} />
-                      </button>
-                      {automationDateMenuOpen && (
-                        <div className="absolute left-0 right-0 top-full z-[130] mt-2 rounded-[22px] bg-[#131314] p-3 shadow-2xl ring-1 ring-[#282a2c]">
-                          <div className="mb-3 flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setAutomationMonthMenuOpen((open) => !open)}
-                              className="min-w-0 truncate rounded-xl px-2 py-1 text-left text-xs font-bold text-[#e3e3e3] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                            >
-                              {automationEditorMonthTitle}
-                            </button>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setAutomationEditorMonth((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[#1e1f20] text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                                title="Previous month"
-                              >
-                                <ChevronUpIcon className="h-4 w-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setAutomationEditorMonth((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[#1e1f20] text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                                title="Next month"
-                              >
-                                <ChevronDownIcon className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </div>
-                          {automationMonthMenuOpen ? (
-                            <div className="max-h-72 overflow-y-auto rounded-2xl bg-[#101112] p-2 ring-1 ring-[#282a2c]">
-                              {automationEditorYearOptions.map((year) => (
-                                <div key={year} className="mb-3 last:mb-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => setAutomationEditorMonth((date) => new Date(year, date.getMonth(), 1))}
-                                    className={`mb-2 h-8 w-full rounded-xl px-2 text-left text-xs font-bold transition ${
-                                      automationEditorMonth.getFullYear() === year
-                                        ? "bg-[var(--accent-soft)] text-[var(--accent-color)]"
-                                        : "text-[#e3e3e3] hover:bg-[#282a2c]"
-                                    }`}
-                                  >
-                                    {year}
-                                  </button>
-                                  <div className="grid grid-cols-4 gap-1.5">
-                                    {automationEditorMonthOptions.map((month) => {
-                                      const selected = automationEditorMonth.getFullYear() === year && automationEditorMonth.getMonth() === month.index;
-                                      return (
-                                        <button
-                                          key={`${year}-${month.index}`}
-                                          type="button"
-                                          onClick={() => {
-                                            setAutomationEditorMonth(new Date(year, month.index, 1));
-                                            setAutomationMonthMenuOpen(false);
-                                          }}
-                                          className={`h-8 rounded-xl text-xs font-bold transition ${
-                                            selected
-                                              ? "bg-[var(--accent-color)] text-[#131314]"
-                                              : "text-[#e3e3e3] hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                                          }`}
-                                        >
-                                          {month.label}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <>
-                              <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-[#e3e3e3]">
-                                {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((day) => (
-                                  <div key={day} className="py-1">{day}</div>
-                                ))}
-                              </div>
-                              <div className="mt-1 grid grid-cols-7 gap-1">
-                                {automationEditorMonthDays.map((date) => {
-                                  const key = toLocalDateKey(date);
-                                  const selected = key === automationDate;
-                                  const inMonth = date.getMonth() === automationEditorMonth.getMonth();
-                                  return (
-                                    <button
-                                      key={key}
-                                      type="button"
-                                      onClick={() => setAutomationEditorDate(date)}
-                                      className={`h-8 rounded-xl text-xs font-bold transition ${
-                                        selected
-                                          ? "bg-[var(--accent-color)] text-[#131314] shadow-[0_0_12px_var(--accent-soft-strong)]"
-                                          : inMonth
-                                            ? "text-[#e3e3e3] hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                                            : "text-[#73777f] hover:bg-[#282a2c]"
-                                      }`}
-                                    >
-                                      {date.getDate()}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[#9aa0a6]">Start time</div>
-                    <div className="relative" data-dropdown-root>
-                      <button
-                        type="button"
-                        onClick={() => setAutomationTimeMenuOpen((open) => !open)}
-                        className={`flex h-11 w-full items-center justify-between rounded-2xl px-3 text-left text-sm font-semibold shadow-inner shadow-black/20 ring-1 transition hover:bg-[#18191b] ${
-                          automationTime
-                            ? "bg-[var(--accent-soft)] text-[var(--accent-color)] ring-[var(--accent-soft-strong)]"
-                            : "bg-[#0f1011] text-[#e3e3e3] ring-[#282a2c] hover:ring-[var(--accent-soft-strong)]"
-                        }`}
-                      >
-                        <span>{automationTime ? `${automationHour12}:${String(automationTimeParts.minutes).padStart(2, "0")} ${automationPeriod}` : "Choose exact time"}</span>
-                        <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--accent-color)] transition ${automationTimeMenuOpen ? "rotate-180" : ""}`} />
-                      </button>
-                      {automationTimeMenuOpen && (
-                        <div className="absolute left-0 right-0 top-full z-[120] mt-2 overflow-hidden rounded-[22px] bg-[#131314] p-2 shadow-2xl ring-1 ring-[#282a2c]">
-                          <div className="grid grid-cols-[1fr_1fr_0.8fr] gap-2">
-                            <div>
-                              <button type="button" onClick={() => setAutomationTimeFromClock(automationHour12 === 12 ? 1 : automationHour12 + 1, automationTimeParts.minutes, automationPeriod)} className="mb-1 flex h-7 w-full items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314] text-xs font-semibold text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]" title="Next hour">
-                                +
-                              </button>
-                              <div className="automation-time-scroll max-h-28 overflow-y-auto pr-1">
-                                {automationHourOptions.map((hour) => (
-                                  <button
-                                    key={hour}
-                                    type="button"
-                                    onClick={() => setAutomationTimeFromClock(hour, automationTimeParts.minutes, automationPeriod)}
-                                    className={`mb-1 flex h-8 w-full items-center justify-center rounded-xl text-xs font-bold transition last:mb-0 ${
-                                      automationHour12 === hour
-                                        ? "bg-[var(--accent-color)] text-[#131314] shadow-[0_0_12px_var(--accent-soft-strong)]"
-                                        : "bg-[#18191b] text-[#c4c7c5] hover:bg-[#282a2c]"
-                                    }`}
-                                  >
-                                    {hour}
-                                  </button>
-                                ))}
-                              </div>
-                              <button type="button" onClick={() => setAutomationTimeFromClock(automationHour12 === 1 ? 12 : automationHour12 - 1, automationTimeParts.minutes, automationPeriod)} className="mt-1 flex h-7 w-full items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314] text-xs font-semibold text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]" title="Previous hour">
-                                -
-                              </button>
-                            </div>
-                            <div>
-                              <button type="button" onClick={() => adjustAutomationTime(1)} className="mb-1 flex h-7 w-full items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314] text-xs font-semibold text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]" title="Next minute">
-                                +
-                              </button>
-                              <div className="automation-time-scroll max-h-28 overflow-y-auto pr-1">
-                                {automationMinuteOptions.map((minute) => (
-                                  <button
-                                    key={minute}
-                                    type="button"
-                                    onClick={() => setAutomationTimeFromClock(automationHour12, minute, automationPeriod)}
-                                    className={`mb-1 flex h-8 w-full items-center justify-center rounded-xl text-xs font-bold transition last:mb-0 ${
-                                      automationTimeParts.minutes === minute
-                                        ? "bg-[var(--accent-color)] text-[#131314] shadow-[0_0_12px_var(--accent-soft-strong)]"
-                                        : "bg-[#18191b] text-[#c4c7c5] hover:bg-[#282a2c]"
-                                    }`}
-                                  >
-                                    {String(minute).padStart(2, "0")}
-                                  </button>
-                                ))}
-                              </div>
-                              <button type="button" onClick={() => adjustAutomationTime(-1)} className="mt-1 flex h-7 w-full items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314] text-xs font-semibold text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]" title="Previous minute">
-                                -
-                              </button>
-                            </div>
-                            <div className="flex flex-col gap-2 pt-7">
-                              {["AM", "PM"].map((period) => (
-                                <button
-                                  key={period}
-                                  type="button"
-                                  onClick={() => setAutomationTimeFromClock(automationHour12, automationTimeParts.minutes, period)}
-                                  className={`h-10 rounded-xl text-xs font-bold transition ${
-                                    automationPeriod === period
-                                      ? "bg-[var(--accent-color)] text-[#131314] shadow-[0_0_12px_var(--accent-soft-strong)]"
-                                      : "bg-[#18191b] text-[#c4c7c5] hover:bg-[#282a2c]"
-                                  }`}
-                                >
-                                  {period}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#9aa0a6]">Repeat</div>
-                    <div className="text-[11px] font-semibold text-[#73777f]">From {automationTime || "time"}</div>
-                  </div>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {[
-                      { label: "Once", value: "once" },
-                      { label: "Daily", value: "daily" },
-                      { label: "Weekly", value: "weekly" },
-                      { label: "Monthly", value: "monthly" },
-                    ].map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => {
-                          setAutomationRepeat(option.value as AutomationRepeat);
-                          if (option.value !== "once" && !automationTime) {
-                            setAutomationTime("09:00");
-                          }
-                        }}
-                        className={`h-9 rounded-xl text-xs font-bold transition ${
-                          automationRepeat === option.value
-                            ? "bg-[var(--accent-color)] text-[#131314] shadow-[0_0_14px_var(--accent-soft-strong)]"
-                            : "bg-[#0f1011] text-[#c4c7c5] ring-1 ring-[#282a2c] hover:bg-[#282a2c]"
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className={`mt-2 rounded-2xl p-2 transition ${automationRepeat === "every_minutes" || automationRepeat === "every_hours" ? "bg-[var(--accent-soft)] ring-1 ring-[var(--accent-soft-strong)]" : "bg-[#0f1011] ring-1 ring-[#282a2c]"}`}>
-                    <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#9aa0a6]">Every</div>
-                    <div className="grid grid-cols-[1fr_1.35fr] gap-2">
-                      <div
-                        className={`grid h-10 min-w-0 grid-cols-[minmax(38px,1fr)_28px_28px] overflow-hidden rounded-xl shadow-sm ring-1 transition ${
-                          automationRepeat === "every_minutes" || automationRepeat === "every_hours"
-                            ? "bg-[var(--accent-soft)] text-[var(--accent-color)] ring-[var(--accent-soft-strong)]"
-                            : "bg-[#101112] text-[#e3e3e3] ring-[#282a2c]"
-                        }`}
-                        onFocus={() => setAutomationRepeat(automationEveryUnit === "hours" ? "every_hours" : "every_minutes")}
-                      >
-                        <input
-                          type="number"
-                          min={1}
-                          max={automationEveryUnit === "hours" ? 24 : 1440}
-                          value={automationEveryAmount}
-                          onChange={(event) => {
-                            const next = clampNumber(Number(event.target.value || 1), 1, automationEveryUnit === "hours" ? 24 : 1440);
-                            setAutomationEveryAmount(next);
-                            setAutomationRepeat(automationEveryUnit === "hours" ? "every_hours" : "every_minutes");
-                            if (!automationTime) setAutomationTime("09:00");
-                          }}
-                          className="number-input min-w-0 appearance-none bg-transparent px-1 text-center text-sm font-bold leading-none outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAutomationEveryAmount((value) => clampNumber(value - 1, 1, automationEveryUnit === "hours" ? 24 : 1440));
-                            setAutomationRepeat(automationEveryUnit === "hours" ? "every_hours" : "every_minutes");
-                            if (!automationTime) setAutomationTime("09:00");
-                          }}
-                          className="grid h-full w-full place-items-center border-l border-[var(--accent-soft-strong)] text-sm font-bold transition hover:bg-[var(--accent-soft)]"
-                          aria-label="Decrease interval"
-                        >
-                          -
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAutomationEveryAmount((value) => clampNumber(value + 1, 1, automationEveryUnit === "hours" ? 24 : 1440));
-                            setAutomationRepeat(automationEveryUnit === "hours" ? "every_hours" : "every_minutes");
-                            if (!automationTime) setAutomationTime("09:00");
-                          }}
-                          className="grid h-full w-full place-items-center border-l border-[var(--accent-soft-strong)] text-sm font-bold transition hover:bg-[var(--accent-soft)]"
-                          aria-label="Increase interval"
-                        >
-                          +
-                        </button>
-                      </div>
-                      <div className="relative" data-dropdown-root>
-                        <button
-                          type="button"
-                          onClick={() => setAutomationEveryUnitMenuOpen((open) => !open)}
-                          className={`flex h-10 w-full items-center justify-between rounded-xl px-3 text-sm font-bold ring-1 transition hover:brightness-110 ${
-                            automationRepeat === "every_minutes" || automationRepeat === "every_hours"
-                              ? "bg-[var(--accent-soft)] text-[var(--accent-color)] ring-[var(--accent-soft-strong)]"
-                              : "bg-[#101112] text-[#e3e3e3] ring-[#282a2c]"
-                          }`}
-                        >
-                          <span>{automationEveryUnit}</span>
-                          <ChevronDownIcon className={`h-4 w-4 text-[#c4c7c5] transition ${automationEveryUnitMenuOpen ? "rotate-180" : ""}`} />
-                        </button>
-                        {automationEveryUnitMenuOpen && (
-                          <div className="absolute left-0 right-0 top-full z-[125] mt-1.5 rounded-xl bg-[#131314] p-1.5 shadow-2xl ring-1 ring-[#282a2c]">
-                            {(["minutes", "hours"] as AutomationEveryUnit[]).map((unit) => (
-                              <button
-                                key={unit}
-                                type="button"
-                                onClick={() => {
-                                  setAutomationEveryUnit(unit);
-                                  setAutomationEveryUnitMenuOpen(false);
-                                  setAutomationRepeat(unit === "hours" ? "every_hours" : "every_minutes");
-                                  setAutomationEveryAmount((value) => clampNumber(value, 1, unit === "hours" ? 24 : 1440));
-                                  if (!automationTime) setAutomationTime("09:00");
-                                }}
-                                className={`mb-1 flex h-9 w-full items-center rounded-xl px-3 text-left text-sm font-bold transition last:mb-0 ${
-                                  automationEveryUnit === unit
-                                    ? "bg-[var(--accent-color)] text-[#131314]"
-                                    : "text-[#e3e3e3] hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                                }`}
-                              >
-                                {unit}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-2 border-t border-[#282a2c] px-5 py-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAutomationEditorOpen(false);
-                    setEditingAutomationId(null);
-                  }}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#282a2c] bg-[#131314] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
-                  title="Cancel"
-                >
-                  <CloseIcon className="h-4 w-4" />
-                </button>
-              <button
-                type="button"
-                onClick={() => saveAutomationJob().catch((error) => console.error("Automation save error:", error))}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border text-sm font-semibold shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                style={{
-                  borderColor: "color-mix(in srgb, var(--accent-color) 32%, transparent)",
-                  backgroundColor: "color-mix(in srgb, var(--accent-color) 18%, #131314 82%)",
-                  color: "color-mix(in srgb, var(--accent-color) 72%, white 28%)",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
-                }}
-                disabled={!automationName.trim() || !automationPrompt.trim()}
-                title="Save automation"
-              >
-                <SaveIcon className="h-4.5 w-4.5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      <AutomationEditorModal
+        open={automationEditorOpen}
+        editingAutomationId={editingAutomationId}
+        automationName={automationName}
+        automationPrompt={automationPrompt}
+        automationDate={automationDate}
+        automationTime={automationTime}
+        automationRepeat={automationRepeat}
+        automationEveryAmount={automationEveryAmount}
+        automationEveryUnit={automationEveryUnit}
+        automationTimeMenuOpen={automationTimeMenuOpen}
+        automationDateMenuOpen={automationDateMenuOpen}
+        automationMonthMenuOpen={automationMonthMenuOpen}
+        automationEveryUnitMenuOpen={automationEveryUnitMenuOpen}
+        automationEditorMonth={automationEditorMonth}
+        onClose={() => setAutomationEditorOpen(false)}
+        onCancel={() => {
+          setAutomationEditorOpen(false);
+          setEditingAutomationId(null);
+        }}
+        onSave={() => saveAutomationJob().catch((error) => console.error("Automation save error:", error))}
+        onAutomationNameChange={setAutomationName}
+        onAutomationPromptChange={setAutomationPrompt}
+        onAutomationDateChange={setAutomationDate}
+        onAutomationTimeChange={setAutomationTime}
+        onAutomationRepeatChange={setAutomationRepeat}
+        onAutomationEveryAmountChange={setAutomationEveryAmount}
+        onAutomationEveryUnitChange={setAutomationEveryUnit}
+        onAutomationTimeMenuOpenChange={setAutomationTimeMenuOpen}
+        onAutomationDateMenuOpenChange={setAutomationDateMenuOpen}
+        onAutomationMonthMenuOpenChange={setAutomationMonthMenuOpen}
+        onAutomationEveryUnitMenuOpenChange={setAutomationEveryUnitMenuOpen}
+        onAutomationEditorMonthChange={setAutomationEditorMonth}
+      />
       <div
         className="flex h-screen overflow-hidden"
         onPointerMove={markUiInteraction}
@@ -6093,286 +4546,90 @@ ${personalityMemory.trim()}`
             }}
             onScrollToBottom={() => scrollToBottom()}
           />
-          <footer className="shrink-0 border-t border-[#282a2c] bg-[#131314] px-4 py-4">
-            <div className="mx-auto w-full max-w-5xl rounded-[30px] border border-[#282a2c] bg-[#1e1f20] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
-              {pendingShellActions.length > 0 && (
-                <div className="mb-3 space-y-2">
-                  {pendingShellActions.map((action) => (
-                    <div key={action.id} className="overflow-hidden rounded-[22px] bg-[#131314] ring-1 ring-[#282a2c]">
-                      <div className="flex items-center justify-between gap-3 px-3.5 py-3">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="text-[10px] text-[var(--accent-color)]">{"\u25B6"}</span>
-                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--accent-color)]" />
-                          <div className="truncate text-sm font-semibold text-[#e3e3e3]">System action request</div>
-                        </div>
-                        <span
-                          className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${action.risk_level === "high" ? "bg-rose-500/15 text-rose-200" : action.risk_level === "medium" ? "bg-amber-500/15 text-amber-200" : ""}`}
-                          style={action.risk_level === "low" ? { backgroundColor: "var(--accent-soft)", color: "var(--accent-color)" } : undefined}
-                        >
-                          {action.risk_level}
-                        </span>
-                      </div>
-                      <div className="border-t border-[#282a2c] p-3">
-                        <div className="text-xs leading-5 text-[#c4c7c5]">{action.purpose}</div>
-                        <details className="mt-2 overflow-hidden rounded-2xl border border-[#282a2c] bg-[#0f1011] text-xs text-[#c4c7c5]">
-                          <summary className="cursor-pointer select-none px-3 py-2 font-semibold text-[var(--accent-color)] [&::-webkit-details-marker]:hidden">
-                            {"\u25B6"} Command
-                          </summary>
-                          <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap border-t border-[#282a2c] p-3 text-xs leading-5 text-[#e3e3e3]">{action.command}</pre>
-                        </details>
-                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                        <div className="min-w-0 truncate text-xs text-[#c4c7c5]" title={action.working_directory}>
-                          Folder: {action.working_directory}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => rejectShellAction(action.id).catch((error) => console.error("Reject shell action error:", error))}
-                            className="rounded-full border border-[#282a2c] bg-[#131314] px-4 py-2 text-xs font-semibold text-[#e3e3e3] transition hover:bg-[#282a2c]"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => approveShellAction(action).catch((error) => console.error("Approve shell action error:", error))}
-                            disabled={executingShellActionId === action.id}
-                            className="rounded-full px-4 py-2 text-xs font-semibold text-[#131314] transition disabled:opacity-50"
-                            style={{ backgroundColor: "var(--accent-color)" }}
-                          >
-                            {executingShellActionId === action.id ? "Running..." : "Run"}
-                          </button>
-                        </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {image && (
-                <div className="mb-3 flex items-center gap-3 rounded-3xl bg-[#131314] p-3 ring-1 ring-[#282a2c]">
-                  <img src={image} alt="Attached preview" className="h-14 w-14 rounded-2xl bg-[#131314] object-contain" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-[#e3e3e3]">Image ready</div>
-                    <div className="truncate text-xs text-[#c4c7c5]">The selected brain will receive this picture with your next message.</div>
-                  </div>
-                  <IconButton title="Remove image" onClick={() => {
-                    setImage(null);
-                    setImagePath(null);
-                  }}>
-                    <CloseIcon />
-                  </IconButton>
-                </div>
-              )}
-
-              <div className="flex items-center gap-2 rounded-[24px] border border-[#282a2c] bg-[#131314] py-1.5 pl-4 pr-2">
-                <textarea
-                  ref={composerInputRef}
-                  defaultValue={input}
-                  onInput={(event) => {
-                    lastComposerInputAtRef.current = Date.now();
-                    const node = event.currentTarget;
-                    setComposerHasText((previous) => {
-                      const next = Boolean(node.value.trim());
-                      return previous === next ? previous : next;
-                    });
-                    resizeComposerTextarea(node);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      handleSend().catch((error) => console.error("Send error:", error));
-                    }
-                  }}
-                  onPaste={(event) => {
-                    const items = event.clipboardData?.items;
-                    if (!items) return;
-                    for (let i = 0; i < items.length; i++) {
-                      if (items[i].type.startsWith("image/")) {
-                        const file = items[i].getAsFile();
-                        if (file) {
-                          attachImageFromFile(file);
-                          event.preventDefault();
-                          return;
-                        }
-                      }
-                    }
-                  }}
-                  rows={1}
-                  className="min-h-[40px] w-full resize-none overflow-y-auto bg-transparent px-3 py-[10px] text-sm leading-5 text-[#e3e3e3] outline-none placeholder:text-[#73777f]"
-                  placeholder="Ask Galaxy anything..."
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isStreaming || sendInFlightRef.current) {
-                      stopActiveResponse();
-                      return;
-                    }
-                    handleSend().catch((error) => console.error("Send error:", error));
-                  }}
-                  disabled={!isStreaming && !sendInFlightRef.current && ((!composerHasText && !image) || engineStatus !== "ready")}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center self-center rounded-2xl text-sm font-semibold transition disabled:cursor-not-allowed"
-                  style={
-                    isStreaming || sendInFlightRef.current
-                      ? { backgroundColor: "var(--accent-color)", color: "#131314" }
-                      : composerHasText || image
-                        ? { backgroundColor: selectedThemeSwatch.accent, color: "#131314" }
-                        : { backgroundColor: "#2d2e30", color: "#5f6368" }
+          <ChatComposer
+            pendingShellActions={pendingShellActions}
+            executingShellActionId={executingShellActionId}
+            image={image}
+            composerInputRef={composerInputRef}
+            input={input}
+            composerHasText={composerHasText}
+            engineReady={engineStatus === "ready"}
+            isStreaming={isStreaming}
+            sendInFlight={sendInFlightRef.current}
+            selectedThemeSwatch={selectedThemeSwatch}
+            thinkingEnabled={thinkingEnabled}
+            liveConversation={liveConversation}
+            isRecording={isRecording}
+            isTranscribing={isTranscribing}
+            themePickerOpen={themePickerOpen}
+            themeSwatches={THEME_SWATCHS}
+            themeSwatchId={themeSwatchId}
+            quickModelMenuOpen={quickModelMenuOpen}
+            availableModels={availableModels}
+            selectedModelPath={selectedModelPath}
+            selectedModel={selectedModel}
+            brainStatus={brainStatus}
+            currentModelEntry={currentModelEntry}
+            onRejectShellAction={(id) => rejectShellAction(id).catch((error) => console.error("Reject shell action error:", error))}
+            onApproveShellAction={(action) => approveShellAction(action).catch((error) => console.error("Approve shell action error:", error))}
+            onRemoveImage={() => {
+              clearImage();
+            }}
+            onComposerInput={(node) => {
+              lastComposerInputAtRef.current = Date.now();
+              setComposerHasText((previous) => {
+                const next = Boolean(node.value.trim());
+                return previous === next ? previous : next;
+              });
+              resizeComposerTextarea(node);
+            }}
+            onComposerPaste={(event) => {
+              const items = event.clipboardData?.items;
+              if (!items) return;
+              for (let i = 0; i < items.length; i++) {
+                if (items[i].type.startsWith("image/")) {
+                  const file = items[i].getAsFile();
+                  if (file) {
+                    attachImageFromFile(file);
+                    event.preventDefault();
+                    return;
                   }
-                  onMouseEnter={(event) => {
-                    if (event.currentTarget.disabled || isStreaming || sendInFlightRef.current || (!composerHasText && !image)) return;
-                    event.currentTarget.style.backgroundColor = selectedThemeSwatch.hover;
-                  }}
-                  onMouseLeave={(event) => {
-                    if (event.currentTarget.disabled) return;
-                    event.currentTarget.style.backgroundColor = composerHasText || image ? selectedThemeSwatch.accent : "#2d2e30";
-                  }}
-                >
-                  {isStreaming || sendInFlightRef.current ? (
-                    <StopIcon className="h-4.5 w-4.5" />
-                  ) : (
-                    <SendIcon className="h-5 w-5" />
-                  )}
-                </button>
-              </div>
-
-              <div className="mt-2 flex items-center justify-between border-t border-[#282a2c] px-1 pt-2">
-                <div className="flex gap-1">
-                  <IconButton title={thinkingEnabled ? "AI brain reasoning is on" : "Enable AI brain reasoning"} onClick={() => setThinkingEnabled((prev) => !prev)} active={thinkingEnabled}>
-                    <BrainIcon className="h-5 w-5" />
-                  </IconButton>
-                  <IconButton
-                    title={liveConversation ? "Live voice playback is on" : "Enable live voice playback"}
-                    onClick={() => setAutoVoiceMode(!liveConversation)}
-                    active={liveConversation}
-                  >
-                    <SpeakerIcon className="h-4.5 w-4.5" />
-                  </IconButton>
-                  <IconButton title={isRecording ? "Stop voice input recording" : isTranscribing ? "Voice input is transcribing" : "Start voice input"} onClick={() => handleMicToggle().catch((error) => console.error("Mic error:", error))} active={isRecording} disabled={isTranscribing}>
-                    <MicIcon className="h-4.5 w-4.5" />
-                  </IconButton>
-                  <IconButton title="Open image generation or attach an image" onClick={() => chooseImageForComposer().catch((error) => console.error("Choose image error:", error))}>
-                    <ImageIcon className="h-4.5 w-4.5" />
-                  </IconButton>
-                  <div className="relative" data-dropdown-root>
-                    <button
-                      type="button"
-                      title="Choose theme color"
-                      onClick={() => {
-                        const next = !themePickerOpen;
-                        setModelMenuOpen(false);
-                        setUserProfileMenuOpen(false);
-                        setPersonalityMenuOpen(false);
-                        setQuickModelMenuOpen(false);
-                        setThemePickerOpen(next);
-                      }}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#282a2c] bg-[#1e1f20] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
-                      style={{
-                        color: themePickerOpen ? selectedThemeSwatch.accent : undefined,
-                        boxShadow: themePickerOpen ? `inset 0 0 0 1px ${selectedThemeSwatch.soft}` : undefined,
-                      }}
-                    >
-                    <BrushIcon className="h-4.5 w-4.5" />
-                    </button>
-                    {themePickerOpen && (
-                      <div className="absolute bottom-full left-1/2 z-50 mb-3 -translate-x-1/2 rounded-full border border-[#282a2c] bg-[#1e1f20] px-3 py-2 shadow-2xl">
-                        <div className="flex items-center gap-2">
-                          {THEME_SWATCHS.map((swatch) => (
-                            <button
-                              key={swatch.id}
-                              type="button"
-                              title={swatch.id}
-                              onClick={() => {
-                                setThemeSwatchId(swatch.id);
-                                setThemePickerOpen(false);
-                              }}
-                              className="flex h-8 w-8 items-center justify-center rounded-full border transition"
-                              style={{
-                                backgroundColor: swatch.accent,
-                                borderColor: swatch.id === themeSwatchId ? "#f3f4f6" : "rgba(255,255,255,0.12)",
-                                boxShadow: swatch.id === themeSwatchId ? `0 0 0 2px ${swatch.soft}` : "none",
-                              }}
-                            >
-                              <span className="sr-only">{swatch.id}</span>
-                            </button>
-                          ))}
-                        </div>
-                        <div
-                          className="absolute left-1/2 top-full h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-[#282a2c] bg-[#1e1f20]"
-                        />
-                      </div>
-                    )}
-                  </div>
-                  <IconButton title="Clear chat" onClick={() => {
-                    setFreshChatConfirmOpen(true);
-                  }}>
-                    <EraserIcon className="h-4.5 w-4.5" />
-                  </IconButton>
-                  {isTranscribing && (
-                    <div className="ml-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: selectedThemeSwatch.accent }}>
-                      <div className="h-2 w-2 animate-ping rounded-full" style={{ backgroundColor: selectedThemeSwatch.accent }} />
-                      <span>Transcribing...</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="relative" data-dropdown-root>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = !quickModelMenuOpen;
-                        setModelMenuOpen(false);
-                        setUserProfileMenuOpen(false);
-                        setPersonalityMenuOpen(false);
-                        setThemePickerOpen(false);
-                        setQuickModelMenuOpen(next);
-                      }}
-                      className="flex max-w-[136px] items-center gap-2 overflow-hidden rounded-xl bg-[#0f1011] px-3 py-1.5 ring-1 ring-[#282a2c] transition hover:bg-[#1a1b1c]"
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <BrainIcon className={`h-3.5 w-3.5 shrink-0 ${brainStatus === "Ready" || brainStatus === "Thinking" ? "text-emerald-400" : "text-[#73777f]"}`} />
-                        {currentModelEntry?.has_vision && <EyeIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent-color)]" />}
-                        <span className="max-w-[96px] truncate text-[10px] font-bold uppercase tracking-[0.14em] text-[#e3e3e3]">
-                          {selectedModel || "No Model"}
-                        </span>
-                      </div>
-                    <ChevronDownIcon className={`h-3 w-3 text-[#73777f] transition-transform ${quickModelMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-
-                  {quickModelMenuOpen && (
-                    <div className="dropdown-scroll absolute bottom-full right-0 z-50 mb-2 max-h-80 w-64 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-2xl border border-[#282a2c] bg-[#131314] p-2 shadow-2xl">
-                      {availableModels.length === 0 ? (
-                        <div className="p-4 text-center text-xs text-[#73777f]">No models found</div>
-                      ) : (
-                        availableModels.map((model) => (
-                          <button
-                            key={model.path}
-                            type="button"
-                            onClick={() => {
-                              setQuickModelMenuOpen(false);
-                              setSelectedModelPath(model.path);
-                              loadModelPath(model.path).catch((error) => console.error("Model select error:", error));
-                            }}
-                            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left transition ${selectedModelPath === model.path ? "bg-[var(--accent-soft)] text-[var(--accent-color)]" : "text-[#c4c7c5] hover:bg-[#282a2c]"}`}
-                          >
-                            <div className="flex w-9 shrink-0 items-center gap-1.5">
-                              <BrainIcon className={`h-4 w-4 shrink-0 ${selectedModelPath === model.path && (brainStatus === "Ready" || brainStatus === "Thinking") ? "text-emerald-400" : "text-[#c4c7c5]"}`} />
-                              {model.has_vision && <EyeIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent-color)]" />}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-semibold">{model.name}</div>
-                              <div className="truncate text-[10px] opacity-60">{model.path.split(/[/\\]/).pop()}</div>
-                            </div>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </footer>
+                }
+              }
+            }}
+            onSend={() => handleSend().catch((error) => console.error("Send error:", error))}
+            onStop={stopActiveResponse}
+            onToggleThinking={() => setThinkingEnabled((prev) => !prev)}
+            onToggleLiveConversation={() => setAutoVoiceMode(!liveConversation)}
+            onMicToggle={() => handleMicToggle().catch((error) => console.error("Mic error:", error))}
+            onChooseImage={() => chooseImageForComposer().catch((error) => console.error("Choose image error:", error))}
+            onToggleThemePicker={() => {
+              const next = !themePickerOpen;
+              setModelMenuOpen(false);
+              setUserProfileMenuOpen(false);
+              setPersonalityMenuOpen(false);
+              setQuickModelMenuOpen(false);
+              setThemePickerOpen(next);
+            }}
+            onSelectTheme={(id) => {
+              setThemeSwatchId(id);
+              setThemePickerOpen(false);
+            }}
+            onClearChat={() => setFreshChatConfirmOpen(true)}
+            onToggleQuickModelMenu={() => {
+              const next = !quickModelMenuOpen;
+              setModelMenuOpen(false);
+              setUserProfileMenuOpen(false);
+              setPersonalityMenuOpen(false);
+              setThemePickerOpen(false);
+              setQuickModelMenuOpen(next);
+            }}
+            onSelectModel={(path) => {
+              setQuickModelMenuOpen(false);
+              setSelectedModelPath(path);
+              loadModelPath(path).catch((error) => console.error("Model select error:", error));
+            }}
+          />
         </main>
 
         <aside
