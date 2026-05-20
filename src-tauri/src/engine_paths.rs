@@ -63,9 +63,9 @@ pub fn llama_server_path() -> std::io::Result<PathBuf> {
 }
 
 pub fn engine_log_path() -> std::io::Result<PathBuf> {
-    Ok(existing_engine_dir()
-        .unwrap_or_else(runtime_engine_dir)
-        .join("llama.log"))
+    let log_dir = crate::app_paths::app_root_dir().join("logs");
+    std::fs::create_dir_all(&log_dir)?;
+    Ok(log_dir.join("llama.log"))
 }
 
 pub fn read_server_help(server_path: &Path) -> Option<String> {
