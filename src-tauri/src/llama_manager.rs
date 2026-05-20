@@ -962,6 +962,45 @@ pub fn start_model_state(
     }
     let _transition_guard = state.transition_lock.lock().unwrap();
     let mut process_guard = state.process.lock().unwrap();
+    let process_is_running = if let Some(child) = process_guard.as_mut() {
+        match child.try_wait() {
+            Ok(None) => true,
+            Ok(Some(status)) => {
+                append_model_log(&format!("existing process exited before start request status={}", status));
+                *process_guard = None;
+                false
+            }
+            Err(error) => {
+                append_model_log(&format!("could not poll existing process before start request error={}", error));
+                false
+            }
+        }
+    } else {
+        false
+    };
+    if process_is_running {
+        if let Ok(session_guard) = state.session.lock() {
+            if let Some(session) = session_guard.as_ref() {
+                if session.model_path == model_path
+                    && session.context_size == context_size
+                    && session.threads == threads.max(1)
+                {
+                    append_model_log(&format!(
+                        "start request reused running process model={} active_gpu_layers={} requested_gpu_layers={}",
+                        model_path, session.active_gpu_layers, gpu_layers
+                    ));
+                    return ModelStatus {
+                        status: "success".to_string(),
+                        message: format!("Model is already running: {}", session.model_name),
+                        has_vision: session.has_vision,
+                        model_name: session.model_name.clone(),
+                        model_path: session.model_path.clone(),
+                        gpu_layers: session.active_gpu_layers,
+                    };
+                }
+            }
+        }
+    }
     let cached_profile = {
         let profiles_guard = state.profiles.lock().unwrap();
         profiles_guard

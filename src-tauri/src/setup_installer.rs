@@ -332,14 +332,23 @@ fn files_installed(files: &[SetupFile]) -> bool {
 }
 
 fn omnivoice_engine_installed() -> bool {
-    app_root_dir()
+    let bin_dir = app_root_dir()
         .join("assistant-runtime")
         .join("voice-tts")
-        .join("bin")
-        .join("omnivoice-tts.exe")
-        .metadata()
-        .map(|meta| meta.len() > 128 * 1024)
-        .unwrap_or(false)
+        .join("bin");
+    let required_files = [
+        "omnivoice-tts.exe",
+        "ggml.dll",
+        "ggml-base.dll",
+        "ggml-cpu.dll",
+    ];
+    required_files.iter().all(|file_name| {
+        bin_dir
+            .join(file_name)
+            .metadata()
+            .map(|meta| meta.len() > 16 * 1024)
+            .unwrap_or(false)
+    })
 }
 
 fn image_runtime_installed() -> bool {

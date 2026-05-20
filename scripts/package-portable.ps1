@@ -38,7 +38,10 @@ try {
   if (Test-Path $voiceTtsBinSource) {
     $voiceTtsBinDest = Join-Path $portableRoot "assistant-runtime\voice-tts\bin"
     New-Item -ItemType Directory -Path $voiceTtsBinDest -Force | Out-Null
-    Get-ChildItem -Path $voiceTtsBinSource -Filter "omnivoice-tts.exe" -File |
+    Get-ChildItem -Path $voiceTtsBinSource -File |
+      Where-Object {
+        $_.Name -in @("omnivoice-tts.exe", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll")
+      } |
       ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $voiceTtsBinDest -Force
       }
