@@ -40,11 +40,25 @@ try {
     New-Item -ItemType Directory -Path $voiceTtsBinDest -Force | Out-Null
     Get-ChildItem -Path $voiceTtsBinSource -File |
       Where-Object {
-        $_.Name -in @("omnivoice-tts.exe", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll")
+        $_.Extension -ieq ".dll" -or $_.Name -ieq "omnivoice-tts.exe"
       } |
       ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $voiceTtsBinDest -Force
       }
+
+    $requiredVoiceRuntimeFiles = @(
+      "omnivoice-tts.exe",
+      "ggml.dll",
+      "ggml-base.dll",
+      "ggml-cpu.dll",
+      "ggml-cuda.dll"
+    )
+    foreach ($fileName in $requiredVoiceRuntimeFiles) {
+      $runtimeFile = Join-Path $voiceTtsBinDest $fileName
+      if (-not (Test-Path $runtimeFile)) {
+        throw "Portable voice runtime is incomplete. Missing $fileName"
+      }
+    }
   }
 
   $samplesSource = Join-Path $root "assistant-runtime\voice\voice_samples"

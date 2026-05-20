@@ -325,8 +325,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   min_p: 0.1,
   repeat_last_n: 64,
   repeat_penalty: 1.0,
-  memory_size: 8192,
-  reply_length: 512,
+  memory_size: 32768,
+  reply_length: 4096,
   intelligence_quality: 50,
   personality: "You are a helpful and friendly AI assistant.",
   personality_presets: [

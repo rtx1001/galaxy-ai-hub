@@ -53,11 +53,11 @@ pub fn check_system() -> SystemInfo {
                 recommended_task_gpu_layers,
                 recommended_context_size,
             ) = if total_vram_mb <= 8192 {
-                (24, 8, 8192)
+                (24, 8, 32768)
             } else if total_vram_mb <= 12288 {
-                (40, 12, 8192)
+                (40, 12, 32768)
             } else {
-                (60, 16, 8192)
+                (60, 16, 32768)
             };
 
             SystemInfo {
@@ -85,7 +85,7 @@ pub fn check_system() -> SystemInfo {
             cpu_threads,
             recommended_chat_gpu_layers: 0,
             recommended_task_gpu_layers: 0,
-            recommended_context_size: 8192,
+            recommended_context_size: 32768,
         },
     }
 }

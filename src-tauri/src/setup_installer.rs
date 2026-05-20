@@ -341,6 +341,7 @@ fn omnivoice_engine_installed() -> bool {
         "ggml.dll",
         "ggml-base.dll",
         "ggml-cpu.dll",
+        "ggml-cuda.dll",
     ];
     required_files.iter().all(|file_name| {
         bin_dir
