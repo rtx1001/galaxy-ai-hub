@@ -449,6 +449,11 @@ function App() {
       });
   }, [settingsLoaded, setupTierOverride, systemInfo, selectedModelPath]);
 
+  const chooseSetupTier = (tier: SetupTier) => {
+    setSetupTierOverride(tier);
+    setSetupNotice(`Selected ${tier} setup. Galaxy will use this tier when its files are installed.`);
+  };
+
   const recommendedThreads = systemInfo
     ? clampNumber(Math.min(systemInfo.cpu_threads, 8), 2, Math.max(2, systemInfo.cpu_threads))
     : 4;
@@ -4381,6 +4386,31 @@ ${personalityMemory.trim()}`
   }, [settingsLoaded, setupCompleted, setupScreenOpen, setupCatalog, setupHasMissingFiles]);
 
   useEffect(() => {
+    if (!settingsLoaded || !setupScreenOpen || !setupCatalog || setupCatalog.tier !== activeSetupTier) {
+      return;
+    }
+    const brainPart = setupCatalog.parts.find((part) => part.key === "brain");
+    if (!brainPart?.installed) {
+      return;
+    }
+    const nextFolder = setupCatalog.brain_model_folder;
+    const nextModel = setupCatalog.selected_brain_model_path;
+    if (!nextModel || selectedModelPath === nextModel) {
+      return;
+    }
+    setModelFolder(nextFolder);
+    setSelectedModelPath(nextModel);
+    scanModelLibrary(nextFolder, nextModel, true).catch((error) =>
+      console.error("Setup tier model switch error:", error),
+    );
+    if (engineStatus === "ready") {
+      loadModelPath(nextModel).catch((error) => console.error("Setup tier load error:", error));
+    } else {
+      setPendingAutoLoadPath(nextModel);
+    }
+  }, [settingsLoaded, setupScreenOpen, setupCatalog, activeSetupTier, selectedModelPath, engineStatus]);
+
+  useEffect(() => {
     if (!settingsLoaded || !setupCompleted || firstStartupSetupNeeded || voiceAutoPrepareStartedRef.current) {
       return;
     }
@@ -5395,7 +5425,7 @@ ${personalityMemory.trim()}`
         hardwareRamLabel={hardwareRamLabel}
         activeSetupTier={activeSetupTier}
         setupTierOverride={setupTierOverride}
-        setSetupTierOverride={setSetupTierOverride}
+        onSelectSetupTier={chooseSetupTier}
         setupCatalog={setupCatalog}
         setupInstalling={setupInstalling}
         activeSetupPartKey={activeSetupPartKey}

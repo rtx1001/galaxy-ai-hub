@@ -319,6 +319,9 @@ details[open] > summary .details-chevron {
 .setup-shell {
   position: relative;
   width: min(940px, calc(100vw - 36px));
+  min-height: min(760px, calc(100vh - 36px));
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border-radius: 30px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -416,6 +419,8 @@ details[open] > summary .details-chevron {
   grid-template-columns: minmax(270px, 0.85fr) minmax(380px, 1.2fr);
   gap: 12px;
   padding: 14px;
+  flex: 1 1 auto;
+  align-items: stretch;
 }
 
 .setup-card {
@@ -423,6 +428,7 @@ details[open] > summary .details-chevron {
   border: 1px solid #282a2c;
   background: #18191b;
   padding: 14px;
+  min-height: 424px;
 }
 
 .setup-tier-badge {
@@ -612,6 +618,8 @@ details[open] > summary .details-chevron {
 
 .setup-size-note {
   margin-top: 11px;
+  min-height: 116px;
+  box-sizing: border-box;
   border-radius: 16px;
   border: 1px solid #282a2c;
   background: #101113;
@@ -637,6 +645,8 @@ details[open] > summary .details-chevron {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 92px;
+  box-sizing: border-box;
   padding: 12px 14px 14px;
   border-top: 1px solid #282a2c;
 }

@@ -1,4 +1,3 @@
-import { Dispatch, SetStateAction } from "react";
 import { BrainIcon, BrushIcon, CloseIcon, SpeakerIcon } from "./Icons";
 import {
   SETUP_PARTS,
@@ -27,7 +26,7 @@ type SetupScreenProps = {
   hardwareRamLabel: string;
   activeSetupTier: SetupTier;
   setupTierOverride: SetupTier | null;
-  setSetupTierOverride: Dispatch<SetStateAction<SetupTier | null>>;
+  onSelectSetupTier: (tier: SetupTier) => void;
   setupCatalog: SetupCatalog | null;
   setupInstalling: boolean;
   activeSetupPartKey: string;
@@ -46,7 +45,7 @@ export function SetupScreen({
   hardwareRamLabel,
   activeSetupTier,
   setupTierOverride,
-  setSetupTierOverride,
+  onSelectSetupTier,
   setupCatalog,
   setupInstalling,
   activeSetupPartKey,
@@ -133,7 +132,7 @@ export function SetupScreen({
                   key={tier}
                   type="button"
                   className={`setup-tier-button ${activeSetupTier === tier ? "active" : ""}`}
-                  onClick={() => setSetupTierOverride(tier)}
+                  onClick={() => onSelectSetupTier(tier)}
                 >
                   <span>{setupTierLabel(tier)}</span>
                 </button>
