@@ -106,7 +106,7 @@ import {
   toLocalDateKey,
 } from "./appCore";
 
-const CURRENT_APP_VERSION = "0.1.1";
+const CURRENT_APP_VERSION = "0.1.2";
 const GITHUB_RELEASES_API = "https://api.github.com/repos/rtx1001/galaxy-ai-hub/releases?per_page=10";
 const GITHUB_RELEASES_PAGE = "https://github.com/rtx1001/galaxy-ai-hub/releases";
 
