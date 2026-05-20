@@ -12,6 +12,7 @@ pub struct SetupFile {
     pub url: String,
     pub destination: String,
     pub size_hint: String,
+    pub extract_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +140,23 @@ fn setup_file(
         url: hf_url(repo, file),
         destination: relative_display(&destination),
         size_hint: size_hint.to_string(),
+        extract_to: None,
+    }
+}
+
+fn setup_archive_file(
+    label: &str,
+    url: &str,
+    destination: PathBuf,
+    extract_to: PathBuf,
+    size_hint: &str,
+) -> SetupFile {
+    SetupFile {
+        label: label.to_string(),
+        url: url.to_string(),
+        destination: relative_display(&destination),
+        size_hint: size_hint.to_string(),
+        extract_to: Some(relative_display(&extract_to)),
     }
 }
 
@@ -200,7 +218,31 @@ fn voice_files(tier: &str) -> Vec<SetupFile> {
     ]
 }
 
-fn image_files(tier: &str) -> Vec<SetupFile> {
+fn sd_runtime_file(has_nvidia_gpu: bool) -> SetupFile {
+    let cache = app_root_dir()
+        .join("assistant-runtime")
+        .join("download-cache");
+    let extract_to = app_root_dir().join("bin").join("stable-diffusion");
+    if has_nvidia_gpu {
+        setup_archive_file(
+            "Image engine CUDA",
+            "https://sourceforge.net/projects/stable-diffusion-cpp.mirror/files/master-625-f683c88/sd-master-f683c88-bin-win-cuda12-x64.zip/download",
+            cache.join("sd-master-f683c88-bin-win-cuda12-x64.zip"),
+            extract_to,
+            "about 362 MB",
+        )
+    } else {
+        setup_archive_file(
+            "Image engine CPU",
+            "https://sourceforge.net/projects/stable-diffusion-cpp.mirror/files/master-625-f683c88/sd-master-f683c88-bin-win-avx2-x64.zip/download",
+            cache.join("sd-master-f683c88-bin-win-avx2-x64.zip"),
+            extract_to,
+            "about 14 MB",
+        )
+    }
+}
+
+fn image_files(tier: &str, has_nvidia_gpu: bool) -> Vec<SetupFile> {
     let (image_file, image_size, encoder_file, encoder_size) = match tier {
         "light" => (
             "v23/Qwen-Rapid-NSFW-v23_Q3_K.gguf",
@@ -227,6 +269,7 @@ fn image_files(tier: &str) -> Vec<SetupFile> {
         .join("models")
         .join("qwen-edit");
     vec![
+        sd_runtime_file(has_nvidia_gpu),
         setup_file(
             "Qwen Image Edit",
             "Novice25/Qwen-Image-Edit-Rapid-AIO-GGUF",
@@ -269,6 +312,13 @@ fn absolute_from_display(path: &str) -> PathBuf {
 }
 
 fn file_installed(file: &SetupFile) -> bool {
+    if let Some(extract_to) = &file.extract_to {
+        let extract_path = absolute_from_display(extract_to);
+        if extract_path.ends_with(Path::new("bin").join("stable-diffusion")) {
+            return image_runtime_installed();
+        }
+        return extract_path.exists();
+    }
     let path = absolute_from_display(&file.destination);
     path.exists()
         && path
@@ -279,6 +329,22 @@ fn file_installed(file: &SetupFile) -> bool {
 
 fn files_installed(files: &[SetupFile]) -> bool {
     files.iter().all(file_installed)
+}
+
+fn omnivoice_engine_installed() -> bool {
+    app_root_dir()
+        .join("assistant-runtime")
+        .join("voice-tts")
+        .join("bin")
+        .join("omnivoice-tts.exe")
+        .metadata()
+        .map(|meta| meta.len() > 128 * 1024)
+        .unwrap_or(false)
+}
+
+fn image_runtime_installed() -> bool {
+    let root = app_root_dir().join("bin").join("stable-diffusion");
+    root.join("sd-cli.exe").exists() && root.join("stable-diffusion.dll").exists()
 }
 
 fn brain_metadata_installed(tier: &str) -> bool {
@@ -333,11 +399,17 @@ fn write_brain_model_yml(tier: &str) -> Result<(), String> {
 
 fn part_key_for_file(file: &SetupFile) -> String {
     let destination = file.destination.replace('\\', "/").to_lowercase();
+    let extract_to = file
+        .extract_to
+        .as_deref()
+        .unwrap_or_default()
+        .replace('\\', "/")
+        .to_lowercase();
     if destination.contains("/brain/") {
         "brain".to_string()
     } else if destination.contains("/voice-tts/") {
         "voice".to_string()
-    } else if destination.contains("/qwen-edit/") {
+    } else if destination.contains("/qwen-edit/") || extract_to.contains("/stable-diffusion") {
         "image".to_string()
     } else {
         String::new()
@@ -367,6 +439,91 @@ fn emit_progress(
         message,
     };
     let _ = app.emit("setup-install-progress", progress);
+}
+
+fn find_dir_containing(root: &Path, file_name: &str) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file()
+            && path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(|value| value.eq_ignore_ascii_case(file_name))
+                .unwrap_or(false)
+        {
+            return path.parent().map(|parent| parent.to_path_buf());
+        }
+        if path.is_dir() {
+            if let Some(found) = find_dir_containing(&path, file_name) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn copy_runtime_files(source_dir: &Path, destination_dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(destination_dir).map_err(|e| {
+        format!(
+            "Could not create image engine folder {}: {}",
+            destination_dir.display(),
+            e
+        )
+    })?;
+    for entry in std::fs::read_dir(source_dir)
+        .map_err(|e| format!("Could not read extracted image engine: {}", e))?
+        .flatten()
+    {
+        let path = entry.path();
+        if path.is_file() {
+            let target = destination_dir.join(entry.file_name());
+            std::fs::copy(&path, &target).map_err(|e| {
+                format!(
+                    "Could not copy image engine file {}: {}",
+                    path.display(),
+                    e
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn extract_archive(file: &SetupFile, archive_path: &Path) -> Result<(), String> {
+    let extract_to = file
+        .extract_to
+        .as_ref()
+        .map(|path| absolute_from_display(path))
+        .ok_or_else(|| format!("{} is not an archive setup item.", file.label))?;
+    if extract_to.exists() {
+        let _ = std::fs::remove_dir_all(&extract_to);
+    }
+    std::fs::create_dir_all(&extract_to).map_err(|e| {
+        format!(
+            "Could not create extraction folder {}: {}",
+            extract_to.display(),
+            e
+        )
+    })?;
+    let mut command = Command::new("tar.exe");
+    command.arg("-xf").arg(archive_path).arg("-C").arg(&extract_to);
+    crate::process_util::hide_window(&mut command);
+    let status = command
+        .status()
+        .map_err(|e| format!("Could not start archive extractor: {}", e))?;
+    if !status.success() {
+        return Err(format!("Could not extract {}", file.label));
+    }
+    if !image_runtime_installed() {
+        if let Some(runtime_dir) = find_dir_containing(&extract_to, "sd-cli.exe") {
+            copy_runtime_files(&runtime_dir, &extract_to)?;
+        }
+    }
+    if !file_installed(file) {
+        return Err(format!("{} extracted, but required files were not found.", file.label));
+    }
+    Ok(())
 }
 
 fn download_file(
@@ -423,11 +580,16 @@ fn download_file(
     {
         return Err(format!("Downloaded file looks incomplete: {}", file.label));
     }
-    if destination.exists() {
-        let _ = std::fs::remove_file(&destination);
+    if file.extract_to.is_some() {
+        extract_archive(file, &temp)?;
+        let _ = std::fs::remove_file(&temp);
+    } else {
+        if destination.exists() {
+            let _ = std::fs::remove_file(&destination);
+        }
+        std::fs::rename(&temp, &destination)
+            .map_err(|e| format!("Could not move downloaded file into place: {}", e))?;
     }
-    std::fs::rename(&temp, &destination)
-        .map_err(|e| format!("Could not move downloaded file into place: {}", e))?;
     emit_progress(
         app,
         "done",
@@ -440,14 +602,15 @@ fn download_file(
 }
 
 #[tauri::command]
-pub fn get_setup_catalog(tier: String) -> SetupCatalog {
+pub fn get_setup_catalog(tier: String, has_nvidia_gpu: Option<bool>) -> SetupCatalog {
     let tier = match tier.as_str() {
         "light" | "balanced" | "high" => tier,
         _ => "balanced".to_string(),
     };
+    let has_nvidia_gpu = has_nvidia_gpu.unwrap_or(false);
     let brain = brain_files(&tier);
     let voice = voice_files(&tier);
-    let image = image_files(&tier);
+    let image = image_files(&tier, has_nvidia_gpu);
     SetupCatalog {
         tier: tier.clone(),
         parts: vec![
@@ -460,13 +623,13 @@ pub fn get_setup_catalog(tier: String) -> SetupCatalog {
             SetupPartCatalog {
                 key: "voice".to_string(),
                 title: "Voice".to_string(),
-                installed: files_installed(&voice),
+                installed: files_installed(&voice) && omnivoice_engine_installed(),
                 files: voice,
             },
             SetupPartCatalog {
                 key: "image".to_string(),
                 title: "Image Studio".to_string(),
-                installed: files_installed(&image),
+                installed: files_installed(&image) && image_runtime_installed(),
                 files: image,
             },
         ],
@@ -481,17 +644,19 @@ pub fn get_setup_catalog(tier: String) -> SetupCatalog {
 pub async fn install_setup_bundle(
     app: tauri::AppHandle,
     tier: String,
+    has_nvidia_gpu: Option<bool>,
 ) -> Result<SetupInstallResult, String> {
     let tier = match tier.as_str() {
         "light" | "balanced" | "high" => tier,
         _ => "balanced".to_string(),
     };
     let install_tier = tier.clone();
+    let install_has_nvidia_gpu = has_nvidia_gpu.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || -> Result<SetupInstallResult, String> {
         let mut all_files = Vec::new();
         all_files.extend(brain_files(&install_tier));
         all_files.extend(voice_files(&install_tier));
-        all_files.extend(image_files(&install_tier));
+        all_files.extend(image_files(&install_tier, install_has_nvidia_gpu));
         let file_count = all_files.len();
         emit_progress(
             &app,
@@ -524,7 +689,7 @@ pub async fn install_setup_bundle(
         Ok(SetupInstallResult {
             success: true,
             message: "Local companion models are installed.".to_string(),
-            catalog: get_setup_catalog(install_tier),
+            catalog: get_setup_catalog(install_tier, Some(install_has_nvidia_gpu)),
         })
     })
     .await

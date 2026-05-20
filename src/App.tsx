@@ -365,7 +365,10 @@ function App() {
   useEffect(() => {
     if (!settingsLoaded) return;
     const tier = setupTierOverride ?? installedSetupTierFromModel(selectedModelPath) ?? setupTierFromSystem(systemInfo);
-    invoke<SetupCatalog>("get_setup_catalog", { tier })
+    invoke<SetupCatalog>("get_setup_catalog", {
+      tier,
+      hasNvidiaGpu: systemInfo?.has_nvidia_gpu ?? false,
+    })
       .then(setSetupCatalog)
       .catch((error) => {
         console.error("Setup catalog error:", error);
@@ -1496,6 +1499,50 @@ ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
     }
 
     throw new Error("Timed out while updating the picture-aware brain engine.");
+  };
+
+  const ensureRuntimeEngineReady = async () => {
+    const hasNvidiaGpu = systemInfo?.has_nvidia_gpu ?? false;
+    try {
+      const ready = await invoke<boolean>("check_engine_ready");
+      if (ready) {
+        await refreshEngineInfo();
+        setEngineStatus("ready");
+        setEngineErrorMsg("");
+        return true;
+      }
+    } catch (error) {
+      console.error("Engine ready check error:", error);
+    }
+
+    setEngineStatus("downloading");
+    setSetupNotice("Preparing the brain engine for this PC...");
+    const result = await invoke<{ success: boolean; message: string }>("download_engine", {
+      hasNvidiaGpu,
+      forceRefresh: false,
+    });
+    if (!result.success) {
+      setEngineStatus("error");
+      setEngineErrorMsg(result.message);
+      throw new Error(result.message);
+    }
+
+    const deadline = Date.now() + 20 * 60 * 1000;
+    while (Date.now() < deadline) {
+      const ready = await invoke<boolean>("check_engine_ready");
+      if (ready) {
+        await refreshEngineInfo();
+        setEngineStatus("ready");
+        setEngineErrorMsg("");
+        return true;
+      }
+      setSetupNotice("Downloading and preparing the brain engine...");
+      await sleep(3000);
+    }
+
+    setEngineStatus("error");
+    setEngineErrorMsg("The brain engine did not become ready in time.");
+    throw new Error("The brain engine did not become ready in time.");
   };
 
   const loadModelPath = async (modelPath: string) => {
@@ -5160,22 +5207,26 @@ ${personalityMemory.trim()}`
     try {
       const result = await invoke<SetupInstallResult>("install_setup_bundle", {
         tier: activeSetupTier,
+        hasNvidiaGpu: systemInfo?.has_nvidia_gpu ?? false,
       });
       setSetupCatalog(result.catalog);
       setModelFolder(result.catalog.brain_model_folder);
       setSelectedModelPath(result.catalog.selected_brain_model_path);
       setSetupCompleted(true);
-      setSetupScreenOpen(false);
       setLeftPanelOpen(true);
       setRightPanelOpen(true);
-      setSetupNotice(result.message);
-      window.setTimeout(() => ensureConversationStartsAtBottom(), 0);
-      void prepareVoiceHelpers(true);
+      setSetupNotice("Models downloaded. Preparing the app for first use...");
+      await ensureRuntimeEngineReady();
       await scanModelLibrary(
         result.catalog.brain_model_folder,
         result.catalog.selected_brain_model_path,
         true,
       );
+      setPendingAutoLoadPath(result.catalog.selected_brain_model_path);
+      await prepareVoiceHelpers(true);
+      setSetupNotice(result.message);
+      setSetupScreenOpen(false);
+      window.setTimeout(() => ensureConversationStartsAtBottom(), 0);
     } catch (error) {
       console.error("Setup install error:", error);
       setSetupNotice(error instanceof Error ? error.message : String(error));

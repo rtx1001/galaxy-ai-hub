@@ -386,6 +386,7 @@ export type SetupFile = {
   url: string;
   destination: string;
   size_hint: string;
+  extract_to?: string | null;
 };
 
 export type SetupPartCatalog = {
@@ -1557,5 +1558,4 @@ export const previewTextForDetectedLanguage = (language?: string | null) => {
   if (normalized.startsWith("de")) return "Das ist eine Stimmprobe.";
   return "This is a preview of the voice.";
 };
-
 
