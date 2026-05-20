@@ -109,6 +109,7 @@ import {
 const CURRENT_APP_VERSION = "0.1.2";
 const GITHUB_RELEASES_API = "https://api.github.com/repos/rtx1001/galaxy-ai-hub/releases?per_page=10";
 const GITHUB_RELEASES_PAGE = "https://github.com/rtx1001/galaxy-ai-hub/releases";
+const MIN_CHAT_CONTEXT_SIZE = 8192;
 
 type AvailableUpdate = {
   version: string;
@@ -1687,9 +1688,14 @@ ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
 
     try {
       let activeGpuLayers = preferredChatGpuLayers;
+      const effectiveContextSize = Math.max(memorySize, MIN_CHAT_CONTEXT_SIZE);
+      if (effectiveContextSize !== memorySize) {
+        setMemorySize(effectiveContextSize);
+      }
+
       let result = await invoke<ModelStatus>("start_model", {
         modelPath,
-        contextSize: memorySize,
+        contextSize: effectiveContextSize,
         threads: recommendedThreads,
         gpuLayers: activeGpuLayers,
         reducedGpuLayers: reducedTaskGpuLayers,
@@ -1704,7 +1710,7 @@ ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
         await updateEngineForVision();
         result = await invoke<ModelStatus>("start_model", {
           modelPath,
-          contextSize: memorySize,
+          contextSize: effectiveContextSize,
           threads: recommendedThreads,
           gpuLayers: activeGpuLayers,
           reducedGpuLayers: reducedTaskGpuLayers,
@@ -1746,7 +1752,7 @@ ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
           });
           result = await invoke<ModelStatus>("start_model", {
             modelPath,
-            contextSize: memorySize,
+            contextSize: effectiveContextSize,
             threads: recommendedThreads,
             gpuLayers: activeGpuLayers,
             reducedGpuLayers: fallbackGpuLayers,
@@ -3396,7 +3402,7 @@ ${personalityMemory.trim()}`
         setMinP(clampNumber(stored.min_p ?? DEFAULT_SETTINGS.min_p, 0, 1));
         setRepeatLastN(clampNumber(stored.repeat_last_n ?? DEFAULT_SETTINGS.repeat_last_n, -1, 4096));
         setRepeatPenalty(clampNumber(stored.repeat_penalty ?? DEFAULT_SETTINGS.repeat_penalty, 0.8, 2));
-        setMemorySize(clampNumber(stored.memory_size, 512, 32768));
+        setMemorySize(clampNumber(stored.memory_size, MIN_CHAT_CONTEXT_SIZE, 32768));
         setReplyLength(clampNumber(stored.reply_length, 64, 4096));
         setIntelligenceQuality(clampNumber(stored.intelligence_quality, 0, 100));
         setPersonality(stored.personality || DEFAULT_SETTINGS.personality);
@@ -3981,7 +3987,7 @@ ${personalityMemory.trim()}`
         if (!systemDefaultsAppliedRef.current) {
           setMemorySize((prev) =>
             prev === DEFAULT_SETTINGS.memory_size
-              ? Math.max(prev, info.recommended_context_size)
+              ? Math.max(prev, info.recommended_context_size, MIN_CHAT_CONTEXT_SIZE)
               : prev,
           );
           systemDefaultsAppliedRef.current = true;
@@ -5240,7 +5246,7 @@ ${personalityMemory.trim()}`
               <div className="flex min-w-0 items-end gap-3">
                 <label className="block w-[132px] shrink-0">
                   <div className="mb-1 text-[11px] font-semibold text-[#c4c7c5]">Context size</div>
-                  <NumberStepper value={memorySize} min={512} max={32768} step={512} onChange={setMemorySize} className="w-[132px]" />
+                  <NumberStepper value={memorySize} min={MIN_CHAT_CONTEXT_SIZE} max={32768} step={512} onChange={setMemorySize} className="w-[132px]" />
                 </label>
                 <label className="block w-[132px] shrink-0">
                   <div className="mb-1 text-[11px] font-semibold text-[#c4c7c5]">Reply size</div>

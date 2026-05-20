@@ -229,7 +229,7 @@ impl Default for AppSettings {
             min_p: default_min_p(),
             repeat_last_n: default_repeat_last_n(),
             repeat_penalty: default_repeat_penalty(),
-            memory_size: 4096,
+            memory_size: 8192,
             reply_length: 512,
             intelligence_quality: 50,
             personality: "You are a helpful and friendly AI assistant.".to_string(),
