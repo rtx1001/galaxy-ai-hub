@@ -34,6 +34,16 @@ try {
   # First-start setup downloads the right runtime for the user's PC and can repair missing files later.
   New-Item -ItemType Directory -Path (Join-Path $portableRoot "src-tauri\engine") -Force | Out-Null
 
+  $voiceTtsBinSource = Join-Path $root "assistant-runtime\voice-tts\bin"
+  if (Test-Path $voiceTtsBinSource) {
+    $voiceTtsBinDest = Join-Path $portableRoot "assistant-runtime\voice-tts\bin"
+    New-Item -ItemType Directory -Path $voiceTtsBinDest -Force | Out-Null
+    Get-ChildItem -Path $voiceTtsBinSource -Filter "omnivoice-tts.exe" -File |
+      ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $voiceTtsBinDest -Force
+      }
+  }
+
   $samplesSource = Join-Path $root "assistant-runtime\voice\voice_samples"
   if (Test-Path $samplesSource) {
     $samplesDest = Join-Path $portableRoot "assistant-runtime\voice\voice_samples"

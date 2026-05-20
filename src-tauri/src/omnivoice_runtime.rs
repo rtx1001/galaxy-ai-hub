@@ -93,26 +93,21 @@ fn omnivoice_tts_executable_path() -> PathBuf {
         omnivoice_runtime_dir()
             .join("bin")
             .join("omnivoice-tts.exe"),
-        omnivoice_runtime_dir().join("bin").join("llama-tts.exe"),
         app_root_dir()
             .join("src-tauri")
             .join("engine")
             .join("omnivoice-tts.exe"),
-        app_root_dir()
-            .join("src-tauri")
-            .join("engine")
-            .join("llama-tts.exe"),
         app_root_dir().join("engine").join("omnivoice-tts.exe"),
-        app_root_dir().join("engine").join("llama-tts.exe"),
     ];
     candidates
         .into_iter()
         .find(|path| path.exists())
         .unwrap_or_else(|| {
             app_root_dir()
-                .join("src-tauri")
-                .join("engine")
-                .join("llama-tts.exe")
+                .join("assistant-runtime")
+                .join("voice-tts")
+                .join("bin")
+                .join("omnivoice-tts.exe")
         })
 }
 

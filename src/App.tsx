@@ -327,6 +327,7 @@ function App() {
   const selectedThemeSwatch =
     THEME_SWATCHS.find((swatch) => swatch.id === themeSwatchId) ?? THEME_SWATCHS[0];
   const setupRepairPromptedRef = useRef(false);
+  const voiceAutoPrepareStartedRef = useRef(false);
   const installedSetupTierFromModel = (path: string | null): SetupTier | null => {
     const normalized = (path || "").replace(/\\/g, "/").toLowerCase();
     if (normalized.includes("gemma-4-e2b")) return "light";
@@ -2038,6 +2039,26 @@ User location: ${localContext}`,
 
   const previewUserVoiceSample = async (sample: VoiceSample) => {
     await previewVoiceSample(sample);
+  };
+
+  const prepareVoiceHelpers = async (showNotice = false) => {
+    if (voiceAutoPrepareStartedRef.current) return;
+    voiceAutoPrepareStartedRef.current = true;
+    if (showNotice) {
+      setSetupNotice("Preparing voice helper so speech is ready on first use...");
+    }
+    try {
+      const voiceStatus = await invoke<VoiceSetupStatus>("start_voice_setup");
+      setVoiceSetupStatus(voiceStatus);
+    } catch (error) {
+      console.error("Voice helper auto-prepare error:", error);
+    }
+    try {
+      const ttsStatus = await invoke<VoiceSetupStatus>("prepare_omnivoice_engine");
+      setOmniVoiceStatus(ttsStatus);
+    } catch (error) {
+      console.error("Voice TTS auto-prepare error:", error);
+    }
   };
 
   const snapConversationToBottom = () => {
@@ -4178,6 +4199,16 @@ ${personalityMemory.trim()}`
     setSetupScreenOpen(true);
   }, [settingsLoaded, setupCompleted, setupScreenOpen, setupCatalog, setupHasMissingFiles]);
 
+  useEffect(() => {
+    if (!settingsLoaded || !setupCompleted || firstStartupSetupNeeded || voiceAutoPrepareStartedRef.current) {
+      return;
+    }
+    if (voiceSetupStatus.ready && omniVoiceStatus.ready) {
+      return;
+    }
+    void prepareVoiceHelpers(false);
+  }, [settingsLoaded, setupCompleted, firstStartupSetupNeeded, voiceSetupStatus.ready, omniVoiceStatus.ready]);
+
   const topProgressPercent =
     brainStatus === "Loading" || brainStatus === "Error"
       ? Math.max(8, modelLoadStatus.progress)
@@ -5139,6 +5170,7 @@ ${personalityMemory.trim()}`
       setRightPanelOpen(true);
       setSetupNotice(result.message);
       window.setTimeout(() => ensureConversationStartsAtBottom(), 0);
+      void prepareVoiceHelpers(true);
       await scanModelLibrary(
         result.catalog.brain_model_folder,
         result.catalog.selected_brain_model_path,
@@ -6149,5 +6181,3 @@ ${personalityMemory.trim()}`
 }
 
 export default App;
-
-
