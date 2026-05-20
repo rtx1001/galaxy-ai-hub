@@ -425,9 +425,9 @@ export const SETUP_PARTS: SetupPart[] = [
     title: "Brain",
     icon: "brain",
     purpose: "Main chat, reasoning, memory, and tool use.",
-    light: "Gemma 4 E2B GGUF Q4/Q5",
-    balanced: "Gemma 4 E4B GGUF Q5/Q6",
-    high: "Gemma 4 E4B GGUF Q8",
+    light: "Gemma 4 E2B Hauhau Q4",
+    balanced: "Gemma 4 E4B Hauhau Q4",
+    high: "Gemma 4 E4B Hauhau Q8",
     note: "The app always gives the LLM first priority.",
   },
   {
@@ -1558,4 +1558,3 @@ export const previewTextForDetectedLanguage = (language?: string | null) => {
   if (normalized.startsWith("de")) return "Das ist eine Stimmprobe.";
   return "This is a preview of the voice.";
 };
-

@@ -367,7 +367,7 @@ function App() {
   const installedSetupTierFromModel = (path: string | null): SetupTier | null => {
     const normalized = (path || "").replace(/\\/g, "/").toLowerCase();
     if (normalized.includes("gemma-4-e2b")) return "light";
-    if (normalized.includes("gemma-4-e4b-it-q8")) return "high";
+    if (normalized.includes("gemma-4-e4b") && normalized.includes("q8")) return "high";
     if (normalized.includes("gemma-4-e4b")) return "balanced";
     return null;
   };

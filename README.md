@@ -29,7 +29,9 @@ These are the current local test models used by this build. They are not stored 
 
 | Part | Current model/files | Used for |
 | --- | --- | --- |
-| Brain | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` | Chat, reasoning, personality, tool use |
+| Brain Light | `Gemma 4 E2B Hauhau Q4` | Chat, reasoning, personality, tool use on lighter PCs |
+| Brain Balanced | `Gemma 4 E4B Hauhau Q4` | Default local chat, reasoning, personality, tool use |
+| Brain High | `Gemma 4 E4B Hauhau Q8` | Higher-quality local chat for stronger PCs |
 | Image Studio | `Qwen-Rapid-NSFW-v23_Q4_K.gguf` | Text-to-image and image editing |
 | Image text encoder | `Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf` | Understanding image prompts |
 | Image projector | `Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf` | Multimodal image support |
@@ -38,11 +40,11 @@ These are the current local test models used by this build. They are not stored 
 | Voice tokenizer | `omnivoice-tokenizer-Q8_0.gguf` | Voice runtime tokenizer |
 | Voice helper | `faster-whisper-tiny` | Voice sample preparation |
 
-Recommended LLM direction for testing:
+Predefined LLM downloads for first startup:
 
-- **Light PC:** Gemma 4 E2B GGUF, Q4 or Q5.
-- **Balanced PC:** Gemma 4 E4B GGUF, Q5 or Q6.
-- **Alternative:** Qwen GGUF instruct models.
+- **Light PC:** `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` Q4 + matching vision projector.
+- **Balanced PC:** `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` Q4 + matching vision projector.
+- **High PC:** `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` Q8 + matching vision projector.
 
 ## Expected PC Specs
 
