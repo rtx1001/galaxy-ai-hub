@@ -3990,7 +3990,12 @@ async fn call_chat(
         .json(&payload)
         .send()
         .await
-        .map_err(|_| "Load a chat brain first, then try again.".to_string())?;
+        .map_err(|e| {
+            format!(
+                "Connection to the brain failed while sending chat request to http://127.0.0.1:8080/v1/chat/completions: {}",
+                e
+            )
+        })?;
 
     if !response.status().is_success() {
         let status = response.status();

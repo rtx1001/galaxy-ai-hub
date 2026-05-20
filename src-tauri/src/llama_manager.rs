@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::io::Write;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -8,6 +10,25 @@ use std::{
 use tauri::State;
 
 use crate::engine_paths;
+
+fn append_model_log(message: &str) {
+    let log_dir = crate::app_paths::app_root_dir().join("logs");
+    if std::fs::create_dir_all(&log_dir).is_err() {
+        return;
+    }
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    let line = format!("[{}] [model] {}\n", timestamp, message);
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_dir.join("galaxy-app.log"))
+    {
+        let _ = file.write_all(line.as_bytes());
+    }
+}
 
 #[derive(Clone)]
 pub struct LlamaState {
@@ -619,9 +640,22 @@ fn relaunch_model(
     command.stderr(std::process::Stdio::from(err_file));
     crate::process_util::hide_window(&mut command);
 
+    append_model_log(&format!(
+        "launch requested model={} context={} threads={} requested_gpu_layers={} applied_gpu_layers={} has_vision={} engine={} log={}",
+        model_path,
+        context_size,
+        threads.max(1),
+        gpu_layers,
+        placement.applied_gpu_layers,
+        has_vision,
+        server_path.display(),
+        log_path.display()
+    ));
+
     let child = command
         .spawn()
         .map_err(|e| format!("Failed to start llama-server.exe: {}", e))?;
+    append_model_log(&format!("process started pid={} model={}", child.id(), model_path));
     *process_guard = Some(child);
     Ok((has_vision, placement.applied_gpu_layers))
 }
@@ -772,6 +806,10 @@ pub fn get_model_load_status(state: State<'_, LlamaState>) -> ModelLoadStatus {
         match child.try_wait() {
             Ok(Some(status)) => {
                 *process_guard = None;
+                if let Ok(mut session_guard) = state.session.lock() {
+                    *session_guard = None;
+                }
+                append_model_log(&format!("process exited status={}", status));
 
                 let summary = summarize_load_from_log(&log_text);
                 if summary.state == "ready" {
@@ -813,7 +851,11 @@ pub fn get_model_load_status(state: State<'_, LlamaState>) -> ModelLoadStatus {
             progress: 0,
         }
     } else {
-        summarize_load_from_log(&log_text)
+        ModelLoadStatus {
+            state: "idle".to_string(),
+            message: "No active model process. Load the brain again before chatting.".to_string(),
+            progress: 0,
+        }
     }
 }
 

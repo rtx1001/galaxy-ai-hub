@@ -344,6 +344,8 @@ function App() {
   const activeChatAbortRef = useRef<AbortController | null>(null);
   const activeChatRequestRef = useRef(0);
   const activeTaskTypeRef = useRef(activeTaskType);
+  const modelLoadPromiseRef = useRef<Promise<void> | null>(null);
+  const modelLoadTargetRef = useRef("");
   const automationRunKeysRef = useRef<Set<string>>(new Set());
   const settingsHydratedAtRef = useRef(0);
   const telegramAutoStartAttemptedRef = useRef(false);
@@ -608,6 +610,34 @@ function App() {
     invoke("append_app_log", { message }).catch(() => {
       // Logging must never affect chat or voice playback.
     });
+  };
+
+  const collectBrainDiagnostics = async () => {
+    const parts = [
+      `brainStatus=${brainStatus}`,
+      `engineStatus=${engineStatus}`,
+      `modelState=${modelLoadStatus.state}`,
+      `selectedModel=${selectedModelPath || "none"}`,
+      `activeTask=${activeTaskTypeRef.current}`,
+    ];
+    try {
+      const healthStartedAt = performance.now();
+      const health = await fetch("http://127.0.0.1:8080/health", { cache: "no-store" });
+      parts.push(`health=${health.status}`);
+      parts.push(`health_ms=${Math.round(performance.now() - healthStartedAt)}`);
+      parts.push(`health_body=${JSON.stringify((await health.text()).slice(0, 300))}`);
+    } catch (error) {
+      parts.push(`health_error=${JSON.stringify(error instanceof Error ? error.message : String(error))}`);
+    }
+    try {
+      const status = await invoke<ModelLoadStatus>("get_model_load_status");
+      parts.push(`load_status=${status.state}`);
+      parts.push(`load_progress=${status.progress}`);
+      parts.push(`load_message=${JSON.stringify(status.message)}`);
+    } catch (error) {
+      parts.push(`load_status_error=${JSON.stringify(error instanceof Error ? error.message : String(error))}`);
+    }
+    return parts.join(" ");
   };
 
   const refreshPendingShellActions = async () => {
@@ -1627,6 +1657,19 @@ ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
       return;
     }
 
+    if (modelLoadPromiseRef.current) {
+      appLog(
+        `model-load join requested=${modelPath} active=${modelLoadTargetRef.current || "unknown"}`,
+      );
+      await modelLoadPromiseRef.current;
+      if (modelLoadTargetRef.current === modelPath || selectedModelPath === modelPath) {
+        return;
+      }
+    }
+
+    modelLoadTargetRef.current = modelPath;
+    const loadPromise = (async () => {
+
     setSelectedModelPath(modelPath);
     setBrainStatus("Loading");
     activeTaskTypeRef.current = "llm";
@@ -1738,6 +1781,16 @@ ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
         message: error instanceof Error ? error.message : String(error),
         progress: 100,
       });
+    }
+    })();
+    modelLoadPromiseRef.current = loadPromise;
+    try {
+      await loadPromise;
+    } finally {
+      if (modelLoadPromiseRef.current === loadPromise) {
+        modelLoadPromiseRef.current = null;
+        modelLoadTargetRef.current = "";
+      }
     }
   };
 
@@ -2634,6 +2687,9 @@ ${personalityMemory.trim()}`
         appLog(
           `chat-trace request model=${selectedModelPath || "none"} thinking=${thinkingEnabled} messages=${toolAgentMessages.length}/${newMessages.length} user=${JSON.stringify(promptText).slice(0, 600)}`,
         );
+        collectBrainDiagnostics()
+          .then((diagnostics) => appLog(`chat-diagnostics before_agent ${diagnostics}`))
+          .catch(() => {});
         const reactResult = await invoke<AgentReactResult>("agent_jan_chat", {
           runtimePrompt: profilePrompt,
           contextBlock: buildSystemContextBlock(),
@@ -2873,6 +2929,13 @@ ${personalityMemory.trim()}`
         return;
       }
       console.error("Chat error:", error);
+      collectBrainDiagnostics()
+        .then((diagnostics) =>
+          appLog(
+            `chat-error message=${JSON.stringify(error instanceof Error ? error.message : String(error))} ${diagnostics}`,
+          ),
+        )
+        .catch(() => {});
       if (error instanceof Error && error.name === "AbortError") {
         updateLastAssistantMessage((last) =>
           last.content === "" ? { ...last, content: "[Stopped]" } : last,
