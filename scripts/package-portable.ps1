@@ -30,16 +30,9 @@ try {
   Copy-Item -LiteralPath (Join-Path $root "README.md") -Destination (Join-Path $portableRoot "README.md") -ErrorAction SilentlyContinue
   Copy-Item -LiteralPath (Join-Path $root "Logo") -Destination (Join-Path $portableRoot "Logo") -Recurse -ErrorAction SilentlyContinue
 
-  $engineSource = Join-Path $root "src-tauri\engine"
-  if (Test-Path $engineSource) {
-    $engineDest = Join-Path $portableRoot "src-tauri\engine"
-    New-Item -ItemType Directory -Path $engineDest -Force | Out-Null
-    Get-ChildItem -Path $engineSource -File |
-      Where-Object { $_.Name -match '\.(exe|dll|txt)$' } |
-      ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination $engineDest -Force
-      }
-  }
+  # Do not bundle heavyweight engines in the portable starter package.
+  # First-start setup downloads the right runtime for the user's PC and can repair missing files later.
+  New-Item -ItemType Directory -Path (Join-Path $portableRoot "src-tauri\engine") -Force | Out-Null
 
   $samplesSource = Join-Path $root "assistant-runtime\voice\voice_samples"
   if (Test-Path $samplesSource) {
@@ -55,12 +48,7 @@ try {
       }
   }
 
-  $imageRuntimeSource = Join-Path $root "bin\stable-diffusion"
-  if (Test-Path $imageRuntimeSource) {
-    $imageRuntimeDest = Join-Path $portableRoot "bin\stable-diffusion"
-    New-Item -ItemType Directory -Path $imageRuntimeDest -Force | Out-Null
-    Copy-Item -LiteralPath $imageRuntimeSource -Destination (Join-Path $portableRoot "bin") -Recurse -Force
-  }
+  New-Item -ItemType Directory -Path (Join-Path $portableRoot "bin") -Force | Out-Null
 
   New-Item -ItemType Directory -Path (Join-Path $portableRoot "assistant-runtime") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $portableRoot "config") -Force | Out-Null
