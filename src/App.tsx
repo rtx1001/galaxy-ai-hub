@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import brandLogo from "./assets/logo-gah.svg";
 import { ChatContentPart, ChatMessage, ChatSessions, EngineInfo, ModelLoadStatus, VoiceSetupStatus, ActionProposal, FilePreviewResult } from "./types";
@@ -104,8 +105,41 @@ import {
   textLooksVietnamese,
   toLocalDateKey,
 } from "./appCore";
+
+const CURRENT_APP_VERSION = "0.1.1";
+const GITHUB_RELEASES_API = "https://api.github.com/repos/rtx1001/galaxy-ai-hub/releases?per_page=10";
+const GITHUB_RELEASES_PAGE = "https://github.com/rtx1001/galaxy-ai-hub/releases";
+
+type AvailableUpdate = {
+  version: string;
+  url: string;
+};
+
+const versionParts = (version: string) =>
+  version
+    .replace(/^v/i, "")
+    .split(/[.-]/)
+    .map((part) => {
+      const value = Number.parseInt(part, 10);
+      return Number.isFinite(value) ? value : 0;
+    });
+
+const isNewerVersion = (candidate: string, current: string) => {
+  const next = versionParts(candidate);
+  const installed = versionParts(current);
+  const length = Math.max(next.length, installed.length);
+  for (let index = 0; index < length; index += 1) {
+    const nextPart = next[index] ?? 0;
+    const installedPart = installed[index] ?? 0;
+    if (nextPart > installedPart) return true;
+    if (nextPart < installedPart) return false;
+  }
+  return false;
+};
+
 function App() {
   const [brainStatus, setBrainStatus] = useState<"Idle" | "Loading" | "Ready" | "Thinking" | "Error">("Idle");
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [engineStatus, setEngineStatus] = useState<"initializing" | "downloading" | "ready" | "error">("initializing");
   const [engineErrorMsg, setEngineErrorMsg] = useState("");
@@ -361,6 +395,43 @@ function App() {
       unlisten?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    const checkForAppUpdate = async () => {
+      try {
+        const response = await fetch(GITHUB_RELEASES_API, {
+          signal: controller.signal,
+          headers: { Accept: "application/vnd.github+json" },
+        });
+        if (!response.ok) return;
+        const releases = (await response.json()) as Array<{
+          tag_name?: string;
+          html_url?: string;
+          draft?: boolean;
+        }>;
+        const latest = releases.find((release) => !release.draft && release.tag_name);
+        if (!latest?.tag_name || cancelled) return;
+        if (isNewerVersion(latest.tag_name, CURRENT_APP_VERSION)) {
+          setAvailableUpdate({
+            version: latest.tag_name.replace(/^v/i, ""),
+            url: latest.html_url || GITHUB_RELEASES_PAGE,
+          });
+        }
+      } catch (error) {
+        if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
+          console.warn("Update check failed:", error);
+        }
+      }
+    };
+    void checkForAppUpdate();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [settingsLoaded]);
 
   useEffect(() => {
     if (!settingsLoaded) return;
@@ -5840,6 +5911,20 @@ ${personalityMemory.trim()}`
             <div className="mt-3 text-center text-[11px] font-medium text-[#9aa0a6]">
               {dateTimeLine}
             </div>
+
+            {availableUpdate && (
+              <div className="mt-2 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => openUrl(availableUpdate.url).catch((error) => console.error("Open release page error:", error))}
+                  className="inline-flex max-w-full items-center gap-2 rounded-full border border-[color:var(--accent-soft-strong)] bg-[color:var(--accent-soft)] px-3 py-1 text-[11px] font-bold tracking-[0.12em] text-[color:var(--accent-color)] transition hover:border-[color:var(--accent-color)] hover:bg-[color:var(--accent-soft-strong)]"
+                  title={`Open Galaxy AI Hub ${availableUpdate.version} release page`}
+                >
+                  <DownloadIcon />
+                  <span className="truncate">New Update available</span>
+                </button>
+              </div>
+            )}
 
             {topStatusText && (
               <div className="mt-1.5 rounded-2xl border border-[#282a2c] bg-[#1e1f20] px-3 py-1.5">
