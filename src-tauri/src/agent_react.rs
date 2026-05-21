@@ -3,113 +3,16 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone};
 use getrandom::getrandom;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::{agent_store, agent_web, file_tools, google_calendar, weather};
 
-#[derive(Debug, Clone, Copy)]
-pub struct SamplingConfig {
-    pub temperature: f32,
-    pub top_k: u32,
-    pub top_p: f32,
-    pub min_p: f32,
-    pub repeat_last_n: i32,
-    pub repeat_penalty: f32,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct ReactChatMessage {
-    pub role: String,
-    pub content: Value,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ReactChatResult {
-    pub answer: String,
-    pub thinking: Option<String>,
-    pub tool_used: Option<String>,
-    pub observation: Option<String>,
-    pub cards: Vec<ToolResultCard>,
-    pub image_proposal: Option<ImageProposal>,
-    pub file_preview: Option<file_tools::FilePreviewResult>,
-    pub action_proposal: Option<ActionProposal>,
-    pub tool_trace: Vec<ToolTrace>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolResultCard {
-    pub kind: String,
-    pub title: String,
-    pub summary: Option<String>,
-    pub fields: Vec<ToolResultField>,
-    pub items: Vec<ToolResultItem>,
-    pub text: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolResultField {
-    pub label: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolResultItem {
-    pub title: String,
-    pub subtitle: Option<String>,
-    pub details: Vec<ToolResultField>,
-    pub url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ImageProposal {
-    pub prompt: String,
-    pub mode: String,
-    pub mask_prompt: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ActionProposal {
-    pub action_type: String,
-    pub title: String,
-    pub details: String,
-    pub risk_level: String,
-    pub arguments: Value,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolTrace {
-    pub tool: String,
-    pub success: bool,
-    pub summary: String,
-}
-
-struct ToolOutcome {
-    observation: String,
-    cards: Vec<ToolResultCard>,
-    file_preview: Option<file_tools::FilePreviewResult>,
-    image_proposal: Option<ImageProposal>,
-    action_proposal: Option<ActionProposal>,
-    success: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ToolCall {
-    tool: String,
-    #[serde(default)]
-    arguments: Value,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ToolRoute {
-    MediaPreview,
-    Gmail,
-    Calendar,
-    Weather,
-    FileSearch,
-    WebSearch,
-    GoogleWorkspace,
-}
+mod types;
+pub use types::{
+    ActionProposal, ImageProposal, ReactChatMessage, ReactChatResult, SamplingConfig,
+    ToolResultCard, ToolResultField, ToolResultItem, ToolTrace,
+};
+use types::{ToolCall, ToolOutcome, ToolRoute};
 
 fn app_root() -> PathBuf {
     crate::app_paths::app_root_dir()
@@ -1388,6 +1291,7 @@ fn vietnamese_media_followup_term(text: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn trim_inline_token(token: &str) -> &str {
     token.trim_matches(|ch: char| {
         matches!(
@@ -2208,6 +2112,7 @@ fn request_mentions_calendar(text: &str) -> bool {
         || contains_any_folded(&lowered, &normalized, &["lịch", "sự kiện"])
 }
 
+#[cfg(test)]
 fn request_wants_calendar_write(text: &str) -> bool {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
@@ -2222,6 +2127,7 @@ fn request_wants_calendar_write(text: &str) -> bool {
         ))
 }
 
+#[cfg(test)]
 fn request_wants_recent_mail(text: &str) -> bool {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
@@ -2235,6 +2141,7 @@ fn request_wants_recent_mail(text: &str) -> bool {
             ))
 }
 
+#[cfg(test)]
 fn request_wants_mail_write(text: &str) -> bool {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
@@ -2891,6 +2798,7 @@ fn contextual_route_for_messages(messages: &[ReactChatMessage]) -> Option<ToolRo
     })
 }
 
+#[cfg(test)]
 fn latest_explicit_route_text(messages: &[ReactChatMessage], route: ToolRoute) -> Option<String> {
     let latest_index = messages.iter().rposition(|message| message.role == "user");
     messages
@@ -3569,7 +3477,7 @@ fn tool_allowed_for_route_kind(call: &ToolCall, route: Option<ToolRoute>) -> Res
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn tool_allowed_for_route(call: &ToolCall, user_text: &str) -> Result<(), String> {
     tool_allowed_for_route_kind(call, route_for_request(user_text))
 }
@@ -3615,7 +3523,6 @@ fn tool_allowed_for_context(call: &ToolCall, messages: &[ReactChatMessage]) -> R
     tool_allowed_for_route_kind(call, route)
 }
 
-#[allow(dead_code)]
 fn should_continue_after_observation(tool: &str, user_text: &str) -> bool {
     matches!(tool, "search_directory" | "list_media_files") && request_wants_preview(user_text)
 }

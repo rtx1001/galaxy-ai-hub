@@ -1,20 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import brandLogo from "./assets/logo-gah.svg";
-import { ChatContentPart, ChatMessage, ChatSessions, EngineInfo, ModelLoadStatus, VoiceSetupStatus, ActionProposal, FilePreviewResult } from "./types";
-import { CloseIcon, GearIcon, MenuIcon, DownloadIcon } from "./components/Icons";
+import { ChatContentPart, ChatMessage, ModelLoadStatus } from "./types";
+import { DownloadIcon } from "./components/Icons";
 import { IconButton } from "./components/UI";
-import { ResourceHeader } from "./components/ResourceHeader";
 import { SetupScreen } from "./components/SetupScreen";
 import { StartupScreen, SettingsLoadErrorScreen } from "./components/AppScreens";
 import { AutomationEditorModal } from "./components/AutomationEditorModal";
 import { LeftPanelContent, RightPanelContent } from "./components/SidePanelContent";
 import { ConversationPane } from "./components/ConversationPane";
 import { ChatComposer } from "./components/ChatComposer";
+import { AppHeader } from "./components/AppHeader";
+import { AvatarFileInputs } from "./components/AvatarFileInputs";
+import { AppSidePanel } from "./components/AppSidePanel";
+import { DropImageOverlay } from "./components/DropImageOverlay";
 import { FreshChatConfirmModal, GoogleEventModals, ImageViewerOverlay } from "./components/AppOverlays";
 import { useAvailableUpdate } from "./hooks/useAvailableUpdate";
 import { useDateTimeLine } from "./hooks/useDateTimeLine";
@@ -31,94 +31,75 @@ import { usePanelState } from "./hooks/usePanelState";
 import { useWorkspaceFolders } from "./hooks/useWorkspaceFolders";
 import { useImageStudioSettings } from "./hooks/useImageStudioSettings";
 import { useCompactLayout } from "./hooks/useCompactLayout";
-import { clampNumber } from "./utils";
+import { useShellActions } from "./hooks/useShellActions";
+import { useConversationScroll } from "./hooks/useConversationScroll";
+import { useRuntimeStatusDisplay } from "./hooks/useRuntimeStatusDisplay";
+import { useComposerText } from "./hooks/useComposerText";
+import { useThemeSelection } from "./hooks/useThemeSelection";
+import { useVoiceHelpers } from "./hooks/useVoiceHelpers";
+import { useVoiceInput } from "./hooks/useVoiceInput";
+import { useEngineBootstrap } from "./hooks/useEngineBootstrap";
+import { useDropdownDismiss } from "./hooks/useDropdownDismiss";
+import { useMissingTooltips } from "./hooks/useMissingTooltips";
+import { useTrayControls } from "./hooks/useTrayControls";
+import { useChatMessageMutations } from "./hooks/useChatMessageMutations";
+import { useModelLibraryActions } from "./hooks/useModelLibraryActions";
+import { useAutomationRunner } from "./hooks/useAutomationRunner";
+import { useVoicePlaybackManager } from "./hooks/useVoicePlaybackManager";
+import { useAutoSpeechQueue } from "./hooks/useAutoSpeechQueue";
+import { usePersonalityMemory } from "./hooks/usePersonalityMemory";
+import { useChatSessions } from "./hooks/useChatSessions";
+import { useStoredImageHydration } from "./hooks/useStoredImageHydration";
+import { useAppSettingsSave } from "./hooks/useAppSettingsSave";
+import { useCharacterFiles } from "./hooks/useCharacterFiles";
+import { useAppBackgroundRefresh } from "./hooks/useAppBackgroundRefresh";
+import { useAppSettingsLoad } from "./hooks/useAppSettingsLoad";
+import { useProfileActions } from "./hooks/useProfileActions";
+import { useActionProposals } from "./hooks/useActionProposals";
+import { useImageGeneration } from "./hooks/useImageGeneration";
+import { useTelegramControls } from "./hooks/useTelegramControls";
+import { useVoiceFolderActions } from "./hooks/useVoiceFolderActions";
+import { useSetupInstallActions } from "./hooks/useSetupInstallActions";
+import { useQuickImageGenerate } from "./hooks/useQuickImageGenerate";
+import { useRuntimePromptBuilders } from "./hooks/useRuntimePromptBuilders";
+import { useChatStop } from "./hooks/useChatStop";
 import {
   AgentReactResult,
-  AppSettings,
-  AudioSynthesisResult,
-  AutomationJob,
-  CharacterFiles,
-  CharacterSettings,
   DEFAULT_SETTINGS,
   DisplayLanguage,
-  FileActionResult,
-  LocalImageDataUrl,
-  MemoryItem,
   ModelLibraryEntry,
   ModelStatus,
-  OmniVoiceVramEstimate,
-  PendingShellAction,
   PersonalityPreset,
   SendOptions,
-  SetupInstallResult,
-  SPEECH_CACHE_LIMIT,
-  ShellExecutionResult,
-  TelegramBotStatus,
-  THEME_SWATCHS,
   UserProfilePreset,
-  VoiceSample,
-  SystemInfo,
-  VramMemoryStatus,
   buildBrainMessages,
   buildToolAgentMessages,
-  compactChatSessionForStorage,
-  compactSessionFingerprint,
-  conversationWantsVietnamese,
   createMessageId,
   detectDisplayLanguage,
-  detectVoicePreviewText,
   estimateTokens,
   extractChatResponseText,
   extractChoiceText,
   extractMessageText,
-  extractShellToolRequest,
   extractTextValue,
   findPendingActionProposal,
   findPendingImageProposal,
-  formatFileActionResult,
   formatReactThinking,
-  formatShellResult,
-  getAutomationDueAt,
   getDefaultLocalContext,
   googleEventMatchesDate,
-  includesAnyPhrase,
   isExplicitApprovalText,
   isGpuFitError,
-  normalizeIntentText,
-  parseStoredChatSession,
-  sanitizeTextForSpeech,
   sleep,
-  splitAssistantMessageForChat,
-  stripShellToolRequest,
   stripThinkBlocks,
-  syncSoulCoreIdentity,
-  textLooksVietnamese,
 } from "./appCore";
 
 const MIN_CHAT_CONTEXT_SIZE = 8192;
 
 function App() {
   const [brainStatus, setBrainStatus] = useState<"Idle" | "Loading" | "Ready" | "Thinking" | "Error">("Idle");
-  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
-  const [engineStatus, setEngineStatus] = useState<"initializing" | "downloading" | "ready" | "error">("initializing");
-  const [engineErrorMsg, setEngineErrorMsg] = useState("");
-  const [, setEngineInfo] = useState<EngineInfo | null>(null);
   const [modelLoadStatus, setModelLoadStatus] = useState<ModelLoadStatus>({
     state: "idle",
     message: "",
     progress: 0,
-  });
-  const [voiceSetupStatus, setVoiceSetupStatus] = useState<VoiceSetupStatus>({
-    state: "idle",
-    message: "Voice helper is waiting.",
-    progress: 0,
-    ready: false,
-  });
-  const [omniVoiceStatus, setOmniVoiceStatus] = useState<VoiceSetupStatus>({
-    state: "idle",
-    message: "Voice playback engine is waiting.",
-    progress: 0,
-    ready: false,
   });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const chatDisplayLanguage: DisplayLanguage = (() => {
@@ -127,9 +108,14 @@ function App() {
       .find((message) => message.role === "user" && extractMessageText(message.content).trim());
     return detectDisplayLanguage(extractMessageText(latestUserText?.content ?? ""));
   })();
-  const [chatSessions, setChatSessions] = useState<ChatSessions>({});
-  const [input, setInput] = useState("");
-  const [composerHasText, setComposerHasText] = useState(false);
+  const {
+    input,
+    composerHasText,
+    composerInputRef,
+    lastComposerInputAtRef,
+    setComposerText,
+    handleComposerInput,
+  } = useComposerText();
   const [userName, setUserName] = useState(DEFAULT_SETTINGS.user_name);
   const [userAvatar, setUserAvatar] = useState(DEFAULT_SETTINGS.user_avatar);
   const [userDescription, setUserDescription] = useState(DEFAULT_SETTINGS.user_description);
@@ -144,8 +130,6 @@ function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const {
     isAudioPlaying,
@@ -153,8 +137,6 @@ function App() {
     playAudioBase64,
     stopActiveAudio,
   } = useAudioPlayback();
-  const [pendingShellActions, setPendingShellActions] = useState<PendingShellAction[]>([]);
-  const [executingShellActionId, setExecutingShellActionId] = useState<number | null>(null);
   const { toolRuns, toolRunsOpen, setToolRunsOpen, refreshToolRuns } = useToolRuns(DEFAULT_SETTINGS.ui_tool_activity_open);
   const {
     automationOpen,
@@ -179,6 +161,20 @@ function App() {
   const [freshChatConfirmOpen, setFreshChatConfirmOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [composerNotice, setComposerNotice] = useState("");
+  const {
+    pendingShellActions,
+    executingShellActionId,
+    addPendingShellAction,
+    refreshPendingShellActions,
+    handleShellToolRequest,
+    recordClientToolRun,
+    rejectShellAction,
+    approveShellAction,
+  } = useShellActions({
+    refreshToolRuns,
+    setComposerNotice,
+    setMessages,
+  });
   const {
     automationJobs,
     setAutomationJobs,
@@ -238,9 +234,14 @@ function App() {
     revealImageLocation,
     openImageViewer,
   } = useImageAttachments({ setComposerNotice });
-  const [showScrollBottom, setShowScrollBottom] = useState(false);
-  const [themePickerOpen, setThemePickerOpen] = useState(false);
-  const [themeSwatchId, setThemeSwatchId] = useState(DEFAULT_SETTINGS.theme_swatch_id);
+  const {
+    themePickerOpen,
+    setThemePickerOpen,
+    themeSwatchId,
+    setThemeSwatchId,
+    selectedThemeSwatch,
+    themeSwatches,
+  } = useThemeSelection();
   const [clearMemoryConfirmOpen, setClearMemoryConfirmOpen] = useState(false);
   const [clearSessionToo, setClearSessionToo] = useState(false);
   const [deletePersonalityConfirmOpen, setDeletePersonalityConfirmOpen] = useState(false);
@@ -330,9 +331,21 @@ function App() {
   const [personalityAvatar, setPersonalityAvatar] = useState(DEFAULT_SETTINGS.personality_presets[0].avatar ?? "");
   const [personalityPresets, setPersonalityPresets] = useState<PersonalityPreset[]>(DEFAULT_SETTINGS.personality_presets);
   const [selectedPersonalityId, setSelectedPersonalityId] = useState(DEFAULT_SETTINGS.selected_personality_id);
-  const [personalityMemory, setPersonalityMemory] = useState("");
-  const [characterSoul, setCharacterSoul] = useState("");
-  const [characterFolder, setCharacterFolder] = useState("");
+  const {
+    characterSoul,
+    characterFolder,
+    saveActiveCharacterFiles,
+  } = useCharacterFiles({
+    settingsLoaded,
+    settingsReadyForSave,
+    selectedPersonalityId,
+    selectedVoicePath,
+    personality,
+    personalityAvatar,
+    personalityPresets,
+    setPersonalityPresets,
+    setSelectedVoicePath,
+  });
   const [modelFolder, setModelFolder] = useState(DEFAULT_SETTINGS.model_folder);
   const {
     linkedFolders,
@@ -346,6 +359,18 @@ function App() {
   const [hasVision, setHasVision] = useState(false);
   const [activeTaskType, setActiveTaskType] = useState<"none" | "llm" | "voice" | "image">("none");
   const [pendingAutoLoadPath, setPendingAutoLoadPath] = useState<string | null>(null);
+  const {
+    systemInfo,
+    engineStatus,
+    setEngineStatus,
+    engineErrorMsg,
+    setEngineErrorMsg,
+    recommendedThreads,
+    refreshEngineInfo,
+  } = useEngineBootstrap({
+    minContextSize: MIN_CHAT_CONTEXT_SIZE,
+    setMemorySize,
+  });
   const {
     setupCompleted,
     setSetupCompleted,
@@ -370,6 +395,14 @@ function App() {
     selectedModelPath,
     systemInfo,
   });
+  const {
+    voiceSetupStatus,
+    omniVoiceStatus,
+    prepareVoiceHelpers,
+  } = useVoiceHelpers({
+    lastComposerInputAtRef,
+    setSetupNotice,
+  });
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [quickModelMenuOpen, setQuickModelMenuOpen] = useState(false);
   const [personalityMenuOpen, setPersonalityMenuOpen] = useState(false);
@@ -385,29 +418,13 @@ function App() {
     setRightPanelOpen,
   });
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
   const userAvatarPickerRef = useRef<HTMLInputElement | null>(null);
   const personalityAvatarPickerRef = useRef<HTMLInputElement | null>(null);
   const avatarTargetPersonalityIdRef = useRef<string | null>(null);
-  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const lastComposerInputAtRef = useRef(0);
   const lastUiInteractionAtRef = useRef(0);
-  const conversationScrollRef = useRef<HTMLElement | null>(null);
-  const conversationEndRef = useRef<HTMLDivElement | null>(null);
-  const lastMessageCountRef = useRef(0);
-  const chatSessionsRef = useRef<ChatSessions>({});
-  const loadedChatSessionIdsRef = useRef<Set<string>>(new Set());
-  const sessionShadowRef = useRef<Record<string, string>>({});
-  const lastSessionMutationAtRef = useRef<Record<string, number>>({});
-  const personalityMemoryShadowRef = useRef<Record<string, string>>({});
-  const systemDefaultsAppliedRef = useRef(false);
-  const speechCacheRef = useRef<Map<string, AudioSynthesisResult>>(new Map());
   const voicePlaybackRequestRef = useRef(0);
   const lastAutoSpokenAssistantIdRef = useRef<string | null>(null);
   const autoSpeechEligibleAssistantIdsRef = useRef<Set<string>>(new Set());
-  const autoSpeechQueueRef = useRef<string[]>([]);
   const liveConversationRef = useRef(liveConversation);
   const sendInFlightRef = useRef(false);
   const activeChatAbortRef = useRef<AbortController | null>(null);
@@ -421,9 +438,30 @@ function App() {
 
   const currentModelEntry =
     availableModels.find((model) => model.path === selectedModelPath) ?? null;
+  const currentModelName =
+    currentModelEntry?.name || selectedModel || (selectedModelPath ? "Selected brain" : "No model selected");
   const localContext = getDefaultLocalContext();
   const selectedUserProfile =
     userProfiles.find((profile) => profile.id === selectedUserProfileId) ?? userProfiles[0] ?? DEFAULT_SETTINGS.user_profiles[0];
+  const selectedPersonalityPreset =
+    personalityPresets.find((preset) => preset.id === selectedPersonalityId) ?? personalityPresets[0];
+  const assistantAvatar = selectedPersonalityPreset?.avatar || personalityAvatar || "";
+  const {
+    personalityMemory,
+    updatePersonalityMemoryAfterTurn,
+    deletePersonalityMemory,
+    handleClearPersonalityMemory,
+  } = usePersonalityMemory({
+    settingsLoaded,
+    selectedPersonalityId,
+    telegramRunning,
+    isStreaming,
+    clearSessionToo,
+    lastComposerInputAtRef,
+    setMessages,
+    setClearMemoryConfirmOpen,
+    setClearSessionToo,
+  });
   const selectedUserVoicePath = selectedUserProfile?.voice_path || "";
   const {
     voiceSamples,
@@ -441,17 +479,11 @@ function App() {
     voiceSamples.find((sample) => sample.path === selectedVoicePath) ?? null;
   const selectedUserVoiceSample =
     voiceSamples.find((sample) => sample.path === selectedUserVoicePath) ?? null;
-  const selectedThemeSwatch =
-    THEME_SWATCHS.find((swatch) => swatch.id === themeSwatchId) ?? THEME_SWATCHS[0];
-  const voiceAutoPrepareStartedRef = useRef(false);
 
   useEffect(() => {
     activeTaskTypeRef.current = activeTaskType;
   }, [activeTaskType]);
 
-  const recommendedThreads = systemInfo
-    ? clampNumber(Math.min(systemInfo.cpu_threads, 8), 2, Math.max(2, systemInfo.cpu_threads))
-    : 4;
   const preferredChatGpuLayers = systemInfo?.has_nvidia_gpu ? 999 : 0;
   const reducedTaskGpuLayers = systemInfo?.has_nvidia_gpu
     ? Math.min(
@@ -466,144 +498,58 @@ function App() {
       )
     : 0;
 
-  const refreshEngineInfo = async () => {
-    const info = await invoke<EngineInfo>("get_engine_info");
-    setEngineInfo(info);
-    return info;
-  };
-
   const markUiInteraction = () => {
     lastUiInteractionAtRef.current = Date.now();
   };
+  const {
+    conversationScrollRef,
+    conversationEndRef,
+    lastMessageCountRef,
+    showScrollBottom,
+    handleChatScroll,
+    scrollToBottom,
+    ensureConversationStartsAtBottom,
+  } = useConversationScroll({
+    markUiInteraction,
+    messagesLength: messages.length,
+    selectedPersonalityId,
+  });
+  const {
+    saveActiveChatSession,
+    loadChatSessionForPersonality,
+    registerEmptyChatSession,
+    removeChatSession,
+    clearActiveChatSession,
+  } = useChatSessions({
+    settingsLoaded,
+    selectedPersonalityId,
+    messages,
+    setMessages,
+    lastMessageCountRef,
+    ensureConversationStartsAtBottom,
+    telegramRunning,
+    isStreaming,
+    sendInFlightRef,
+    lastComposerInputAtRef,
+  });
 
-  const updateLastAssistantMessage = (
-    updater: (message: ChatMessage) => ChatMessage,
-  ) => {
-    setMessages((prev) => {
-      if (prev.length === 0) return prev;
-      const updated = [...prev];
-      const last = updated[updated.length - 1];
-      if (last.role !== "assistant") return prev;
-      updated[updated.length - 1] = updater(last);
-      return updated;
-    });
-  };
-
-  const updateAssistantMessageById = (
-    messageId: string,
-    updater: (message: ChatMessage) => ChatMessage,
-  ) => {
-    setMessages((prev) =>
-      prev.map((message) =>
-        message.id === messageId && message.role === "assistant" ? updater(message) : message,
-      ),
-    );
-  };
-
-  const finalizeAssistantMessageById = (
-    messageId: string,
-    updater: (message: ChatMessage) => ChatMessage,
-  ) => {
-    let splitIds: string[] = [];
-    setMessages((prev) => {
-      const index = prev.findIndex((message) => message.id === messageId && message.role === "assistant");
-      if (index < 0) return prev;
-      const next = [...prev];
-      const updated = updater(next[index]);
-      const splitMessages = splitAssistantMessageForChat(updated);
-      splitIds = splitMessages.map((message) => message.id);
-      next.splice(index, 1, ...splitMessages);
-      return next;
-    });
-    return splitIds.length ? splitIds : [messageId];
-  };
-
-  const deleteImageFromChatMessage = (messageId: string) => {
-    setMessages((prev) =>
-      prev.map((message) =>
-        message.id === messageId && Array.isArray(message.content)
-          ? {
-              ...message,
-              content: [{ type: "text", text: "Image deleted." }],
-              thinking: undefined,
-            }
-          : message,
-      ),
-    );
-    setCollapsedImageParts((prev) => {
-      const next: Record<string, boolean> = {};
-      Object.entries(prev).forEach(([key, value]) => {
-        if (!key.startsWith(`${messageId}:`)) {
-          next[key] = value;
-        }
-      });
-      return next;
-    });
-    autoSpeechEligibleAssistantIdsRef.current.delete(messageId);
-    if (lastAutoSpokenAssistantIdRef.current === messageId) {
-      lastAutoSpokenAssistantIdRef.current = null;
-    }
-    if (speakingMessageId === messageId) {
-      voicePlaybackRequestRef.current += 1;
-      stopActiveAudio();
-      setSpeakingMessageId(null);
-    }
-  };
-
-  const enrichPreviewPerception = async (messageId: string, preview: FilePreviewResult) => {
-    const mime = preview.mime_type.toLowerCase();
-    if (!preview.data_url || !mime.startsWith("audio/") || preview.perception) {
-      return;
-    }
-    if (!voiceSetupStatus.ready || preview.size_bytes > 30 * 1024 * 1024) {
-      return;
-    }
-
-    try {
-      const result = await invoke<{ text: string; language: string; language_probability: number }>("transcribe_audio", {
-        audioDataUrl: preview.data_url,
-      });
-      const text = result.text.trim();
-      if (!text) {
-        return;
-      }
-      const perception = `Transcript (${result.language || "unknown"}): ${text}`;
-      updateAssistantMessageById(messageId, (message) => {
-        if (!Array.isArray(message.content)) return message;
-        return {
-          ...message,
-          content: message.content.map((part) =>
-            part.type === "file_preview" && part.file_preview.path === preview.path
-              ? { ...part, file_preview: { ...part.file_preview, perception } }
-              : part,
-          ),
-        };
-      });
-    } catch (error) {
-      console.error("Preview transcription error:", error);
-    }
-  };
-
-  const saveActiveChatSession = (
-    personalityId = selectedPersonalityId,
-    session = messages,
-  ) => {
-    if (!personalityId) return;
-    chatSessionsRef.current = {
-      ...chatSessionsRef.current,
-      [personalityId]: session,
-    };
-    setChatSessions((prev) =>
-      prev[personalityId] === session ? prev : { ...prev, [personalityId]: session },
-    );
-  };
-
-  const loadChatSessionForPersonality = (personalityId: string) => {
-    const session = chatSessionsRef.current[personalityId] ?? [];
-    setMessages(session);
-    lastMessageCountRef.current = session.length;
-    ensureConversationStartsAtBottom();
-  };
+  const {
+    updateLastAssistantMessage,
+    updateAssistantMessageById,
+    finalizeAssistantMessageById,
+    deleteImageFromChatMessage,
+    enrichPreviewPerception,
+  } = useChatMessageMutations({
+    setMessages,
+    setCollapsedImageParts,
+    autoSpeechEligibleAssistantIdsRef,
+    lastAutoSpokenAssistantIdRef,
+    voicePlaybackRequestRef,
+    speakingMessageId,
+    setSpeakingMessageId,
+    stopActiveAudio,
+    voiceSetupReady: voiceSetupStatus.ready,
+  });
 
   const appLog = (message: string) => {
     console.info(`[Galaxy] ${message}`);
@@ -638,101 +584,6 @@ function App() {
       parts.push(`load_status_error=${JSON.stringify(error instanceof Error ? error.message : String(error))}`);
     }
     return parts.join(" ");
-  };
-
-  const refreshPendingShellActions = async () => {
-    try {
-      const actions = await invoke<PendingShellAction[]>("list_pending_shell_actions");
-      setPendingShellActions(actions);
-    } catch (error) {
-      console.error("Pending shell action load error:", error);
-    }
-  };
-
-  const handleShellToolRequest = async (assistantMessageId: string, replyText: string) => {
-    const request = extractShellToolRequest(replyText);
-    if (!request?.command?.trim()) {
-      return replyText;
-    }
-
-    const visibleReply =
-      stripShellToolRequest(replyText) ||
-      "I prepared a system action. Review it below before it runs.";
-    const action = await invoke<PendingShellAction>("propose_shell_action", {
-      command: request.command,
-      workingDirectory: request.working_directory || undefined,
-      purpose: request.purpose || "Run the requested local system action.",
-      timeoutSeconds: request.timeout_seconds || 30,
-    });
-    const finalReply = `${visibleReply}\n\nWaiting for your approval before running: ${action.purpose}`;
-    setPendingShellActions((prev) => [...prev.filter((item) => item.id !== action.id), action]);
-    setMessages((prev) =>
-      prev.map((message) =>
-        message.id === assistantMessageId
-          ? {
-              ...message,
-              content: finalReply,
-            }
-          : message,
-      ),
-    );
-    setComposerNotice("A system action is waiting for approval.");
-    return finalReply;
-  };
-
-  const recordClientToolRun = async (
-    toolName: string,
-    input: Record<string, unknown>,
-    outputText: string,
-    success: boolean,
-    startedAt: number,
-  ) => {
-    const durationMs = Math.max(0, Math.round(performance.now() - startedAt));
-    await invoke("record_agent_tool_run", {
-      run: {
-        tool_name: toolName,
-        input_json: JSON.stringify(input),
-        output_text: outputText,
-        success,
-        duration_ms: durationMs,
-      },
-    });
-    refreshToolRuns().catch((error) => console.error("Tool activity refresh error:", error));
-  };
-
-  const rejectShellAction = async (id: number) => {
-    await invoke<boolean>("reject_shell_action", { id });
-    setPendingShellActions((prev) => prev.filter((action) => action.id !== id));
-  };
-
-  const approveShellAction = async (action: PendingShellAction) => {
-    setExecutingShellActionId(action.id);
-    try {
-      const result = await invoke<ShellExecutionResult>("execute_shell_action", { id: action.id });
-      await invoke("record_agent_tool_run", {
-        run: {
-          tool_name: "powershell",
-          input_json: JSON.stringify(action),
-          output_text: formatShellResult(result),
-          success: !result.timed_out && result.exit_code === 0,
-          duration_ms: Math.round(result.duration_ms),
-        },
-      }).catch(() => undefined);
-      refreshToolRuns().catch((error) => console.error("Tool activity refresh error:", error));
-      setPendingShellActions((prev) => prev.filter((item) => item.id !== action.id));
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: createMessageId(),
-          role: "assistant",
-          content: formatShellResult(result),
-        },
-      ]);
-    } catch (error) {
-      setComposerNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setExecutingShellActionId(null);
-    }
   };
 
   const processSseEvent = (eventChunk: string) => {
@@ -794,40 +645,47 @@ function App() {
     activeTaskTypeRef.current = taskType;
     setActiveTaskType(taskType);
   };
+  const {
+    isRecording,
+    isTranscribing,
+    handleMicToggle,
+  } = useVoiceInput({
+    composerInputRef,
+    input,
+    setComposerNotice,
+    setComposerText,
+    unloadLlmForTask,
+    voiceSetupStatus,
+  });
 
-  const chooseVoiceVramMode = async () => {
-    const llmIsLoaded =
-      activeTaskTypeRef.current === "llm" ||
-      brainStatus === "Ready" ||
-      brainStatus === "Thinking";
-
-    if (!llmIsLoaded) {
-      activeTaskTypeRef.current = "voice";
-      setActiveTaskType("voice");
-      return "voice-only" as const;
-    }
-
-    try {
-      const [vram, estimate] = await Promise.all([
-        invoke<VramMemoryStatus>("get_vram_memory_status"),
-        invoke<OmniVoiceVramEstimate>("estimate_omnivoice_vram_need"),
-      ]);
-      appLog(
-        `voice vram check free=${vram.free_mb}MB used=${vram.used_mb}MB total=${vram.total_mb}MB need=${estimate.required_mb}MB`,
-      );
-
-      if (vram.available && vram.free_mb >= estimate.required_mb) {
-        setComposerNotice("Loading voice...");
-        return "shared" as const;
-      }
-    } catch (error) {
-      console.error("Voice VRAM check error:", error);
-      appLog(`voice vram check failed ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    await unloadLlmForTask("voice");
-    return "swapped" as const;
-  };
+  const {
+    playAutoSpeechQueue,
+    previewVoiceSample,
+    speakMessageText,
+  } = useVoicePlaybackManager({
+    activeTaskTypeRef,
+    autoSpeechEligibleAssistantIdsRef,
+    brainStatus,
+    ensureAudioPlaybackUnlocked,
+    isStreaming,
+    lastAutoSpokenAssistantIdRef,
+    messages,
+    playAudioBase64,
+    previewingVoicePath,
+    recordClientToolRun,
+    selectedUserVoicePath,
+    selectedVoicePath,
+    sendInFlightRef,
+    setActiveTaskType,
+    setBrainStatus,
+    setComposerNotice,
+    setPreviewingVoicePath,
+    setSpeakingMessageId,
+    stopActiveAudio,
+    unloadLlmForTask,
+    voicePlaybackRequestRef,
+    appLog,
+  });
 
   const waitForModelReady = async (message = "Loading the selected brain...") => {
     const deadline = Date.now() + 10 * 60 * 1000;
@@ -870,185 +728,6 @@ function App() {
     }
 
     throw new Error("Timed out waiting for the brain to become ready.");
-  };
-
-  const rememberSpeech = (key: string, value: AudioSynthesisResult) => {
-    const cache = speechCacheRef.current;
-    cache.delete(key);
-    cache.set(key, value);
-
-    while (cache.size > SPEECH_CACHE_LIMIT) {
-      const oldestKey = cache.keys().next().value;
-      if (!oldestKey) break;
-      cache.delete(oldestKey);
-    }
-  };
-
-  const synthesizeAndPlaySpeech = async (
-    text: string,
-    voiceSamplePath: string,
-    requestId: number,
-    manageVram = true,
-  ) => {
-    const speechText = sanitizeTextForSpeech(text);
-    if (!speechText) {
-      return;
-    }
-
-    stopActiveAudio();
-    const cleanText = speechText.trim();
-    const cacheKey = JSON.stringify([voiceSamplePath || "", cleanText]);
-    const cached = speechCacheRef.current.get(cacheKey);
-    const voiceTaskStartedAt = performance.now();
-    const voiceInput = {
-      voice_sample: voiceSamplePath ? voiceSamplePath.split(/[/\\]/).pop() : "default",
-      text: cleanText.slice(0, 220),
-      manage_vram: manageVram,
-    };
-
-    if (cached) {
-      if (requestId !== voicePlaybackRequestRef.current) return;
-      recordClientToolRun(
-        "voice_cached",
-        { ...voiceInput, cached: true },
-        "Played cached voice audio.",
-        true,
-        voiceTaskStartedAt,
-      ).catch(() => undefined);
-      await playAudioBase64(cached.audio_base64, cached.mime_type);
-      return;
-    }
-
-    let voiceMode: "shared" | "swapped" | "voice-only" | "none" = "none";
-    let result: AudioSynthesisResult;
-    try {
-      if (manageVram) {
-        voiceMode = await chooseVoiceVramMode();
-      }
-
-      setComposerNotice("Loading voice...");
-      appLog(`voice synth start sample=${voiceSamplePath || "<design>"} request=${requestId} manageVram=${manageVram} mode=${voiceMode}`);
-      await invoke("prepare_omnivoice_engine").catch(() => undefined);
-      appLog(`voice synth engine ready sample=${voiceSamplePath || "<design>"} request=${requestId}`);
-      result = await invoke<AudioSynthesisResult>("synthesize_speech", {
-        text: cleanText,
-        voiceSamplePath: voiceSamplePath || null,
-        useSidecar: false,
-      });
-    } catch (error) {
-      if (manageVram && voiceMode === "shared" && isGpuFitError(error)) {
-        appLog(`voice synth shared mode failed from GPU memory, retrying with LLM unloaded`);
-        await unloadLlmForTask("voice");
-        try {
-          result = await invoke<AudioSynthesisResult>("synthesize_speech", {
-            text: cleanText,
-            voiceSamplePath: voiceSamplePath || null,
-            useSidecar: false,
-          });
-        } catch (retryError) {
-          recordClientToolRun(
-            "voice_speech",
-            { ...voiceInput, mode: "swapped" },
-            retryError instanceof Error ? retryError.message : String(retryError),
-            false,
-            voiceTaskStartedAt,
-          ).catch(() => undefined);
-          throw retryError;
-        }
-      } else {
-        recordClientToolRun(
-          "voice_speech",
-          { ...voiceInput, mode: voiceMode },
-          error instanceof Error ? error.message : String(error),
-          false,
-          voiceTaskStartedAt,
-        ).catch(() => undefined);
-        throw error;
-      }
-    }
-    appLog(`voice synth received audio bytes_b64=${result.audio_base64.length} request=${requestId}`);
-    rememberSpeech(cacheKey, result);
-    if (requestId !== voicePlaybackRequestRef.current) return;
-    recordClientToolRun(
-      "voice_speech",
-      { ...voiceInput, mode: voiceMode },
-      "Generated voice audio.",
-      true,
-      voiceTaskStartedAt,
-    ).catch(() => undefined);
-    await playAudioBase64(result.audio_base64, result.mime_type);
-    appLog(`voice synth playback started request=${requestId}`);
-  };
-
-  const speakMessageText = async (
-    messageId: string,
-    text: string,
-    role: "user" | "assistant",
-  ) => {
-    const speechText = sanitizeTextForSpeech(text);
-    if (!speechText.trim()) {
-      return;
-    }
-
-    setSpeakingMessageId(messageId);
-    const requestId = ++voicePlaybackRequestRef.current;
-    const voicePath = role === "user" ? selectedUserVoicePath : selectedVoicePath;
-    try {
-      await synthesizeAndPlaySpeech(speechText, voicePath, requestId);
-      setComposerNotice("");
-    } catch (error) {
-      console.error("Speech error:", error);
-      setComposerNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (requestId === voicePlaybackRequestRef.current) {
-        setSpeakingMessageId(null);
-      }
-      if (activeTaskTypeRef.current === "voice") {
-        activeTaskTypeRef.current = "none";
-        setActiveTaskType("none");
-      }
-      if (!sendInFlightRef.current && !isStreaming) {
-        setBrainStatus(activeTaskTypeRef.current === "llm" ? "Ready" : "Idle");
-      }
-    }
-  };
-
-  const playAutoSpeechQueue = async (queue: string[], requestId: number) => {
-    for (const messageId of queue) {
-      if (requestId !== voicePlaybackRequestRef.current) return;
-      const message = messages.find((item) => item.id === messageId && item.role === "assistant");
-      const speechText = sanitizeTextForSpeech(message ? extractMessageText(message.content) : "");
-      if (!speechText.trim()) {
-        autoSpeechEligibleAssistantIdsRef.current.delete(messageId);
-        continue;
-      }
-
-      autoSpeechEligibleAssistantIdsRef.current.delete(messageId);
-      lastAutoSpokenAssistantIdRef.current = messageId;
-      setSpeakingMessageId(messageId);
-      try {
-        await synthesizeAndPlaySpeech(speechText, selectedVoicePath, requestId);
-      } catch (error) {
-        console.error("Live speech error:", error);
-        appLog(`live speech failed message=${messageId} error=${error instanceof Error ? error.message : String(error)}`);
-        setComposerNotice(error instanceof Error ? error.message : String(error));
-        return;
-      } finally {
-        if (requestId === voicePlaybackRequestRef.current) {
-          setSpeakingMessageId(null);
-        }
-        if (activeTaskTypeRef.current === "voice") {
-          activeTaskTypeRef.current = "none";
-          setActiveTaskType("none");
-        }
-      }
-    }
-    if (requestId === voicePlaybackRequestRef.current) {
-      setComposerNotice("");
-      if (!sendInFlightRef.current && !isStreaming) {
-        setBrainStatus(activeTaskTypeRef.current === "llm" ? "Ready" : "Idle");
-      }
-    }
   };
 
   const generateNaturalImageCompletionReply = async (
@@ -1121,40 +800,6 @@ ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
       console.error("Image completion reply error:", error);
       appLog(`image completion reply failed error=${error instanceof Error ? error.message : String(error)}`);
       return "";
-    }
-  };
-
-  const previewVoiceSample = async (sample: VoiceSample) => {
-    if (previewingVoicePath === sample.path) {
-      voicePlaybackRequestRef.current += 1;
-      stopActiveAudio();
-      setPreviewingVoicePath(null);
-      return;
-    }
-
-    voicePlaybackRequestRef.current += 1;
-    stopActiveAudio();
-    const requestId = voicePlaybackRequestRef.current;
-    setPreviewingVoicePath(sample.path);
-    try {
-      await ensureAudioPlaybackUnlocked().catch(() => null);
-      await synthesizeAndPlaySpeech(
-        detectVoicePreviewText(sample),
-        sample.path,
-        requestId,
-      );
-      setComposerNotice("");
-    } catch (error) {
-      console.error("Voice preview error:", error);
-      setComposerNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (requestId === voicePlaybackRequestRef.current) {
-        setPreviewingVoicePath(null);
-      }
-      if (activeTaskTypeRef.current === "voice") {
-        activeTaskTypeRef.current = "none";
-        setActiveTaskType("none");
-      }
     }
   };
 
@@ -1428,138 +1073,42 @@ ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
     }
   };
 
-  const scanModelLibrary = async (
-    folderPath: string,
-    preferredPath?: string,
-    autoLoad?: boolean,
-  ) => {
-    if (!folderPath) {
-      setAvailableModels([]);
-      setSelectedModelPath("");
-      setSelectedModel(null);
-      return;
-    }
+  const {
+    scanModelLibrary,
+    handleChooseModelFolder,
+  } = useModelLibraryActions({
+    modelFolder,
+    engineStatus,
+    setAvailableModels,
+    setSelectedModelPath,
+    setSelectedModel,
+    setModelFolder,
+    setPendingAutoLoadPath,
+    setComposerNotice,
+    loadModelPath,
+  });
 
-    try {
-      const models = await invoke<ModelLibraryEntry[]>("scan_model_folder", {
-        folderPath,
-      });
-      setAvailableModels(models);
-
-      if (models.length === 0) {
-        setComposerNotice("No GGUF brains were found in that folder.");
-        setSelectedModelPath("");
-        return;
-      }
-
-      const targetPath =
-        preferredPath && models.some((model) => model.path === preferredPath)
-          ? preferredPath
-          : models[0].path;
-      setSelectedModelPath(targetPath);
-      setComposerNotice("");
-
-      if (autoLoad) {
-        if (engineStatus === "ready") {
-          await loadModelPath(targetPath);
-        } else {
-          setPendingAutoLoadPath(targetPath);
-        }
-      }
-    } catch (error) {
-      console.error("Model library scan error:", error);
-      setComposerNotice(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const handleChooseModelFolder = async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "Choose your GGUF library folder",
-      defaultPath: modelFolder || undefined,
-    });
-
-    if (typeof selected !== "string") {
-      return;
-    }
-
-    setModelFolder(selected);
-    await scanModelLibrary(selected, "", false);
-  };
-
-  const handleChooseVoiceFolder = async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "Choose voice samples folder",
-      defaultPath: voiceFolder || undefined,
-    });
-
-    if (typeof selected !== "string") {
-      return;
-    }
-
-    setVoiceFolder(selected);
-    updateActiveCharacterVoicePath("");
-  };
-
-  const handleTestTelegram = async () => {
-    setTelegramStatus("Checking Telegram...");
-    try {
-      const status = await invoke<TelegramBotStatus>("test_telegram_bot", {
-        token: telegramBotToken,
-      });
-      setTelegramStatus(status.message);
-    } catch (error) {
-      setTelegramStatus(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const buildSystemContextBlock = () => [
-    `Time: ${new Date().toLocaleString()}`,
-    `Location: ${localContext}`,
-    `Default location: ${localContext}`,
-    `Character folder: ${characterFolder || "not initialized"}`,
-    `Active model: ${currentModelName}`,
-    `Workspace folders: ${linkedFolders.length ? linkedFolders.join("; ") : "none"}`,
-    `Google: ${googleStatus.connected ? "online" : "offline"}`,
-    `Telegram: ${telegramRunning ? "online" : "offline"}`,
-    `Voice: input ${voiceSetupStatus.ready ? "ready" : "not ready"}, tts ${omniVoiceStatus.ready ? "ready" : "not ready"}`,
-    "Image: local Qwen image model",
-  ].join(" | ");
-
-  const buildAssistantRuntimePrompt = () => {
-    const activePersonality =
-      personalityPresets.find((preset) => preset.id === selectedPersonalityId) ?? personalityPresets[0];
-    return [
-      `Assistant profile:
-Name: ${activePersonality?.name || "Assistant"}
-Instructions:
-${personality || activePersonality?.prompt || "Helpful assistant."}
-`,
-      characterSoul.trim() ? `\nAdditional character context:\n${characterSoul.trim()}` : "",
-      personalityMemory.trim()
-        ? `\nConversation memory:
-${personalityMemory.trim()}
-`
-        : "",
-      userName.trim() || userDescription.trim()
-        ? `\nUser profile:\nName: ${userName.trim() || "User"}\nAbout user: ${userDescription.trim() || "No extra details."}`
-        : "",
-      linkedFolders.length
-        ? `\nPermitted workspace folders:\n${linkedFolders.join("\n")}`
-        : "\nPermitted workspace folders: none selected.",
-      `\nConnected utilities:
-Google Calendar: ${googleStatus.connected ? `online${googleStatus.email ? ` (${googleStatus.email})` : ""}` : "offline"}
-Gmail: ${googleStatus.connected ? "online" : "offline"}
-Telegram control: ${telegramRunning ? "online" : "offline"}
-Voice input: ${voiceSetupStatus.ready ? "ready" : "not ready"}
-Voice TTS: ${omniVoiceStatus.ready ? "ready" : "not ready"}
-Image generation: local Qwen image model
-User location: ${localContext}`,
-    ].join("");
-  };
+  const {
+    buildAssistantRuntimePrompt,
+    buildSystemContextBlock,
+  } = useRuntimePromptBuilders({
+    characterFolder,
+    characterSoul,
+    currentModelName,
+    googleConnected: googleStatus.connected,
+    googleEmail: googleStatus.email ?? undefined,
+    linkedFolders,
+    localContext,
+    omniVoiceReady: omniVoiceStatus.ready,
+    personality,
+    personalityMemory,
+    personalityPresets,
+    selectedPersonalityId,
+    telegramRunning,
+    userDescription,
+    userName,
+    voiceInputReady: voiceSetupStatus.ready,
+  });
 
   const updateActiveCharacterVoicePath = (voicePath: string) => {
     setSelectedVoicePath(voicePath);
@@ -1571,435 +1120,151 @@ User location: ${localContext}`,
     );
   };
 
-  const updateActiveUserProfile = (patch: Partial<UserProfilePreset>) => {
-    setUserProfiles((prev) =>
-      prev.map((profile) =>
-        profile.id === selectedUserProfileId ? { ...profile, ...patch } : profile,
-      ),
-    );
-  };
+  const {
+    createUserProfile,
+    deleteSelectedPersonalityPreset,
+    deleteSelectedUserProfile,
+    openPersonalityProfile,
+    openUserProfile,
+    saveActiveUserProfile,
+    saveCurrentPersonalityPreset,
+    selectPersonalityPreset,
+    selectUserProfile,
+    updateActiveUserProfile,
+    updateActiveUserVoicePath,
+    updateSelectedPersonalityPreset,
+  } = useProfileActions({
+    characterSoul,
+    clearImage,
+    deletePersonalityMemory,
+    loadChatSessionForPersonality,
+    personality,
+    personalityAvatar,
+    personalityNameDraft,
+    personalityPresets,
+    registerEmptyChatSession,
+    removeChatSession,
+    saveActiveCharacterFiles,
+    saveActiveChatSession,
+    selectedPersonalityId,
+    selectedPersonalityPreset,
+    selectedUserProfile,
+    selectedUserProfileId,
+    selectedUserVoicePath,
+    selectedVoicePath,
+    setComposerNotice,
+    setComposerText,
+    setMessages,
+    setPersonality,
+    setPersonalityAvatar,
+    setPersonalityNameDraft,
+    setPersonalityPresets,
+    setPersonalityProfileOpen,
+    setSelectedPersonalityId,
+    setSelectedUserProfileId,
+    setSelectedVoicePath,
+    setUserAvatar,
+    setUserDescription,
+    setUserLatitude,
+    setUserLocationLabel,
+    setUserLongitude,
+    setUserName,
+    setUserProfileMenuOpen,
+    setUserProfileOpen,
+    setUserProfiles,
+    userAvatar,
+    userDescription,
+    userLatitude,
+    userLocationLabel,
+    userLongitude,
+    userName,
+    userProfiles,
+  });
 
-  const updateActiveUserVoicePath = (voicePath: string) => {
-    updateActiveUserProfile({ voice_path: voicePath });
-  };
+  const { handleChooseVoiceFolder } = useVoiceFolderActions({
+    setVoiceFolder,
+    updateActiveCharacterVoicePath,
+    voiceFolder,
+  });
 
-  const saveActiveCharacterFiles = async (
-    override?: Partial<CharacterSettings> & { name?: string; soul?: string },
-  ) => {
-    const activePersonality =
-      personalityPresets.find((preset) => preset.id === selectedPersonalityId) ?? personalityPresets[0];
-    if (!activePersonality) return;
-    const nextName = override?.name ?? activePersonality.name;
-    const nextPrompt = override?.prompt ?? (personality || activePersonality.prompt || "");
-    const settings: CharacterSettings = {
-      voice_path: override?.voice_path ?? selectedVoicePath ?? "",
-      avatar: override?.avatar ?? activePersonality.avatar ?? personalityAvatar ?? "",
-      prompt: nextPrompt,
-      greeting: override?.greeting ?? "",
-      notes: override?.notes ?? "",
-    };
-    const nextSoul = syncSoulCoreIdentity(override?.soul ?? characterSoul, nextName, nextPrompt);
-    const saved = await invoke<CharacterFiles>("save_character_files", {
-      id: activePersonality.id,
-      name: nextName,
-      soul: nextSoul,
-      settings,
-    });
-    setCharacterSoul(saved.soul);
-    setCharacterFolder(saved.folder);
-  };
+  const {
+    handleStartTelegram,
+    handleStopTelegram,
+    handleTestTelegram,
+    setAutoVoiceMode,
+  } = useTelegramControls({
+    buildAssistantRuntimePrompt,
+    ensureAudioPlaybackUnlocked,
+    googleClientId,
+    googleClientSecret,
+    linkedFolders,
+    liveConversation,
+    minP,
+    repeatLastN,
+    repeatPenalty,
+    replyLength,
+    samplingTemperature,
+    setLiveConversation,
+    setTelegramRunning,
+    setTelegramStatus,
+    telegramBotToken,
+    telegramOwnerId,
+    thinkingEnabled,
+    topK,
+    topP,
+  });
 
-  const handleStartTelegram = async () => {
-    setTelegramStatus("Starting Telegram control...");
-    try {
-      const status = await invoke<TelegramBotStatus>("start_telegram_bot", {
-        token: telegramBotToken,
-        ownerUserId: telegramOwnerId,
-        systemPrompt: buildAssistantRuntimePrompt(),
-        temperature: samplingTemperature,
-        thinkingEnabled,
-        topK,
-        topP,
-        minP,
-        repeatLastN,
-        repeatPenalty,
-        maxTokens: Math.min(replyLength, 768),
-        googleClientId,
-        googleClientSecret,
-        folders: linkedFolders,
-      });
-      setTelegramRunning(status.success);
-      setTelegramStatus(status.message);
-    } catch (error) {
-      setTelegramRunning(false);
-      setTelegramStatus(error instanceof Error ? error.message : String(error));
-    }
-  };
+  const {
+    approveActionProposal,
+    dismissChatPart,
+    dismissImageProposal,
+    executeActionProposal,
+    naturalizeSystemResult,
+  } = useActionProposals({
+    addPendingShellAction,
+    ensureChatModelReady,
+    googleClientId,
+    googleClientSecret,
+    linkedFolders,
+    messages,
+    minP,
+    repeatLastN,
+    repeatPenalty,
+    replyLength,
+    samplingTemperature,
+    selectedUserProfile,
+    setComposerNotice,
+    setIsApproving,
+    setMessages,
+    topK,
+    topP,
+    userName,
+  });
 
-  const handleStopTelegram = async () => {
-    try {
-      const status = await invoke<TelegramBotStatus>("stop_telegram_bot");
-      setTelegramRunning(false);
-      setTelegramStatus(status.message);
-    } catch (error) {
-      setTelegramStatus(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const setAutoVoiceMode = (enabled: boolean) => {
-    if (enabled) {
-      ensureAudioPlaybackUnlocked().catch(() => null);
-      invoke("prepare_omnivoice_engine").catch(() => undefined);
-    }
-    setLiveConversation(enabled);
-  };
-
-  const personalityMemoryKind = (id = selectedPersonalityId) => `personality:${id}`;
-
-  const handleChatScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    markUiInteraction();
-    const target = e.target as HTMLDivElement;
-    const isScrolledUp = target.scrollHeight - target.scrollTop - target.clientHeight > 150;
-    setShowScrollBottom(isScrolledUp);
-  };
-
-  const scrollToBottom = () => {
-    if (conversationScrollRef.current) {
-      conversationScrollRef.current.scrollTo({
-        top: conversationScrollRef.current.scrollHeight,
-        behavior: "smooth"
-      });
-    }
-  };
-
-  const previewUserVoiceSample = async (sample: VoiceSample) => {
-    await previewVoiceSample(sample);
-  };
-
-  const prepareVoiceHelpers = async (showNotice = false) => {
-    if (voiceAutoPrepareStartedRef.current) return;
-    voiceAutoPrepareStartedRef.current = true;
-    if (showNotice) {
-      setSetupNotice("Preparing voice helper so speech is ready on first use...");
-    }
-    try {
-      const voiceStatus = await invoke<VoiceSetupStatus>("start_voice_setup");
-      setVoiceSetupStatus(voiceStatus);
-    } catch (error) {
-      console.error("Voice helper auto-prepare error:", error);
-    }
-    try {
-      const ttsStatus = await invoke<VoiceSetupStatus>("prepare_omnivoice_engine");
-      setOmniVoiceStatus(ttsStatus);
-    } catch (error) {
-      console.error("Voice TTS auto-prepare error:", error);
-    }
-  };
-
-  const snapConversationToBottom = () => {
-    const container = conversationScrollRef.current;
-    if (!container) return;
-    container.scrollTo({
-      top: container.scrollHeight,
-      behavior: "auto",
-    });
-  };
-
-  const ensureConversationStartsAtBottom = () => {
-    window.requestAnimationFrame(() => {
-      snapConversationToBottom();
-      window.requestAnimationFrame(() => {
-        snapConversationToBottom();
-      });
-    });
-    window.setTimeout(() => {
-      snapConversationToBottom();
-    }, 60);
-  };
-
-  const compactPersonalityMemory = (memory: string, feedback: string) => {
-    const cleanFeedback = feedback.replace(/\s+/g, " ").trim();
-    if (!cleanFeedback) return memory.trim();
-    const bullet = `- ${cleanFeedback}`;
-    const existing = memory
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .filter((line) => line !== bullet);
-    const next = [...existing, bullet].slice(-14).join("\n");
-    return next.length > 2200 ? next.slice(next.length - 2200).replace(/^[^\n]*\n?/, "") : next;
-  };
-
-  const isPersonalityTrainingFeedback = (text: string) => {
-    const lower = normalizeIntentText(text);
-    return includesAnyPhrase(lower, [
-      "remember",
-      "learn",
-      "from now on",
-      "answer like",
-      "dont answer",
-      "do not answer",
-      "bad answer",
-      "good answer",
-      "format like",
-      "style like",
-      "sai",
-    ]);
-  };
-
-  const updatePersonalityMemoryAfterTurn = async (userText: string, answerText: string) => {
-    if (!selectedPersonalityId || !isPersonalityTrainingFeedback(userText)) return;
-    const feedback = `User feedback: ${userText}${answerText.trim() ? ` | Last answer summary: ${answerText.trim().slice(0, 220)}` : ""}`;
-    const nextMemory = compactPersonalityMemory(personalityMemory, feedback);
-    setPersonalityMemory(nextMemory);
-    personalityMemoryShadowRef.current[selectedPersonalityId] = nextMemory;
-    try {
-      await invoke<MemoryItem>("remember_local_memory", {
-        kind: personalityMemoryKind(),
-        key: "compact_style_memory",
-        value: nextMemory,
-        source: "personality_training",
-        confidence: 0.9,
-      });
-    } catch (error) {
-      console.error("Personality memory save error:", error);
-    }
-  };
-
-  const deletePersonalityMemory = async (personalityId: string) => {
-    try {
-      const items = await invoke<MemoryItem[]>("list_local_memory", {
-        kind: personalityMemoryKind(personalityId),
-        limit: 100,
-      });
-      await Promise.all(items.map((item) => invoke<boolean>("forget_local_memory", { id: item.id })));
-    } catch (error) {
-      console.error("Personality memory delete error:", error);
-    }
-  };
-
-  const handleClearPersonalityMemory = async () => {
-    if (!selectedPersonalityId) return;
-    try {
-      // Clear the compact style memory from the DB
-      await deletePersonalityMemory(selectedPersonalityId);
-      setPersonalityMemory("");
-      // Optionally clear the saved chat session too
-      if (clearSessionToo) {
-        await invoke<boolean>("delete_personality_chat_session", { personalityId: selectedPersonalityId });
-        setMessages([]);
-      }
-    } catch (error) {
-      console.error("Clear memory error:", error);
-    } finally {
-      setClearMemoryConfirmOpen(false);
-      setClearSessionToo(false);
-    }
-  };
-
-  const dismissImageProposal = (messageId: string, proposalIndex: number) => {
-    setMessages((prev) =>
-      prev.map((message) => {
-        if (message.id !== messageId || !Array.isArray(message.content)) {
-          return message;
-        }
-        const nextContent = message.content.filter((_, index) => index !== proposalIndex);
-        return {
-          ...message,
-          content: nextContent.length ? nextContent : "Image creation was cancelled.",
-        };
-      }),
-    );
-  };
-
-  const dismissChatPart = (messageId: string, partIndex: number, fallbackText: string) => {
-    setMessages((prev) =>
-      prev.map((message) => {
-        if (message.id !== messageId || !Array.isArray(message.content)) {
-          return message;
-        }
-        const nextContent = message.content.filter((_, index) => index !== partIndex);
-        return {
-          ...message,
-          content: nextContent.length ? nextContent : fallbackText,
-        };
-      }),
-    );
-  };
-
-  const proposalString = (proposal: ActionProposal, key: string) => {
-    const value = proposal.arguments?.[key];
-    return typeof value === "string" ? value : "";
-  };
-
-  const proposalJsonPayload = (proposal: ActionProposal, key: string) => {
-    const value = proposal.arguments?.[key];
-    if (value == null) {
-      return null;
-    }
-    if (typeof value === "string") {
-      return value;
-    }
-    return JSON.stringify(value);
-  };
-
-  const executeActionProposal = async (proposal: ActionProposal) => {
-    if (proposal.action_type === "write_file") {
-      const result = await invoke<FileActionResult>("write_linked_text_file", {
-        relativePath: proposalString(proposal, "relative_path"),
-        content: proposalString(proposal, "content"),
-        rootFolder: proposalString(proposal, "root_folder") || linkedFolders[0],
-        folders: linkedFolders,
-      });
-      return formatFileActionResult(result);
-    }
-    if (proposal.action_type === "move_file") {
-      const result = await invoke<FileActionResult>("move_linked_file", {
-        source: proposalString(proposal, "source"),
-        destinationRelativePath: proposalString(proposal, "destination_relative_path"),
-        rootFolder: proposalString(proposal, "root_folder") || linkedFolders[0],
-        folders: linkedFolders,
-      });
-      return formatFileActionResult(result);
-    }
-    if (proposal.action_type === "delete_file") {
-      const result = await invoke<FileActionResult>("trash_linked_file", {
-        source: proposalString(proposal, "source"),
-        folders: linkedFolders,
-      });
-      return formatFileActionResult(result);
-    }
-    if (proposal.action_type === "run_powershell") {
-      const action = await invoke<PendingShellAction>("propose_shell_action", {
-        command: proposalString(proposal, "command"),
-        workingDirectory: proposalString(proposal, "working_directory") || undefined,
-        purpose: proposalString(proposal, "purpose") || proposal.details,
-        timeoutSeconds: Number(proposal.arguments?.timeout_seconds) || 30,
-      });
-      setPendingShellActions((prev) => [...prev.filter((item) => item.id !== action.id), action]);
-      return `System action is waiting for final approval: ${action.purpose}`;
-    }
-    if (proposal.action_type === "gmail_send") {
-      return await invoke<string>("send_google_gmail_message", {
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        to: proposalString(proposal, "to"),
-        subject: proposalString(proposal, "subject"),
-        body: proposalString(proposal, "body"),
-        senderName: selectedUserProfile?.name || userName || undefined,
-      });
-    }
-    if (proposal.action_type === "gmail_trash") {
-      return await invoke<string>("trash_google_gmail_message", {
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        id: proposalString(proposal, "id"),
-      });
-    }
-    if (proposal.action_type === "calendar_create") {
-      const result = await invoke<{ id: string; title: string; html_link: string | null }>("create_google_calendar_event", {
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        title: proposalString(proposal, "title"),
-        start: proposalString(proposal, "start"),
-        end: proposalString(proposal, "end"),
-        description: proposalString(proposal, "description") || null,
-        location: proposalString(proposal, "location") || null,
-      });
-      return `Event created: "${result.title}"${result.html_link ? ` \u2014 [Open in Calendar](${result.html_link})` : ""}`;
-    }
-    if (proposal.action_type === "calendar_delete") {
-      return await invoke<string>("delete_google_calendar_event", {
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        id: proposalString(proposal, "id"),
-      });
-    }
-    if (proposal.action_type === "google_contact_delete") {
-      return await invoke<string>("delete_google_contact", {
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        resourceName: proposalString(proposal, "resource_name"),
-      });
-    }
-    if (proposal.action_type === "google_action") {
-      return await invoke<string>("execute_google_api", {
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        method: proposalString(proposal, "method") || "POST",
-        url: proposalString(proposal, "url"),
-        payload: proposalJsonPayload(proposal, "payload"),
-      });
-    }
-    throw new Error("This action type is not supported yet.");
-  };
-
-  const naturalizeSystemResult = async (userRequest: string, rawResult: string) => {
-    const trimmed = rawResult.trim();
-    if (!trimmed) return "";
-    try {
-      const ready = await ensureChatModelReady();
-      if (!ready) return trimmed;
-      const languageHint = conversationWantsVietnamese(messages) || textLooksVietnamese(userRequest)
-        ? "Reply in natural Vietnamese matching the current conversation."
-        : "Reply in the current conversation language.";
-      const response = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          stream: false,
-          temperature: samplingTemperature,
-          top_k: topK,
-          top_p: topP,
-          min_p: minP,
-          repeat_last_n: repeatLastN,
-          repeat_penalty: repeatPenalty,
-          max_tokens: Math.min(160, replyLength),
-          messages: [
-            {
-              role: "system",
-              content: `Turn a verified system/tool result into one short, natural assistant reply. ${languageHint} Do not expose message IDs, raw API wording, JSON, tool names, or backend status unless the user explicitly needs it.`,
-            },
-            {
-              role: "user",
-              content: `Original user request:\n${userRequest.trim() || "(scheduled automation)"}\n\nVerified result:\n${trimmed}`,
-            },
-          ],
-        }),
-      });
-      if (!response.ok) return trimmed;
-      const body = await response.json();
-      const reply = body?.choices?.[0]?.message?.content;
-      return typeof reply === "string" && reply.trim() ? reply.trim() : trimmed;
-    } catch (error) {
-      console.error("Naturalize system result error:", error);
-      return trimmed;
-    }
-  };
-
-  const approveActionProposal = async (messageId: string, partIndex: number, proposal: ActionProposal) => {
-    setIsApproving(true);
-    try {
-      console.log("Approving action:", proposal.action_type, proposal.arguments);
-      const rawResult = await executeActionProposal(proposal);
-      const naturalResultText = await naturalizeSystemResult(proposal.details || proposal.action_type, rawResult);
-      dismissChatPart(messageId, partIndex, "Action approved.");
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: createMessageId(),
-          role: "assistant",
-          content: naturalResultText,
-        },
-      ]);
-      return;
-    } catch (error) {
-      console.error("Action approval error:", error);
-      setComposerNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsApproving(false);
-    }
-  };
+  const { handleGenerateImage } = useImageGeneration({
+    appLog,
+    assistantAvatar,
+    autoSpeechEligibleAssistantIdsRef,
+    clearImage,
+    composerInputRef,
+    generateNaturalImageCompletionReply,
+    image,
+    imageHeight,
+    imageWidth,
+    input,
+    isGeneratingImage,
+    liveConversationRef,
+    messages,
+    recordClientToolRun,
+    setComposerNotice,
+    setComposerText,
+    setIsGeneratingImage,
+    setMessages,
+    unloadLlmForTask,
+    updateAssistantMessageById,
+    updateLastAssistantMessage,
+    userAvatar,
+  });
 
   const handleSend = async (options: SendOptions = {}) => {
     const promptText = options.text ?? composerInputRef.current?.value ?? input;
@@ -2442,462 +1707,102 @@ ${personalityMemory.trim()}`
     }
   };
 
-  const stopActiveResponse = () => {
-    activeChatRequestRef.current += 1;
-    activeChatAbortRef.current?.abort();
-    activeChatAbortRef.current = null;
-    sendInFlightRef.current = false;
-    setIsStreaming(false);
-    setBrainStatus("Ready");
-    setComposerNotice("Stopped.");
-  };
+  const { stopActiveResponse } = useChatStop({
+    activeChatAbortRef,
+    activeChatRequestRef,
+    sendInFlightRef,
+    setBrainStatus,
+    setComposerNotice,
+    setIsStreaming,
+  });
 
-  useEffect(() => {
-    if (!settingsLoaded) return;
+  useAutomationRunner({
+    settingsLoaded,
+    automationJobs,
+    isStreaming,
+    engineStatus,
+    selectedModelPath,
+    sendInFlightRef,
+    lastComposerInputAtRef,
+    automationRunKeysRef,
+    setComposerNotice,
+    setAutomationJobs,
+    handleSend,
+  });
 
-    const checkAutomations = () => {
-      if (sendInFlightRef.current || isStreaming || engineStatus !== "ready" || !selectedModelPath) {
-        return;
-      }
-      if (Date.now() - lastComposerInputAtRef.current < 1200) return;
+  const { handleQuickImageGenerate } = useQuickImageGenerate({
+    appLog,
+    handleSend,
+    imageHeight,
+    imageWidth,
+    isGeneratingImage,
+    quickImagePrompt,
+    recordClientToolRun,
+    setComposerNotice,
+    setIsGeneratingImage,
+    setQuickImagePrompt,
+    unloadLlmForTask,
+  });
 
-      const now = new Date();
-      const dueJob = automationJobs.find((job) => {
-        if (!job.enabled) return false;
-        const dueAt = getAutomationDueAt(job, now);
-        if (!dueAt) return false;
-        if ((job.last_run_at ?? 0) * 1000 >= dueAt) return false;
-        const runKey = `${job.id}:${dueAt}`;
-        if (automationRunKeysRef.current.has(runKey)) return false;
-        automationRunKeysRef.current.add(runKey);
-        return true;
-      });
-
-      if (!dueJob) return;
-
-      setComposerNotice(`Running scheduled task: ${dueJob.name}`);
-      invoke<AutomationJob>("mark_automation_job_ran", { id: dueJob.id })
-        .then((updated) => {
-          setAutomationJobs((prev) => prev.map((job) => (job.id === updated.id ? updated : job)));
-        })
-        .catch((error) => console.error("Automation mark error:", error));
-
-      handleSend({
-        text: dueJob.prompt,
-        sourceLabel: dueJob.name,
-        skipLocalIntent: true,
-        silentUser: true,
-        autoApproveActions: true,
-      }).catch((error) => console.error("Automation run error:", error));
-    };
-
-    checkAutomations();
-    const handle = window.setInterval(checkAutomations, 15_000);
-    return () => window.clearInterval(handle);
-  }, [settingsLoaded, automationJobs, isStreaming, engineStatus, selectedModelPath]);
-
-  const handleGenerateImage = async (promptOverride?: string, mode = "text_to_image", maskPrompt?: string | null) => {
-    const prompt = (promptOverride ?? composerInputRef.current?.value ?? input).trim();
-    if (!prompt || isGeneratingImage) {
-      return;
-    }
-    const latestChatImage = [...messages]
-      .reverse()
-      .find((message) =>
-        Array.isArray(message.content) &&
-        message.content.some((part) => part.type === "image_url"),
-      )
-      ?.content;
-    const latestChatImageUrl = Array.isArray(latestChatImage)
-      ? latestChatImage.find((part) => part.type === "image_url")?.image_url.url
-      : null;
-    const initImageDataUrls = (() => {
-      if (mode === "avatar_image") return assistantAvatar ? [assistantAvatar] : [];
-      if (mode === "user_avatar_image" || mode === "avatar_user_image") return userAvatar ? [userAvatar] : [];
-      if (mode === "user_character_image" || mode === "user_and_character_image" || mode === "both_avatars_image") {
-        return [userAvatar, assistantAvatar].filter((value): value is string => Boolean(value));
-      }
-      const source = image || (mode === "image_to_image" && latestChatImageUrl?.startsWith("data:image/") ? latestChatImageUrl : null);
-      return source ? [source] : [];
-    })();
-    const needsReferenceImage = mode === "avatar_image" || mode === "user_avatar_image" || mode === "avatar_user_image" || mode === "user_character_image" || mode === "user_and_character_image" || mode === "both_avatars_image" || mode === "image_to_image";
-    const needsBothAvatars = mode === "user_character_image" || mode === "user_and_character_image" || mode === "both_avatars_image";
-    if (needsBothAvatars && initImageDataUrls.length < 2) {
-      setComposerNotice("This image mode needs both the user avatar and character avatar first.");
-      return;
-    }
-    if (needsReferenceImage && initImageDataUrls.length === 0) {
-      setComposerNotice("This image mode needs a profile or attached image first.");
-      return;
-    }
-
-    const assistantMessageId = createMessageId();
-    setIsGeneratingImage(true);
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: assistantMessageId,
-        role: "assistant",
-        content: "Sending image...",
-      },
-    ]);
-    setComposerText("");
-    const imageTaskStartedAt = performance.now();
-    const imageRunInput = {
-      mode,
-      prompt,
-      mask_prompt: maskPrompt || "",
-      width: imageWidth,
-      height: imageHeight,
-      reference_images: initImageDataUrls.length,
-    };
-
-    try {
-      await unloadLlmForTask("image");
-      await invoke("stop_omnivoice_engine").catch(() => undefined);
-      appLog(
-        `image-trace request prompt=${JSON.stringify(prompt).slice(0, 800)} size=${imageWidth}x${imageHeight}`,
-      );
-      const result = await invoke<{ image_base64: string; mime_type: string; file_path: string }>("generate_image", {
-        prompt,
-        initImageDataUrl: initImageDataUrls[0] || null,
-        initImageDataUrls,
-        maskPrompt: maskPrompt || null,
-        width: imageWidth,
-        height: imageHeight,
-      });
-      const imageUrl = `data:${result.mime_type};base64,${result.image_base64}`;
-      appLog(`image-trace response mime=${result.mime_type} bytes_b64=${result.image_base64.length} file=${result.file_path || "<unknown>"}`);
-      setIsGeneratingImage(false);
-      const naturalReply = await generateNaturalImageCompletionReply(prompt, mode, imageUrl);
-      updateAssistantMessageById(assistantMessageId, (last) => ({
-        ...last,
-        content: [
-          { type: "text", text: naturalReply || "" },
-          { type: "image_url", image_url: { url: imageUrl, local_path: result.file_path } },
-        ],
-      }));
-      if (liveConversationRef.current && naturalReply.trim()) {
-        autoSpeechEligibleAssistantIdsRef.current.add(assistantMessageId);
-      }
-      clearImage();
-      setComposerNotice("");
-      recordClientToolRun(
-        "generate_image",
-        imageRunInput,
-        result.file_path ? `Generated image: ${result.file_path}` : "Generated image.",
-        true,
-        imageTaskStartedAt,
-      ).catch(() => undefined);
-    } catch (error) {
-      recordClientToolRun(
-        "generate_image",
-        imageRunInput,
-        error instanceof Error ? error.message : String(error),
-        false,
-        imageTaskStartedAt,
-      ).catch(() => undefined);
-      updateLastAssistantMessage((last) => ({
-        ...last,
-        content: error instanceof Error ? error.message : String(error),
-      }));
-    } finally {
-      setIsGeneratingImage(false);
-    }
-  };
-
-  const handleQuickImageGenerate = async () => {
-    const prompt = quickImagePrompt.trim();
-    if (!prompt || isGeneratingImage) {
-      return;
-    }
-
-    setIsGeneratingImage(true);
-    setComposerNotice("Generating image...");
-    const imageTaskStartedAt = performance.now();
-    const imageRunInput = {
-      mode: "text_to_image",
-      prompt,
-      width: imageWidth,
-      height: imageHeight,
-      source: "image_studio",
-    };
-
-    try {
-      await unloadLlmForTask("image");
-      await invoke("stop_omnivoice_engine").catch(() => undefined);
-      appLog(
-        `image-trace quick request prompt=${JSON.stringify(prompt).slice(0, 800)} size=${imageWidth}x${imageHeight}`,
-      );
-      const result = await invoke<{ image_base64: string; mime_type: string; file_path: string }>("generate_image", {
-        prompt,
-        initImageDataUrl: null,
-        initImageDataUrls: [],
-        maskPrompt: null,
-        width: imageWidth,
-        height: imageHeight,
-      });
-      const imageUrl = `data:${result.mime_type};base64,${result.image_base64}`;
-      appLog(`image-trace quick response mime=${result.mime_type} bytes_b64=${result.image_base64.length} file=${result.file_path || "<unknown>"}`);
-      setQuickImagePrompt("");
-      setComposerNotice("");
-      setIsGeneratingImage(false);
-      recordClientToolRun(
-        "generate_image",
-        imageRunInput,
-        result.file_path ? `Generated image: ${result.file_path}` : "Generated image.",
-        true,
-        imageTaskStartedAt,
-      ).catch(() => undefined);
-      await handleSend({
-        text: prompt,
-        imageDataUrl: imageUrl,
-        imagePath: result.file_path,
-        sourceLabel: "Image Studio",
-        skipLocalIntent: true,
-      });
-    } catch (error) {
-      console.error("Quick image generation error:", error);
-      recordClientToolRun(
-        "generate_image",
-        imageRunInput,
-        error instanceof Error ? error.message : String(error),
-        false,
-        imageTaskStartedAt,
-      ).catch(() => undefined);
-      setComposerNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsGeneratingImage(false);
-    }
-  };
-
-  const handleMicToggle = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      return;
-    }
-
-    if (!voiceSetupStatus.ready) {
-      setComposerNotice(
-        voiceSetupStatus.state === "error"
-          ? voiceSetupStatus.message
-          : voiceSetupStatus.state === "idle"
-            ? "Preparing voice listening now. Click the microphone again when it says ready."
-            : "The voice helper is still getting ready. Please wait a moment.",
-      );
-      if (voiceSetupStatus.state === "idle") {
-        await invoke("start_voice_setup");
-      }
-      return;
-    }
-
-    try {
-      await unloadLlmForTask("voice");
-      if (navigator.permissions?.query) {
-        try {
-          const permission = await navigator.permissions.query({ name: "microphone" as PermissionName });
-          if (permission.state === "denied") {
-            setComposerNotice("Microphone permission is blocked. Allow microphone access in the browser or app settings first.");
-            return;
-          }
-        } catch {
-          // Some environments do not expose microphone permission queries.
-        }
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-      recordedChunksRef.current = [];
-
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          recordedChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        const blob = new Blob(recordedChunksRef.current, {
-          type: recorder.mimeType || "audio/webm",
-        });
-        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-        mediaStreamRef.current = null;
-        setIsRecording(false);
-
-        if (blob.size === 0) {
-          return;
-        }
-
-        setIsTranscribing(true);
-        try {
-          const reader = new FileReader();
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = () => reject(new Error("Could not read the recording."));
-            reader.readAsDataURL(blob);
-          });
-
-          const result = await invoke<{
-            text: string;
-            language: string;
-            language_probability: number;
-          }>("transcribe_audio", {
-            audioDataUrl: dataUrl,
-          });
-
-          {
-            const currentText = composerInputRef.current?.value ?? input;
-            setComposerText(currentText ? `${currentText} ${result.text}`.trim() : result.text);
-          }
-          setComposerNotice("");
-        } catch (error) {
-          console.error("Transcription error:", error);
-          setComposerNotice(error instanceof Error ? error.message : String(error));
-        } finally {
-          setIsTranscribing(false);
-        }
-      };
-
-      recorder.start();
-      setComposerNotice("");
-      setIsRecording(true);
-    } catch (error) {
-      console.error("Microphone error:", error);
-      setComposerNotice("Microphone access was not granted. Allow microphone access and try again.");
-    }
-  };
-
-  useEffect(() => {
-    let active = true;
-
-    const loadSettings = async () => {
-      try {
-        const [stored, defaultVoiceFolder] = await Promise.all([
-          invoke<AppSettings>("load_app_settings"),
-          invoke<string>("default_voice_samples_folder").catch(() => ""),
-        ]);
-        if (!active) return;
-
-        const nextUserAvatar = await compressAvatarDataUrl(stored.user_avatar || "");
-        setSetupCompleted(Boolean(stored.setup_completed));
-        const sourceUserProfiles = stored.user_profiles?.length
-          ? stored.user_profiles
-          : [{
-              id: stored.selected_user_profile_id || "default_user",
-              name: stored.user_name || DEFAULT_SETTINGS.user_name,
-              description: stored.user_description || "",
-              avatar: stored.user_avatar || "",
-              voice_path: "",
-              location_label: stored.user_location_label || "",
-              latitude: typeof stored.user_latitude === "number" ? stored.user_latitude : null,
-              longitude: typeof stored.user_longitude === "number" ? stored.user_longitude : null,
-            }];
-        const normalizedUserProfiles = await Promise.all(
-          sourceUserProfiles.map(async (profile) => ({
-            ...profile,
-            avatar: await compressAvatarDataUrl(profile.avatar || ""),
-            description: profile.description || "",
-            voice_path: profile.voice_path || "",
-            location_label: profile.location_label || "",
-            latitude: typeof profile.latitude === "number" && Number.isFinite(profile.latitude) ? profile.latitude : null,
-            longitude: typeof profile.longitude === "number" && Number.isFinite(profile.longitude) ? profile.longitude : null,
-            auto_speech: profile.auto_speech ?? true,
-          })),
-        );
-        const sourcePresets = stored.personality_presets?.length
-          ? stored.personality_presets
-          : DEFAULT_SETTINGS.personality_presets;
-        const normalizedPresets = await Promise.all(
-          sourcePresets.map(async (preset) => ({
-            ...preset,
-            avatar: await compressAvatarDataUrl(preset.avatar || ""),
-          })),
-        );
-        if (!active) return;
-
-        const nextUserProfileId = stored.selected_user_profile_id || normalizedUserProfiles[0]?.id || DEFAULT_SETTINGS.selected_user_profile_id;
-        const activeUserProfile =
-          normalizedUserProfiles.find((profile) => profile.id === nextUserProfileId) ??
-          normalizedUserProfiles[0] ??
-          DEFAULT_SETTINGS.user_profiles[0];
-        setUserProfiles(normalizedUserProfiles);
-        setSelectedUserProfileId(activeUserProfile.id);
-        setUserName(activeUserProfile.name || DEFAULT_SETTINGS.user_name);
-        setUserAvatar(activeUserProfile.avatar || nextUserAvatar);
-        setUserDescription(activeUserProfile.description || "");
-        setUserLocationLabel(activeUserProfile.location_label || "");
-        setUserLatitude(typeof activeUserProfile.latitude === "number" && Number.isFinite(activeUserProfile.latitude) ? activeUserProfile.latitude : null);
-        setUserLongitude(typeof activeUserProfile.longitude === "number" && Number.isFinite(activeUserProfile.longitude) ? activeUserProfile.longitude : null);
-        setThemeSwatchId(
-          THEME_SWATCHS.some((swatch) => swatch.id === stored.theme_swatch_id)
-            ? stored.theme_swatch_id
-            : DEFAULT_SETTINGS.theme_swatch_id,
-        );
-        setLiveConversation(stored.live_conversation);
-        setTelegramBotToken(stored.telegram_bot_token || "");
-        setTelegramOwnerId(stored.telegram_owner_id || "");
-        setTelegramGuests(Array.isArray(stored.telegram_guests) ? stored.telegram_guests : []);
-        setThinkingEnabled(Boolean(stored.thinking_enabled));
-        setGoogleClientId(stored.google_client_id || "");
-        setGoogleClientSecret(stored.google_client_secret || "");
-        setGoogleRedirectUri(stored.google_redirect_uri || DEFAULT_SETTINGS.google_redirect_uri);
-        setImageWidth(clampNumber(stored.image_width ?? DEFAULT_SETTINGS.image_width, 256, 2048));
-        setImageHeight(clampNumber(stored.image_height ?? DEFAULT_SETTINGS.image_height, 256, 2048));
-        setVoiceFolder(stored.voice_folder || defaultVoiceFolder || "");
-        setSelectedVoicePath(stored.selected_voice_path || "");
-        setCreativity(clampNumber(stored.creativity, 0, 100));
-        setSamplingTemperature(clampNumber(stored.sampling_temperature ?? DEFAULT_SETTINGS.sampling_temperature, 0, 2));
-        setTopK(clampNumber(stored.top_k ?? DEFAULT_SETTINGS.top_k, 0, 200));
-        setTopP(clampNumber(stored.top_p ?? DEFAULT_SETTINGS.top_p, 0, 1));
-        setMinP(clampNumber(stored.min_p ?? DEFAULT_SETTINGS.min_p, 0, 1));
-        setRepeatLastN(clampNumber(stored.repeat_last_n ?? DEFAULT_SETTINGS.repeat_last_n, -1, 4096));
-        setRepeatPenalty(clampNumber(stored.repeat_penalty ?? DEFAULT_SETTINGS.repeat_penalty, 0.8, 2));
-        setMemorySize(clampNumber(stored.memory_size, MIN_CHAT_CONTEXT_SIZE, 32768));
-        setReplyLength(clampNumber(stored.reply_length, 64, 4096));
-        setIntelligenceQuality(clampNumber(stored.intelligence_quality, 0, 100));
-        setPersonality(stored.personality || DEFAULT_SETTINGS.personality);
-        setPersonalityPresets(normalizedPresets);
-        const nextPersonalityId = stored.selected_personality_id || DEFAULT_SETTINGS.selected_personality_id;
-        setSelectedPersonalityId(nextPersonalityId);
-        setPersonalityNameDraft(normalizedPresets.find((preset) => preset.id === nextPersonalityId)?.name || "Assistant");
-        setPersonalityAvatar(
-          normalizedPresets.find((preset) => preset.id === nextPersonalityId)?.avatar || "",
-        );
-        setModelFolder(stored.model_folder || "");
-        setLinkedFolders(stored.linked_folders || []);
-        setSelectedModelPath(stored.selected_model_path || "");
-        setLeftPanelOpen(stored.ui_left_panel_open ?? DEFAULT_SETTINGS.ui_left_panel_open);
-        setRightPanelOpen(stored.ui_right_panel_open ?? DEFAULT_SETTINGS.ui_right_panel_open);
-        setWorkspaceOpen(stored.ui_workspace_open ?? DEFAULT_SETTINGS.ui_workspace_open);
-        setImageStudioOpen(stored.ui_image_studio_open ?? DEFAULT_SETTINGS.ui_image_studio_open);
-        setCalendarOpen(stored.ui_calendar_open ?? stored.ui_automation_open ?? DEFAULT_SETTINGS.ui_calendar_open);
-        setAutomationOpen(stored.ui_automation_open ?? DEFAULT_SETTINGS.ui_automation_open);
-        setTelegramPanelOpen(stored.ui_telegram_open ?? DEFAULT_SETTINGS.ui_telegram_open);
-        setGooglePanelOpen(stored.ui_google_open ?? DEFAULT_SETTINGS.ui_google_open);
-        setToolRunsOpen(stored.ui_tool_activity_open ?? DEFAULT_SETTINGS.ui_tool_activity_open);
-        setSamplingOpen(stored.ui_sampling_open ?? DEFAULT_SETTINGS.ui_sampling_open);
-        invoke("migrate_character_folders").catch((error) =>
-          console.error("Character folder migration error:", error),
-        );
-        setSettingsLoadError(null);
-        settingsHydratedAtRef.current = Date.now();
-        setSettingsReadyForSave(true);
-        setSettingsLoaded(true);
-      } catch (error) {
-        console.error("Settings load error:", error);
-        setSettingsLoadError(error instanceof Error ? error.message : String(error));
-        setSettingsReadyForSave(false);
-        setSettingsLoaded(true);
-      }
-    };
-
-    loadSettings();
-
-    return () => {
-      active = false;
-    };
-  }, []);
+  useAppSettingsLoad({
+    compressAvatarDataUrl,
+    setAutomationOpen,
+    setCalendarOpen,
+    setCreativity,
+    setGoogleClientId,
+    setGoogleClientSecret,
+    setGooglePanelOpen,
+    setGoogleRedirectUri,
+    setImageHeight,
+    setImageStudioOpen,
+    setImageWidth,
+    setIntelligenceQuality,
+    setLeftPanelOpen,
+    setLinkedFolders,
+    setLiveConversation,
+    setMemorySize,
+    setMinP,
+    setModelFolder,
+    setPersonality,
+    setPersonalityAvatar,
+    setPersonalityNameDraft,
+    setPersonalityPresets,
+    setRepeatLastN,
+    setRepeatPenalty,
+    setReplyLength,
+    setRightPanelOpen,
+    setSamplingOpen,
+    setSamplingTemperature,
+    setSelectedModelPath,
+    setSelectedPersonalityId,
+    setSelectedUserProfileId,
+    setSelectedVoicePath,
+    setSettingsLoadError,
+    setSettingsLoaded,
+    setSettingsReadyForSave,
+    setSetupCompleted,
+    setTelegramBotToken,
+    setTelegramGuests,
+    setTelegramOwnerId,
+    setTelegramPanelOpen,
+    setThemeSwatchId,
+    setThinkingEnabled,
+    setToolRunsOpen,
+    setTopK,
+    setTopP,
+    setUserAvatar,
+    setUserDescription,
+    setUserLatitude,
+    setUserLocationLabel,
+    setUserLongitude,
+    setUserName,
+    setUserProfiles,
+    setVoiceFolder,
+    setWorkspaceOpen,
+    settingsHydratedAtRef,
+    themeSwatches,
+    minChatContextSize: MIN_CHAT_CONTEXT_SIZE,
+  });
 
   useEffect(() => {
     liveConversationRef.current = liveConversation;
@@ -2914,113 +1819,13 @@ ${personalityMemory.trim()}`
     handleStartTelegram().catch((error) => console.error("Telegram auto-start error:", error));
   }, [settingsLoaded, telegramBotToken]);
 
-  useEffect(() => {
-    let disposed = false;
-    const unlisteners: Array<() => void> = [];
-    const register = async (event: string, handler: () => void) => {
-      const unlisten = await listen(event, handler);
-      if (disposed) {
-        unlisten();
-        return;
-      }
-      unlisteners.push(unlisten);
-    };
-
-    const attachTrayHandlers = async () => {
-      await Promise.all([
-        register("tray-toggle-telegram", () => {
-          (telegramRunning ? handleStopTelegram() : handleStartTelegram()).catch((error) =>
-            console.error("Tray Telegram toggle error:", error),
-          );
-        }),
-        register("tray-toggle-auto-voice", () => setAutoVoiceMode(!liveConversation)),
-      ]);
-    };
-
-    attachTrayHandlers().catch((error) => console.error("Tray handler setup error:", error));
-
-    return () => {
-      disposed = true;
-      unlisteners.forEach((unlisten) => unlisten());
-    };
-  }, [
-    telegramBotToken,
-    telegramOwnerId,
-    samplingTemperature,
-    topK,
-    topP,
-    minP,
-    repeatLastN,
-    repeatPenalty,
-    replyLength,
-    googleClientId,
-    googleClientSecret,
-    linkedFolders,
-    personality,
-    characterSoul,
-    personalityMemory,
-    userName,
-    userDescription,
-    googleStatus.connected,
-    googleStatus.email,
+  useTrayControls({
+    settingsLoaded,
     telegramRunning,
-    voiceSetupStatus.ready,
-    omniVoiceStatus.ready,
-    liveConversation,
-  ]);
-
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    invoke("update_tray_menu_state", {
-      telegramRunning,
-      autoVoice: liveConversation,
-    }).catch((error) => console.error("Tray menu state update error:", error));
-  }, [settingsLoaded, telegramRunning, liveConversation]);
-
-  useEffect(() => {
-    if (!settingsLoaded || !selectedPersonalityId) return;
-    const activePersonality =
-      personalityPresets.find((preset) => preset.id === selectedPersonalityId) ?? personalityPresets[0];
-    if (!activePersonality) return;
-
-    let cancelled = false;
-    invoke<CharacterFiles>("load_character_files", {
-      id: activePersonality.id,
-      name: activePersonality.name,
-      prompt: activePersonality.prompt || personality || "",
-      avatar: activePersonality.avatar || "",
-      voicePath: activePersonality.voice_path || selectedVoicePath || "",
-    })
-      .then((files) => {
-        if (cancelled) return;
-        setCharacterSoul(files.soul);
-        setCharacterFolder(files.folder);
-        if (files.settings.voice_path) {
-          setSelectedVoicePath(files.settings.voice_path);
-        }
-        setPersonalityPresets((prev) =>
-          prev.map((preset) =>
-            preset.id === activePersonality.id
-              ? {
-                  ...preset,
-                  voice_path: files.settings.voice_path || preset.voice_path || "",
-                  avatar: preset.avatar || files.settings.avatar || "",
-                  prompt: preset.prompt || files.settings.prompt || "",
-                }
-              : preset,
-          ),
-        );
-      })
-      .catch((error) => {
-        console.error("Character files load error:", error);
-        setCharacterSoul("");
-        setCharacterFolder("");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [settingsLoaded, selectedPersonalityId, personalityPresets.length]);
+    autoVoice: liveConversation,
+    onToggleTelegram: () => (telegramRunning ? handleStopTelegram() : handleStartTelegram()),
+    onToggleAutoVoice: () => setAutoVoiceMode(!liveConversation),
+  });
 
   useEffect(() => {
     if (!settingsLoaded || !selectedUserProfileId) return;
@@ -3035,527 +1840,84 @@ ${personalityMemory.trim()}`
     });
   }, [settingsLoaded, selectedUserProfileId, userName, userAvatar, userDescription, userLocationLabel, userLatitude, userLongitude, selectedUserProfile?.auto_speech]);
 
-  useEffect(() => {
-    if (!settingsLoaded || !settingsReadyForSave || !selectedPersonalityId || !characterSoul.trim()) return;
-    const handle = window.setTimeout(() => {
-      saveActiveCharacterFiles().catch((error) => console.error("Character files save error:", error));
-    }, 900);
-    return () => window.clearTimeout(handle);
-  }, [settingsLoaded, settingsReadyForSave, selectedPersonalityId, selectedVoicePath, personality, personalityAvatar, characterSoul]);
+  useMissingTooltips();
 
-  useEffect(() => {
-    const applyMissingTooltip = (event: MouseEvent) => {
-      const target = event.target instanceof Element
-        ? event.target.closest("button,input,textarea,select")
-        : null;
-      if (!(target instanceof HTMLElement) || target.getAttribute("title")) return;
-      const tooltip =
-        target.getAttribute("aria-label") ||
-        target.getAttribute("placeholder") ||
-        target.textContent?.replace(/\s+/g, " ").trim() ||
-        "";
-      if (tooltip) target.setAttribute("title", tooltip);
-    };
-    document.addEventListener("mouseover", applyMissingTooltip, true);
-    return () => document.removeEventListener("mouseover", applyMissingTooltip, true);
-  }, []);
-
-  useEffect(() => {
-    if (!settingsLoaded || !settingsReadyForSave) {
-      return;
-    }
-    if (Date.now() - settingsHydratedAtRef.current < 1500) {
-      const handle = window.setTimeout(() => {
-        settingsHydratedAtRef.current = 0;
-      }, 1500);
-      return () => window.clearTimeout(handle);
-    }
-
-    const handle = setTimeout(() => {
-      invoke("save_app_settings", {
-        settings: {
-          live_conversation: liveConversation,
-          setup_completed: setupCompleted,
-          user_name: userName,
-          user_avatar: userAvatar,
-          user_description: userDescription,
-          user_location_label: userLocationLabel,
-          user_latitude: userLatitude,
-          user_longitude: userLongitude,
-          theme_swatch_id: themeSwatchId,
-          telegram_bot_token: telegramBotToken,
-          telegram_owner_id: telegramOwnerId,
-          telegram_guests: telegramGuests,
-          thinking_enabled: thinkingEnabled,
-          google_client_id: googleClientId,
-          google_client_secret: googleClientSecret,
-          google_redirect_uri: googleRedirectUri,
-          image_width: imageWidth,
-          image_height: imageHeight,
-          voice_folder: voiceFolder,
-          selected_voice_path: selectedVoicePath,
-          creativity,
-          sampling_temperature: samplingTemperature,
-          top_k: topK,
-          top_p: topP,
-          min_p: minP,
-          repeat_last_n: repeatLastN,
-          repeat_penalty: repeatPenalty,
-          memory_size: memorySize,
-          reply_length: replyLength,
-          intelligence_quality: intelligenceQuality,
-          personality,
-          personality_presets: personalityPresets,
-          selected_personality_id: selectedPersonalityId,
-          user_profiles: userProfiles,
-          selected_user_profile_id: selectedUserProfileId,
-          model_folder: modelFolder,
-          selected_model_path: selectedModelPath,
-          linked_folders: linkedFolders,
-          ui_left_panel_open: leftPanelOpen,
-          ui_right_panel_open: rightPanelOpen,
-          ui_workspace_open: workspaceOpen,
-          ui_image_studio_open: imageStudioOpen,
-          ui_calendar_open: calendarOpen,
-          ui_automation_open: automationOpen,
-          ui_telegram_open: telegramPanelOpen,
-          ui_google_open: googlePanelOpen,
-          ui_tool_activity_open: toolRunsOpen,
-          ui_sampling_open: samplingOpen,
-        } satisfies AppSettings,
-      }).catch((error) => console.error("Settings save error:", error));
-    }, 800);
-
-    return () => clearTimeout(handle);
-  }, [
+  useAppSettingsSave({
+    automationOpen,
+    calendarOpen,
+    creativity,
+    googleClientId,
+    googleClientSecret,
+    googlePanelOpen,
+    googleRedirectUri,
+    imageHeight,
+    imageStudioOpen,
+    imageWidth,
+    intelligenceQuality,
+    leftPanelOpen,
+    linkedFolders,
+    liveConversation,
+    memorySize,
+    minP,
+    modelFolder,
+    personality,
+    personalityPresets,
+    repeatLastN,
+    repeatPenalty,
+    replyLength,
+    rightPanelOpen,
+    samplingOpen,
+    samplingTemperature,
+    selectedModelPath,
+    selectedPersonalityId,
+    selectedUserProfileId,
+    selectedVoicePath,
+    settingsHydratedAtRef,
     settingsLoaded,
     settingsReadyForSave,
     setupCompleted,
+    telegramBotToken,
+    telegramGuests,
+    telegramOwnerId,
+    telegramPanelOpen,
+    themeSwatchId,
+    thinkingEnabled,
+    toolRunsOpen,
+    topK,
+    topP,
     userName,
     userAvatar,
     userDescription,
-    userProfiles,
-    selectedUserProfileId,
-    userLocationLabel,
     userLatitude,
+    userLocationLabel,
     userLongitude,
-    themeSwatchId,
-    liveConversation,
-    telegramBotToken,
-    telegramOwnerId,
-    telegramGuests,
-    thinkingEnabled,
+    userProfiles,
+    voiceFolder,
+    workspaceOpen,
+  });
+
+  useStoredImageHydration({
+    settingsLoaded,
+    messages,
+    setMessages,
+  });
+
+  useAppBackgroundRefresh({
+    automationMonth,
     googleClientId,
     googleClientSecret,
-    googleRedirectUri,
-    imageWidth,
-    imageHeight,
-    voiceFolder,
+    googleConnected: googleStatus.connected,
+    refreshAutomationJobs,
+    refreshGoogleCalendarEvents,
+    refreshGoogleStatus,
+    refreshPendingShellActions,
+    refreshToolRuns,
     selectedVoicePath,
-    creativity,
-    samplingTemperature,
-    topK,
-    topP,
-    minP,
-    repeatLastN,
-    repeatPenalty,
-    memorySize,
-    replyLength,
-    intelligenceQuality,
-    personality,
-    personalityPresets,
-    selectedPersonalityId,
-    modelFolder,
-    selectedModelPath,
-    linkedFolders,
-    leftPanelOpen,
-    rightPanelOpen,
-    workspaceOpen,
-    imageStudioOpen,
-    calendarOpen,
-    automationOpen,
-    telegramPanelOpen,
-    googlePanelOpen,
-    toolRunsOpen,
-    samplingOpen,
-  ]);
-
-  useEffect(() => {
-    chatSessionsRef.current = chatSessions;
-  }, [chatSessions]);
-
-  useEffect(() => {
-    if (!selectedPersonalityId) return;
-    setChatSessions((prev) =>
-      prev[selectedPersonalityId] === messages
-        ? prev
-        : { ...prev, [selectedPersonalityId]: messages },
-    );
-  }, [messages, selectedPersonalityId]);
-
-  useEffect(() => {
-    if (!settingsLoaded || !selectedPersonalityId || loadedChatSessionIdsRef.current.has(selectedPersonalityId)) {
-      return;
-    }
-
-    let active = true;
-    invoke<string>("load_personality_chat_session", { personalityId: selectedPersonalityId })
-      .then((raw) => {
-        if (!active) return;
-        const session = parseStoredChatSession(raw);
-        loadedChatSessionIdsRef.current.add(selectedPersonalityId);
-        chatSessionsRef.current = { ...chatSessionsRef.current, [selectedPersonalityId]: session };
-        setChatSessions((prev) => ({ ...prev, [selectedPersonalityId]: session }));
-        setMessages(session);
-        lastMessageCountRef.current = session.length;
-        sessionShadowRef.current[selectedPersonalityId] = compactSessionFingerprint(session);
-        lastSessionMutationAtRef.current[selectedPersonalityId] = Date.now();
-      })
-      .catch((error) => {
-        console.error("Chat session load error:", error);
-        loadedChatSessionIdsRef.current.add(selectedPersonalityId);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [settingsLoaded, selectedPersonalityId]);
-
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    ensureConversationStartsAtBottom();
-  }, [settingsLoaded, selectedPersonalityId, messages.length]);
-
-  useEffect(() => {
-    if (!settingsLoaded || !selectedPersonalityId || !loadedChatSessionIdsRef.current.has(selectedPersonalityId)) {
-      return;
-    }
-    const session = compactChatSessionForStorage(messages);
-    const sessionJson = JSON.stringify(session);
-    sessionShadowRef.current[selectedPersonalityId] = sessionJson;
-    lastSessionMutationAtRef.current[selectedPersonalityId] = Date.now();
-    const handle = window.setTimeout(() => {
-      invoke("save_personality_chat_session", {
-        personalityId: selectedPersonalityId,
-        messagesJson: sessionJson,
-      }).catch((error) => console.error("Chat session save error:", error));
-    }, 900);
-    return () => window.clearTimeout(handle);
-  }, [settingsLoaded, selectedPersonalityId, messages]);
-
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    const missingImages: Array<{ messageId: string; partIndex: number; path: string }> = [];
-    messages.forEach((message) => {
-      if (!Array.isArray(message.content)) return;
-      message.content.forEach((part, partIndex) => {
-        if (part.type === "image_url" && part.image_url.local_path && !part.image_url.url) {
-          missingImages.push({ messageId: message.id, partIndex, path: part.image_url.local_path });
-        }
-      });
-    });
-    if (!missingImages.length) return;
-
-    let cancelled = false;
-    Promise.all(
-      missingImages.map(async (item) => {
-        try {
-          const result = await invoke<LocalImageDataUrl>("read_local_image_data_url", { path: item.path });
-          return { ...item, url: result.data_url };
-        } catch (error) {
-          console.error("Stored image reload error:", error);
-          return { ...item, url: "" };
-        }
-      }),
-    ).then((loaded) => {
-      if (cancelled) return;
-      const loadedByPart = new Map(loaded.filter((item) => item.url).map((item) => [`${item.messageId}:${item.partIndex}`, item.url]));
-      if (!loadedByPart.size) return;
-      setMessages((prev) =>
-        prev.map((message) => {
-          if (!Array.isArray(message.content)) return message;
-          let changed = false;
-          const content = message.content.map((part, partIndex) => {
-            if (part.type !== "image_url") return part;
-            const url = loadedByPart.get(`${message.id}:${partIndex}`);
-            if (!url) return part;
-            changed = true;
-            return { ...part, image_url: { ...part.image_url, url } };
-          });
-          return changed ? { ...message, content } : message;
-        }),
-      );
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [settingsLoaded, messages]);
-
-  useEffect(() => {
-    refreshPendingShellActions();
-    refreshAutomationJobs();
-    refreshToolRuns();
-    refreshGoogleStatus().catch((error) => console.error("Google startup status error:", error));
-  }, []);
-
-  useEffect(() => {
-    if (!settingsLoaded || !selectedPersonalityId) return;
-    invoke<MemoryItem[]>("list_local_memory", {
-      kind: personalityMemoryKind(selectedPersonalityId),
-      limit: 20,
-    })
-      .then((items) => {
-        const memory = items.find((item) => item.key === "compact_style_memory")?.value || "";
-        setPersonalityMemory(memory);
-        personalityMemoryShadowRef.current[selectedPersonalityId] = memory;
-      })
-      .catch((error) => {
-        console.error("Personality memory load error:", error);
-        setPersonalityMemory("");
-        personalityMemoryShadowRef.current[selectedPersonalityId] = "";
-      });
-  }, [settingsLoaded, selectedPersonalityId]);
-
-  useEffect(() => {
-    if (!settingsLoaded || !selectedPersonalityId || !loadedChatSessionIdsRef.current.has(selectedPersonalityId)) {
-      return;
-    }
-
-    let active = true;
-    const syncSession = async () => {
-      if (sendInFlightRef.current || isStreaming) return;
-      if (Date.now() - lastComposerInputAtRef.current < 1200) return;
-      const lastMutation = lastSessionMutationAtRef.current[selectedPersonalityId] ?? 0;
-      if (Date.now() - lastMutation < 1800) return;
-      try {
-        const raw = await invoke<string>("load_personality_chat_session", {
-          personalityId: selectedPersonalityId,
-        });
-        if (!active) return;
-        const remoteSession = parseStoredChatSession(raw);
-        const remoteFingerprint = compactSessionFingerprint(remoteSession);
-        const currentFingerprint =
-          sessionShadowRef.current[selectedPersonalityId] ??
-          compactSessionFingerprint(chatSessionsRef.current[selectedPersonalityId] ?? []);
-        if (remoteFingerprint === currentFingerprint) return;
-        sessionShadowRef.current[selectedPersonalityId] = remoteFingerprint;
-        chatSessionsRef.current = {
-          ...chatSessionsRef.current,
-          [selectedPersonalityId]: remoteSession,
-        };
-        setChatSessions((prev) => ({ ...prev, [selectedPersonalityId]: remoteSession }));
-        setMessages(remoteSession);
-        lastMessageCountRef.current = remoteSession.length;
-      } catch (error) {
-        console.error("Chat session sync error:", error);
-      }
-    };
-
-    const handle = window.setInterval(() => {
-      syncSession().catch((error) => console.error("Chat session sync error:", error));
-    }, telegramRunning ? 2500 : 5000);
-
-    syncSession().catch((error) => console.error("Chat session sync error:", error));
-    return () => {
-      active = false;
-      window.clearInterval(handle);
-    };
-  }, [settingsLoaded, selectedPersonalityId, telegramRunning, isStreaming]);
-
-  useEffect(() => {
-    if (!settingsLoaded || !selectedPersonalityId) return;
-
-    let active = true;
-    const syncMemory = async () => {
-      if (Date.now() - lastComposerInputAtRef.current < 1200) return;
-      try {
-        const items = await invoke<MemoryItem[]>("list_local_memory", {
-          kind: personalityMemoryKind(selectedPersonalityId),
-          limit: 20,
-        });
-        if (!active) return;
-        const nextMemory = items.find((item) => item.key === "compact_style_memory")?.value || "";
-        if ((personalityMemoryShadowRef.current[selectedPersonalityId] ?? "") === nextMemory) {
-          return;
-        }
-        personalityMemoryShadowRef.current[selectedPersonalityId] = nextMemory;
-        setPersonalityMemory(nextMemory);
-      } catch (error) {
-        console.error("Personality memory sync error:", error);
-      }
-    };
-
-    const handle = window.setInterval(() => {
-      syncMemory().catch((error) => console.error("Personality memory sync error:", error));
-    }, telegramRunning ? 2500 : 5000);
-
-    syncMemory().catch((error) => console.error("Personality memory sync error:", error));
-    return () => {
-      active = false;
-      window.clearInterval(handle);
-    };
-  }, [settingsLoaded, selectedPersonalityId, telegramRunning]);
-
-  useEffect(() => {
-    if (!settingsLoaded || !googleStatus.connected) {
-      return;
-    }
-
-    refreshGoogleCalendarEvents(automationMonth).catch((error) => console.error("Google Calendar refresh error:", error));
-  }, [settingsLoaded, googleStatus.connected, automationMonth, googleClientId, googleClientSecret]);
-
-  useEffect(() => {
-    let isActive = true;
-    let pollHandle: ReturnType<typeof setInterval> | undefined;
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-
-    const initializeEngine = async () => {
-      try {
-        const info = await invoke<SystemInfo>("check_system");
-        if (!isActive) return;
-        setSystemInfo(info);
-
-        if (!systemDefaultsAppliedRef.current) {
-          setMemorySize((prev) =>
-            prev === DEFAULT_SETTINGS.memory_size
-              ? Math.max(prev, info.recommended_context_size, MIN_CHAT_CONTEXT_SIZE)
-              : prev,
-          );
-          systemDefaultsAppliedRef.current = true;
-        }
-
-        const ready = await invoke<boolean>("check_engine_ready");
-        if (!isActive) return;
-        if (ready) {
-          await refreshEngineInfo();
-          setEngineErrorMsg("");
-          setEngineStatus("ready");
-          return;
-        }
-
-        setEngineStatus("downloading");
-        const result = await invoke<{ success: boolean; message: string }>("download_engine", {
-          hasNvidiaGpu: info.has_nvidia_gpu,
-          forceRefresh: false,
-        });
-        if (!isActive) return;
-
-        if (!result.success) {
-          setEngineErrorMsg(result.message);
-          setEngineStatus("error");
-          return;
-        }
-
-        pollHandle = setInterval(async () => {
-          try {
-            const isReady = await invoke<boolean>("check_engine_ready");
-            if (!isActive) return;
-
-            if (isReady && pollHandle) {
-              clearInterval(pollHandle);
-              if (timeoutHandle) clearTimeout(timeoutHandle);
-              await refreshEngineInfo();
-              setEngineErrorMsg("");
-              setEngineStatus("ready");
-            }
-          } catch (error) {
-            console.error("Engine poll error:", error);
-          }
-        }, 3000);
-
-        timeoutHandle = setTimeout(() => {
-          if (!isActive) return;
-          if (pollHandle) clearInterval(pollHandle);
-          setEngineStatus("error");
-          setEngineErrorMsg("The brain download took too long. Please try again.");
-        }, 20 * 60 * 1000);
-      } catch (error) {
-        if (!isActive) return;
-        console.error(error);
-        setEngineErrorMsg(error instanceof Error ? error.message : String(error));
-        setEngineStatus("error");
-      }
-    };
-
-    initializeEngine();
-
-    return () => {
-      isActive = false;
-      if (pollHandle) clearInterval(pollHandle);
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    let intervalHandle: ReturnType<typeof setInterval> | undefined;
-
-    const syncVoiceStatus = async () => {
-      if (Date.now() - lastComposerInputAtRef.current < 1200) return;
-      try {
-        const status = await invoke<VoiceSetupStatus>("get_voice_setup_status");
-        if (!active) return;
-        setVoiceSetupStatus(status);
-
-      } catch (error) {
-        if (!active) return;
-        console.error("Voice status error:", error);
-      }
-    };
-
-    syncVoiceStatus();
-    intervalHandle = setInterval(syncVoiceStatus, 5000);
-
-    return () => {
-      active = false;
-      if (intervalHandle) clearInterval(intervalHandle);
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    let intervalHandle: ReturnType<typeof setInterval> | undefined;
-
-    const syncOmniVoiceStatus = async () => {
-      if (Date.now() - lastComposerInputAtRef.current < 1200) return;
-      try {
-        const status = await invoke<VoiceSetupStatus>("get_omnivoice_engine_status");
-        if (!active) return;
-        setOmniVoiceStatus(status);
-      } catch (error) {
-        if (!active) return;
-        console.error("OmniVoice status error:", error);
-      }
-    };
-
-    syncOmniVoiceStatus();
-    intervalHandle = setInterval(syncOmniVoiceStatus, 5000);
-
-    return () => {
-      active = false;
-      if (intervalHandle) clearInterval(intervalHandle);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!settingsLoaded || !settingsReadyForSave) {
-      return;
-    }
-
-    if (!selectedVoicePath && voiceSamples.length > 0) {
-      updateActiveCharacterVoicePath(voiceSamples[0].path);
-      return;
-    }
-
-    if (
-      selectedVoicePath &&
-      voiceSamples.length > 0 &&
-      !voiceSamples.some((sample) => sample.path === selectedVoicePath)
-    ) {
-      updateActiveCharacterVoicePath(voiceSamples[0].path);
-    }
-  }, [settingsLoaded, selectedVoicePath, voiceSamples]);
+    settingsLoaded,
+    settingsReadyForSave,
+    updateActiveCharacterVoicePath,
+    voiceSamples,
+  });
 
   useEffect(() => {
     if (messages.length === lastMessageCountRef.current) {
@@ -3583,73 +1945,33 @@ ${personalityMemory.trim()}`
     });
   }, [messages]);
 
-  useEffect(() => {
-    if (!settingsLoaded || !liveConversation || isStreaming || isGeneratingImage || isTranscribing || speakingMessageId) {
-      return;
-    }
+  useAutoSpeechQueue({
+    settingsLoaded,
+    messages,
+    liveConversation,
+    isStreaming,
+    isGeneratingImage,
+    isTranscribing,
+    speakingMessageId,
+    selectedVoicePath,
+    autoSpeechEligibleAssistantIdsRef,
+    lastAutoSpokenAssistantIdRef,
+    voicePlaybackRequestRef,
+    ensureAudioPlaybackUnlocked,
+    playAutoSpeechQueue,
+  });
 
-    const queue = messages
-      .filter((message) => message.role === "assistant" && autoSpeechEligibleAssistantIdsRef.current.has(message.id))
-      .map((message) => message.id);
-    if (!queue.length) {
-      return;
-    }
-
-    const firstMessage = messages.find((message) => message.id === queue[0]);
-    const firstText = firstMessage ? extractMessageText(firstMessage.content).trim() : "";
-    if (!firstText || firstText.startsWith("[Error") || firstText === "[Stopped]") {
-      autoSpeechEligibleAssistantIdsRef.current.delete(queue[0]);
-      return;
-    }
-
-    if (lastAutoSpokenAssistantIdRef.current === queue[0]) {
-      return;
-    }
-
-    autoSpeechQueueRef.current = queue;
-    ensureAudioPlaybackUnlocked().catch(() => null);
-    const requestId = ++voicePlaybackRequestRef.current;
-    playAutoSpeechQueue(queue, requestId).catch((error) => {
-      console.error("Live speech queue error:", error);
-    });
-  }, [settingsLoaded, messages, liveConversation, isStreaming, isGeneratingImage, isTranscribing, speakingMessageId, selectedVoicePath]);
-
-  useEffect(() => {
-    if (messages.length !== 0) {
-      return;
-    }
-
-    window.requestAnimationFrame(() => {
-      const container = conversationScrollRef.current;
-      if (!container) return;
-      container.scrollTo({
-        top: container.scrollHeight,
-        behavior: "auto",
-      });
-    });
-  }, [messages.length, selectedPersonalityId]);
-
-  useEffect(() => {
-    const closeOpenDropdowns = (event: PointerEvent) => {
-      const target = event.target as Element | null;
-      if (target?.closest("[data-dropdown-root]")) {
-        return;
-      }
-
-      setModelMenuOpen(false);
-      setQuickModelMenuOpen(false);
-      setThemePickerOpen(false);
-      setUserProfileMenuOpen(false);
-      setPersonalityMenuOpen(false);
-      setAutomationTimeMenuOpen(false);
-      setAutomationDateMenuOpen(false);
-      setAutomationMonthMenuOpen(false);
-      setAutomationEveryUnitMenuOpen(false);
-    };
-
-    document.addEventListener("pointerdown", closeOpenDropdowns);
-    return () => document.removeEventListener("pointerdown", closeOpenDropdowns);
-  }, []);
+  useDropdownDismiss(() => {
+    setModelMenuOpen(false);
+    setQuickModelMenuOpen(false);
+    setThemePickerOpen(false);
+    setUserProfileMenuOpen(false);
+    setPersonalityMenuOpen(false);
+    setAutomationTimeMenuOpen(false);
+    setAutomationDateMenuOpen(false);
+    setAutomationMonthMenuOpen(false);
+    setAutomationEveryUnitMenuOpen(false);
+  });
 
   useEffect(() => {
     if (!settingsLoaded || !modelFolder) {
@@ -3674,31 +1996,32 @@ ${personalityMemory.trim()}`
   const selectedGoogleEvents = googleCalendarEvents.filter((event) =>
     googleEventMatchesDate(event, selectedAutomationDate),
   );
-  const currentModelName =
-    currentModelEntry?.name || selectedModel || (selectedModelPath ? "Selected brain" : "No model selected");
-  const selectedPersonalityPreset =
-    personalityPresets.find((preset) => preset.id === selectedPersonalityId) ?? personalityPresets[0];
-  const assistantAvatar = selectedPersonalityPreset?.avatar || personalityAvatar || "";
   const hardwareGpuLabel = systemInfo?.gpu_details.replace(/\s*\(([^)]+)\)\s*$/, " - $1") ?? "";
   const hardwareRamLabel = systemInfo ? `${(systemInfo.total_ram_mb / 1024).toFixed(1)} GB` : "Unknown";
   const conversationLogoClass = messages.length === 0
     ? "hidden"
     : "pointer-events-none absolute left-1/2 top-1/2 z-0 w-[min(52vw,360px)] -translate-x-1/2 -translate-y-1/2 opacity-[0.045]";
-  const compactComposerNotice = composerNotice
-    .replace(/^Thinking with tools\.\.\.$/, "Chat: thinking with tools")
-    .replace(/^Waiting for confirmation before using tools\.$/, "Chat: waiting for tool confirmation")
-    .replace(/^Preparing voice playback\.\.\.$/, "Voice: preparing playback");
-  const topStatusText =
-    (brainStatus === "Loading" ? `Model: ${modelLoadStatus.message || "loading"}` : "") ||
-    (brainStatus === "Error" ? `Model error: ${modelLoadStatus.message || "could not load"}` : "") ||
-    (isGeneratingImage ? "Image: generating" : "") ||
-    (isTranscribing ? "Voice: transcribing" : "") ||
-    (isStreaming ? "Chat: generating reply" : "") ||
-    compactComposerNotice ||
-    (omniVoiceStatus.state !== "idle" && !omniVoiceStatus.ready ? "Voice: preparing playback" : "") ||
-    (voiceSetupStatus.state !== "idle" && !voiceSetupStatus.ready ? `Voice input: ${voiceSetupStatus.message || "preparing"}` : "") ||
-    (engineStatus === "downloading" ? "Engine: preparing model runtime" : "") ||
-    (selectedModelPath ? `Ready: ${currentModelName}` : "No model loaded");
+  const {
+    topStatusText,
+    topProgressPercent,
+    topProgressActive,
+    imageStudioDrawing,
+    waveformProcessing,
+  } = useRuntimeStatusDisplay({
+    activeTaskType,
+    brainStatus,
+    composerNotice,
+    currentModelName,
+    engineStatus,
+    isAudioPlaying,
+    isGeneratingImage,
+    isStreaming,
+    isTranscribing,
+    modelLoadStatus,
+    omniVoiceStatus,
+    selectedModelPath,
+    voiceSetupStatus,
+  });
 
   useEffect(() => {
     if (!settingsLoaded || !setupScreenOpen || !setupCatalog || setupCatalog.tier !== activeSetupTier) {
@@ -3726,7 +2049,7 @@ ${personalityMemory.trim()}`
   }, [settingsLoaded, setupScreenOpen, setupCatalog, activeSetupTier, selectedModelPath, engineStatus]);
 
   useEffect(() => {
-    if (!settingsLoaded || !setupCompleted || firstStartupSetupNeeded || voiceAutoPrepareStartedRef.current) {
+    if (!settingsLoaded || !setupCompleted || firstStartupSetupNeeded) {
       return;
     }
     if (voiceSetupStatus.ready && omniVoiceStatus.ready) {
@@ -3734,235 +2057,6 @@ ${personalityMemory.trim()}`
     }
     void prepareVoiceHelpers(false);
   }, [settingsLoaded, setupCompleted, firstStartupSetupNeeded, voiceSetupStatus.ready, omniVoiceStatus.ready]);
-
-  const topProgressPercent =
-    brainStatus === "Loading" || brainStatus === "Error"
-      ? Math.max(8, modelLoadStatus.progress)
-      : omniVoiceStatus.state !== "idle" && !omniVoiceStatus.ready
-        ? Math.max(8, omniVoiceStatus.progress)
-      : voiceSetupStatus.state !== "idle" && !voiceSetupStatus.ready
-        ? Math.max(8, voiceSetupStatus.progress)
-        : isGeneratingImage
-          ? 65
-          : isTranscribing
-            ? 45
-            : isStreaming
-              ? 100
-              : engineStatus === "downloading"
-                ? 25
-                : 0;
-  const topProgressActive = topProgressPercent > 0;
-  const imageStudioDrawing = isGeneratingImage;
-  const waveformProcessing =
-    isGeneratingImage ||
-    isStreaming ||
-    isTranscribing ||
-    brainStatus === "Loading" ||
-    brainStatus === "Thinking" ||
-    modelLoadStatus.state === "starting" ||
-    modelLoadStatus.state === "loading" ||
-    modelLoadStatus.state === "updating" ||
-    (activeTaskType === "voice" && !isAudioPlaying) ||
-    activeTaskType === "image" ||
-    (voiceSetupStatus.state !== "idle" && !voiceSetupStatus.ready) ||
-    Boolean(
-      composerNotice &&
-        /(thinking|preparing|loading|generating|sending|transcribing|starting|updating)/i.test(composerNotice),
-    );
-
-  const resizeComposerTextarea = (node: HTMLTextAreaElement) => {
-    node.style.height = "0px";
-    node.style.height = `${Math.min(192, Math.max(42, node.scrollHeight))}px`;
-  };
-
-  const setComposerText = (text: string) => {
-    lastComposerInputAtRef.current = Date.now();
-    setInput(text);
-    setComposerHasText(Boolean(text.trim()));
-    const node = composerInputRef.current;
-    if (node) {
-      node.value = text;
-      resizeComposerTextarea(node);
-    }
-  };
-
-  useEffect(() => {
-    const node = composerInputRef.current;
-    if (!node) return;
-    if (node.value !== input) {
-      node.value = input;
-    }
-    setComposerHasText((previous) => {
-      const next = Boolean(node.value.trim());
-      return previous === next ? previous : next;
-    });
-    resizeComposerTextarea(node);
-  }, [input]);
-
-  const selectPersonalityPreset = (presetId: string) => {
-    const preset = personalityPresets.find((item) => item.id === presetId);
-    if (!preset) return;
-    saveActiveChatSession();
-    setSelectedPersonalityId(preset.id);
-    setPersonalityNameDraft(preset.name || "Assistant");
-    setPersonality(preset.prompt);
-    setPersonalityAvatar(preset.avatar || "");
-    if (preset.voice_path) {
-      setSelectedVoicePath(preset.voice_path);
-    }
-    loadChatSessionForPersonality(preset.id);
-    setComposerText("");
-    clearImage();
-    setComposerNotice("");
-  };
-
-  const selectUserProfile = (profileId: string) => {
-    const profile = userProfiles.find((item) => item.id === profileId);
-    if (!profile) return;
-    setSelectedUserProfileId(profile.id);
-    setUserName(profile.name || "You");
-    setUserAvatar(profile.avatar || "");
-    setUserDescription(profile.description || "");
-    setUserLocationLabel(profile.location_label || "");
-    setUserLatitude(typeof profile.latitude === "number" && Number.isFinite(profile.latitude) ? profile.latitude : null);
-    setUserLongitude(typeof profile.longitude === "number" && Number.isFinite(profile.longitude) ? profile.longitude : null);
-    setUserProfileMenuOpen(false);
-  };
-
-  const createUserProfile = () => {
-    const profile: UserProfilePreset = {
-      id: createMessageId(),
-      name: "New user",
-      description: "",
-      avatar: "",
-      voice_path: "",
-      location_label: "",
-      latitude: null,
-      longitude: null,
-      auto_speech: true,
-    };
-    setUserProfiles((prev) => [...prev, profile]);
-    setSelectedUserProfileId(profile.id);
-    setUserName(profile.name);
-    setUserAvatar("");
-    setUserDescription("");
-    setUserLocationLabel("");
-    setUserLatitude(null);
-    setUserLongitude(null);
-    setUserProfileMenuOpen(false);
-    setUserProfileOpen(true);
-  };
-
-  const openUserProfile = () => {
-    setUserProfileMenuOpen(false);
-    setUserProfileOpen(true);
-  };
-
-  const saveActiveUserProfile = () => {
-    const nextName = userName.trim() || selectedUserProfile?.name || "You";
-    setUserName(nextName);
-    updateActiveUserProfile({
-      name: nextName,
-      avatar: userAvatar,
-      description: userDescription,
-      voice_path: selectedUserVoicePath,
-      location_label: userLocationLabel,
-      latitude: userLatitude,
-      longitude: userLongitude,
-      auto_speech: selectedUserProfile?.auto_speech ?? true,
-    });
-    setUserProfileOpen(false);
-  };
-
-  const deleteSelectedUserProfile = () => {
-    if (userProfiles.length <= 1) return;
-    setUserProfiles((prev) => {
-      const next = prev.filter((profile) => profile.id !== selectedUserProfileId);
-      const fallback = next[0] ?? DEFAULT_SETTINGS.user_profiles[0];
-      setSelectedUserProfileId(fallback.id);
-      setUserName(fallback.name || "You");
-      setUserAvatar(fallback.avatar || "");
-      setUserDescription(fallback.description || "");
-      setUserLocationLabel(fallback.location_label || "");
-      setUserLatitude(typeof fallback.latitude === "number" && Number.isFinite(fallback.latitude) ? fallback.latitude : null);
-      setUserLongitude(typeof fallback.longitude === "number" && Number.isFinite(fallback.longitude) ? fallback.longitude : null);
-      return next.length ? next : DEFAULT_SETTINGS.user_profiles;
-    });
-    setUserProfileOpen(false);
-  };
-
-  const openPersonalityProfile = () => {
-    setPersonalityNameDraft(selectedPersonalityPreset?.name || "Assistant");
-    setPersonalityProfileOpen(true);
-  };
-
-  const saveCurrentPersonalityPreset = () => {
-    const name = "New assistant";
-    const preset: PersonalityPreset = {
-      id: createMessageId(),
-      name,
-      prompt: "You are a helpful assistant.",
-      avatar: "",
-      voice_path: "",
-    };
-    saveActiveChatSession();
-    setPersonalityPresets((prev) => [...prev, preset]);
-    setSelectedPersonalityId(preset.id);
-    setPersonality(preset.prompt);
-    setPersonalityAvatar("");
-    setSelectedVoicePath("");
-    setPersonalityNameDraft(name);
-    setMessages([]);
-    loadedChatSessionIdsRef.current.add(preset.id);
-    chatSessionsRef.current = { ...chatSessionsRef.current, [preset.id]: [] };
-    setChatSessions((prev) => ({ ...prev, [preset.id]: [] }));
-    sessionShadowRef.current[preset.id] = compactSessionFingerprint([]);
-    lastSessionMutationAtRef.current[preset.id] = Date.now();
-    setPersonalityProfileOpen(true);
-  };
-
-  const updateSelectedPersonalityPreset = () => {
-    const nextName = personalityNameDraft.trim() || selectedPersonalityPreset?.name || "Assistant";
-    setPersonalityPresets((prev) =>
-      prev.map((preset) =>
-        preset.id === selectedPersonalityId
-          ? { ...preset, name: nextName, prompt: personality, avatar: personalityAvatar, voice_path: selectedVoicePath }
-          : preset,
-      ),
-    );
-    setPersonalityNameDraft(nextName);
-    saveActiveCharacterFiles({
-      name: nextName,
-      prompt: personality,
-      avatar: personalityAvatar,
-      voice_path: selectedVoicePath,
-      soul: characterSoul,
-    }).catch((error) => console.error("Character files save error:", error));
-  };
-
-  const deleteSelectedPersonalityPreset = () => {
-    if (personalityPresets.length <= 1) return;
-    const deletedPersonalityId = selectedPersonalityId;
-    deletePersonalityMemory(deletedPersonalityId).catch((error) => console.error("Personality memory delete error:", error));
-    invoke("delete_personality_chat_session", { personalityId: deletedPersonalityId }).catch((error) =>
-      console.error("Personality chat session delete error:", error),
-    );
-    setPersonalityPresets((prev) => {
-      const next = prev.filter((preset) => preset.id !== selectedPersonalityId);
-      const fallback = next[0] ?? DEFAULT_SETTINGS.personality_presets[0];
-      const { [deletedPersonalityId]: _deletedSession, ...remainingSessions } = chatSessionsRef.current;
-      loadedChatSessionIdsRef.current.delete(deletedPersonalityId);
-      chatSessionsRef.current = remainingSessions;
-      setChatSessions(remainingSessions);
-      setSelectedPersonalityId(fallback.id);
-      setPersonalityNameDraft(fallback.name || "Assistant");
-      setPersonality(fallback.prompt);
-      setPersonalityAvatar(fallback.avatar || "");
-      setPersonalityMemory("");
-      setMessages(remainingSessions[fallback.id] ?? []);
-      return next.length ? next : DEFAULT_SETTINGS.personality_presets;
-    });
-  };
 
   const leftPanelContent = (
     <LeftPanelContent
@@ -4149,7 +2243,7 @@ ${personalityMemory.trim()}`
       onUserNameChange={setUserName}
       onUserDescriptionChange={setUserDescription}
       onChooseVoiceFolder={() => handleChooseVoiceFolder().catch((error) => console.error("Voice folder error:", error))}
-      onPreviewUserVoice={(sample) => void previewUserVoiceSample(sample)}
+      onPreviewUserVoice={(sample) => void previewVoiceSample(sample)}
       onSelectUserVoice={updateActiveUserVoicePath}
       onToggleUserAutoSpeech={() => updateActiveUserProfile({ auto_speech: !(selectedUserProfile?.auto_speech ?? true) })}
       onRequestDeleteUser={() => {
@@ -4202,57 +2296,30 @@ ${personalityMemory.trim()}`
       onRepeatPenaltyChange={setRepeatPenalty}
     />
   );
-  const handleInstallSetupBundle = async () => {
-    if (setupInstalling) return;
-    setSetupInstalling(true);
-    setSetupProgress({
-      stage: "starting",
-      part_key: "",
-      label: "",
-      file_index: 0,
-      file_count: setupCatalog?.parts.reduce((count, part) => count + part.files.length, 0) || 0,
-      percent: 0,
-      message: "Preparing local model folders...",
-    });
-    setSetupNotice("Downloading local AI parts. This can take a long time on the first run...");
-    try {
-      const result = await invoke<SetupInstallResult>("install_setup_bundle", {
-        tier: activeSetupTier,
-        hasNvidiaGpu: systemInfo?.has_nvidia_gpu ?? false,
-      });
-      setSetupCatalog(result.catalog);
-      setModelFolder(result.catalog.brain_model_folder);
-      setSelectedModelPath(result.catalog.selected_brain_model_path);
-      setSetupCompleted(true);
-      setLeftPanelOpen(true);
-      setRightPanelOpen(true);
-      setSetupNotice("Models downloaded. Preparing the app for first use...");
-      await ensureRuntimeEngineReady();
-      await scanModelLibrary(
-        result.catalog.brain_model_folder,
-        result.catalog.selected_brain_model_path,
-        true,
-      );
-      setPendingAutoLoadPath(result.catalog.selected_brain_model_path);
-      await prepareVoiceHelpers(true);
-      setSetupNotice(result.message);
-      setSetupScreenOpen(false);
-      window.setTimeout(() => ensureConversationStartsAtBottom(), 0);
-    } catch (error) {
-      console.error("Setup install error:", error);
-      setSetupNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSetupInstalling(false);
-    }
-  };
-
-  const closeSetupScreen = () => {
-    setSetupCompleted(true);
-    setSetupScreenOpen(false);
-    setLeftPanelOpen(true);
-    setRightPanelOpen(true);
-    window.setTimeout(() => ensureConversationStartsAtBottom(), 0);
-  };
+  const {
+    closeSetupScreen,
+    handleInstallSetupBundle,
+  } = useSetupInstallActions({
+    activeSetupTier,
+    ensureConversationStartsAtBottom,
+    ensureRuntimeEngineReady,
+    prepareVoiceHelpers,
+    scanModelLibrary,
+    setLeftPanelOpen,
+    setModelFolder,
+    setPendingAutoLoadPath,
+    setRightPanelOpen,
+    setSelectedModelPath,
+    setSetupCatalog,
+    setSetupCompleted,
+    setSetupInstalling,
+    setSetupNotice,
+    setSetupProgress,
+    setSetupScreenOpen,
+    setupCatalog,
+    setupInstalling,
+    systemInfo,
+  });
 
   if (!settingsLoaded) {
     return <StartupScreen />;
@@ -4299,48 +2366,22 @@ ${personalityMemory.trim()}`
           } as React.CSSProperties
         }
       >
-      <input
-        ref={userAvatarPickerRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(event) => {
-          readAvatarImage(event.target.files?.[0], setUserAvatar);
-          event.currentTarget.value = "";
-        }}
-      />
-      <input
-        ref={personalityAvatarPickerRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(event) => {
-          readAvatarImage(event.target.files?.[0], (dataUrl) => {
-            const targetId = avatarTargetPersonalityIdRef.current || selectedPersonalityId;
-            setPersonalityAvatar(dataUrl);
-            setPersonalityPresets((prev) =>
-              prev.map((preset) =>
-                preset.id === targetId ? { ...preset, avatar: dataUrl } : preset,
-              ),
-            );
-            avatarTargetPersonalityIdRef.current = null;
-          });
-          event.currentTarget.value = "";
-        }}
+      <AvatarFileInputs
+        avatarTargetPersonalityIdRef={avatarTargetPersonalityIdRef}
+        personalityAvatarPickerRef={personalityAvatarPickerRef}
+        readAvatarImage={readAvatarImage}
+        selectedPersonalityId={selectedPersonalityId}
+        setPersonalityAvatar={setPersonalityAvatar}
+        setPersonalityPresets={setPersonalityPresets}
+        setUserAvatar={setUserAvatar}
+        userAvatarPickerRef={userAvatarPickerRef}
       />
 
       <FreshChatConfirmModal
         open={freshChatConfirmOpen}
         onClose={() => setFreshChatConfirmOpen(false)}
         onClear={() => {
-          setMessages([]);
-          if (selectedPersonalityId) {
-            chatSessionsRef.current = {
-              ...chatSessionsRef.current,
-              [selectedPersonalityId]: [],
-            };
-            setChatSessions((prev) => ({ ...prev, [selectedPersonalityId]: [] }));
-          }
+          clearActiveChatSession();
           setComposerText("");
           clearImage();
           setComposerNotice("");
@@ -4387,33 +2428,20 @@ ${personalityMemory.trim()}`
         onPointerMove={markUiInteraction}
         onWheel={markUiInteraction}
       >
-        <aside
-          className={`${leftPanelOpen ? "flex" : "hidden"} ${
-            isCompactLayout ? "fixed inset-y-0 left-0 z-50 w-[320px]" : "relative z-30 w-[292px] flex-none"
-          } flex-col border-r border-[#323437] bg-[#18191b]`}
+        <AppSidePanel
+          open={leftPanelOpen}
+          side="left"
+          title="App Settings"
+          isCompactLayout={isCompactLayout}
+          onClose={() => setLeftPanelOpen(false)}
+          actions={(
+            <IconButton size="sm" title="Download models" onClick={() => setSetupScreenOpen(true)}>
+              <DownloadIcon />
+            </IconButton>
+          )}
         >
-          <div className="flex h-14 items-center justify-between border-b border-[#282a2c] px-4">
-            <div className="text-sm font-semibold text-[#e3e3e3]">App Settings</div>
-            <div className="flex items-center gap-2">
-              <IconButton size="sm" title="Download models" onClick={() => setSetupScreenOpen(true)}>
-                <DownloadIcon />
-              </IconButton>
-              <IconButton size="sm" title="Close app settings" onClick={() => setLeftPanelOpen(false)}>
-                <CloseIcon />
-              </IconButton>
-            </div>
-          </div>
-          <div className="panel-scroll min-h-0 flex-1 overflow-y-auto">{leftPanelContent}</div>
-        </aside>
-
-        {isCompactLayout && leftPanelOpen && (
-          <button
-            type="button"
-            onClick={() => setLeftPanelOpen(false)}
-            className="fixed inset-0 z-40 bg-black/35"
-            aria-label="Close app settings overlay"
-          />
-        )}
+          {leftPanelContent}
+        </AppSidePanel>
 
         <main
           className="relative flex min-w-0 flex-1 flex-col overflow-hidden w-full"
@@ -4428,73 +2456,30 @@ ${personalityMemory.trim()}`
             attachImageFromFile(event.dataTransfer.files[0]);
           }}
         >
-          {isDragging && (
-            <div className="absolute inset-0 z-40 flex items-center justify-center border-4 border-dashed bg-[#131314]/80 backdrop-blur-sm" style={{ borderColor: "var(--accent-soft-strong)" }}>
-              <div className="rounded-[28px] bg-[#1e1f20] px-8 py-6 text-center shadow-xl ring-1 ring-[#282a2c]">
-                <div className="font-title text-2xl text-[#e3e3e3]">Drop an image here</div>
-                <div className="mt-2 text-sm text-[#c4c7c5]">The assistant will add it to the chat with your instruction.</div>
-              </div>
-            </div>
-          )}
+          {isDragging && <DropImageOverlay />}
 
           <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
             <img src={brandLogo} alt="" aria-hidden="true" className={conversationLogoClass} />
           </div>
 
-          <header className="shrink-0 border-b border-[#282a2c] bg-[#131314] px-3 py-2">
-            <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
-              <IconButton title={leftPanelOpen ? "Close app settings" : "Open app settings"} onClick={() => setLeftPanelOpen((prev) => !prev)} size="sm" active={leftPanelOpen}>
-                <GearIcon />
-              </IconButton>
-              <div className="min-w-0 overflow-hidden">
-                <ResourceHeader
-                  activeTaskType={activeTaskType}
-                  brainStatus={brainStatus}
-                  modelState={modelLoadStatus.state}
-                  isGeneratingImage={isGeneratingImage}
-                  isAudioPlaying={isAudioPlaying}
-                  isVoiceBusy={Boolean(speakingMessageId || previewingVoicePath || isAudioPlaying)}
-                />
-              </div>
-              <IconButton title={rightPanelOpen ? "Close model controls" : "Open model controls"} onClick={() => setRightPanelOpen((prev) => !prev)} size="sm" active={rightPanelOpen}>
-                <MenuIcon />
-              </IconButton>
-            </div>
-            <div className="mt-3 text-center text-[11px] font-medium text-[#9aa0a6]">
-              {dateTimeLine}
-            </div>
-
-            {availableUpdate && (
-              <div className="mt-2 flex justify-center">
-                <button
-                  type="button"
-                  onClick={() => openUrl(availableUpdate.url).catch((error) => console.error("Open release page error:", error))}
-                  className="inline-flex max-w-full items-center gap-2 rounded-full border border-[color:var(--accent-soft-strong)] bg-[color:var(--accent-soft)] px-3 py-1 text-[11px] font-bold tracking-[0.12em] text-[color:var(--accent-color)] transition hover:border-[color:var(--accent-color)] hover:bg-[color:var(--accent-soft-strong)]"
-                  title={`Open Galaxy AI Hub ${availableUpdate.version} release page`}
-                >
-                  <DownloadIcon />
-                  <span className="truncate">New Update available</span>
-                </button>
-              </div>
-            )}
-
-            {topStatusText && (
-              <div className="mt-1.5 rounded-2xl border border-[#282a2c] bg-[#1e1f20] px-3 py-1.5">
-                <div className="flex items-center justify-between gap-3 text-[11px] font-semibold text-[#c4c7c5]">
-                  <span className="min-w-0 truncate">{topStatusText}</span>
-                  {topProgressActive && <span className="shrink-0 text-[#9aa0a6]">{Math.round(topProgressPercent)}%</span>}
-                </div>
-                {topProgressActive && (
-                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-[#282a2c]">
-                    <div
-                      className={`h-full transition-all duration-300 ${brainStatus === "Error" ? "bg-rose-500" : ""}`}
-                      style={{ width: `${topProgressPercent}%`, backgroundColor: brainStatus === "Error" ? undefined : "var(--accent-color)" }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-          </header>
+          <AppHeader
+            activeTaskType={activeTaskType}
+            availableUpdate={availableUpdate}
+            brainStatus={brainStatus}
+            dateTimeLine={dateTimeLine}
+            isAudioPlaying={isAudioPlaying}
+            isGeneratingImage={isGeneratingImage}
+            leftPanelOpen={leftPanelOpen}
+            modelLoadStatus={modelLoadStatus}
+            previewingVoicePath={previewingVoicePath}
+            rightPanelOpen={rightPanelOpen}
+            setLeftPanelOpen={setLeftPanelOpen}
+            setRightPanelOpen={setRightPanelOpen}
+            speakingMessageId={speakingMessageId}
+            topProgressActive={topProgressActive}
+            topProgressPercent={topProgressPercent}
+            topStatusText={topStatusText}
+          />
 
           {engineErrorMsg && (
             <div className="shrink-0 border-b border-rose-500/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
@@ -4562,7 +2547,7 @@ ${personalityMemory.trim()}`
             isRecording={isRecording}
             isTranscribing={isTranscribing}
             themePickerOpen={themePickerOpen}
-            themeSwatches={THEME_SWATCHS}
+            themeSwatches={themeSwatches}
             themeSwatchId={themeSwatchId}
             quickModelMenuOpen={quickModelMenuOpen}
             availableModels={availableModels}
@@ -4575,14 +2560,7 @@ ${personalityMemory.trim()}`
             onRemoveImage={() => {
               clearImage();
             }}
-            onComposerInput={(node) => {
-              lastComposerInputAtRef.current = Date.now();
-              setComposerHasText((previous) => {
-                const next = Boolean(node.value.trim());
-                return previous === next ? previous : next;
-              });
-              resizeComposerTextarea(node);
-            }}
+            onComposerInput={handleComposerInput}
             onComposerPaste={(event) => {
               const items = event.clipboardData?.items;
               if (!items) return;
@@ -4632,28 +2610,15 @@ ${personalityMemory.trim()}`
           />
         </main>
 
-        <aside
-          className={`${rightPanelOpen ? "flex" : "hidden"} ${
-            isCompactLayout ? "fixed inset-y-0 right-0 z-50 w-[320px]" : "relative z-30 w-[292px] flex-none"
-          } flex-col border-l border-[#323437] bg-[#18191b]`}
+        <AppSidePanel
+          open={rightPanelOpen}
+          side="right"
+          title="Model Controls"
+          isCompactLayout={isCompactLayout}
+          onClose={() => setRightPanelOpen(false)}
         >
-          <div className="flex h-14 items-center justify-between border-b border-[#282a2c] px-4">
-            <div className="text-sm font-semibold text-[#e3e3e3]">Model Controls</div>
-            <IconButton size="sm" title="Close model controls" onClick={() => setRightPanelOpen(false)}>
-              <CloseIcon />
-            </IconButton>
-          </div>
-          <div className="panel-scroll min-h-0 flex-1 overflow-y-auto">{rightPanelContent}</div>
-        </aside>
-
-        {isCompactLayout && rightPanelOpen && (
-          <button
-            type="button"
-            onClick={() => setRightPanelOpen(false)}
-            className="fixed inset-0 z-40 bg-black/35"
-            aria-label="Close model controls overlay"
-          />
-        )}
+          {rightPanelContent}
+        </AppSidePanel>
       </div>
     </div>
 
