@@ -1490,6 +1490,7 @@ function App() {
       setThemeSwatchId={setThemeSwatchId}
       setThinkingEnabled={setThinkingEnabled}
       setUserAvatar={setUserAvatar}
+      setUserProfileMenuOpen={setUserProfileMenuOpen}
       settingsLoadError={settingsLoadError}
       settingsLoaded={settingsLoaded}
       setupCatalog={setupCatalog}

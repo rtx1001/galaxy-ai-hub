@@ -225,7 +225,11 @@ export function ChatComposer({
               <button
                 type="button"
                 title="Choose theme color"
-                onClick={onToggleThemePicker}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onToggleThemePicker();
+                }}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#282a2c] bg-[#1e1f20] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
                 style={{
                   color: themePickerOpen ? selectedThemeSwatch.accent : undefined,
@@ -235,14 +239,21 @@ export function ChatComposer({
                 <BrushIcon className="h-4.5 w-4.5" />
               </button>
               {themePickerOpen && (
-                <div className="absolute bottom-full left-1/2 z-50 mb-3 -translate-x-1/2 rounded-full border border-[#282a2c] bg-[#1e1f20] px-3 py-2 shadow-2xl">
+                <div
+                  className="absolute bottom-full left-1/2 z-[220] mb-3 -translate-x-1/2 rounded-full border border-[#282a2c] bg-[#1e1f20] px-3 py-2 shadow-2xl"
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
                   <div className="flex items-center gap-2">
                     {themeSwatches.map((swatch) => (
                       <button
                         key={swatch.id}
                         type="button"
                         title={swatch.id}
-                        onClick={() => onSelectTheme(swatch.id)}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onSelectTheme(swatch.id);
+                        }}
                         className="flex h-8 w-8 items-center justify-center rounded-full border transition"
                         style={{
                           backgroundColor: swatch.accent,
