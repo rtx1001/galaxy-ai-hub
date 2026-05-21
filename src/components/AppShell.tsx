@@ -160,6 +160,7 @@ export function AppShell(props: AppShellProps) {
 
             <AppHeader
               activeTaskType={props.activeTaskType}
+              appVersion={props.appVersion}
               availableUpdate={props.availableUpdate}
               brainStatus={props.brainStatus}
               dateTimeLine={props.dateTimeLine}

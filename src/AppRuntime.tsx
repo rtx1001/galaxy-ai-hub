@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ChatMessage, ModelLoadStatus } from "./types";
 import { AppShell } from "./components/AppShell";
-import { useAvailableUpdate } from "./hooks/useAvailableUpdate";
+import { CURRENT_APP_VERSION, useAvailableUpdate } from "./hooks/useAvailableUpdate";
 import { useDateTimeLine } from "./hooks/useDateTimeLine";
 import { useTelegramGuests } from "./hooks/useTelegramGuests";
 import { useToolRuns } from "./hooks/useToolRuns";
@@ -1356,6 +1356,7 @@ function App() {
       activeSetupPartKey={activeSetupPartKey}
       activeSetupTier={activeSetupTier}
       activeTaskType={activeTaskType}
+      appVersion={`v${CURRENT_APP_VERSION}`}
       approveActionProposal={approveActionProposal}
       approveShellAction={approveShellAction}
       assistantAvatar={assistantAvatar}

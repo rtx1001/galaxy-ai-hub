@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ToolResultCard, ImageProposal, ActionProposal, FilePreviewResult, GoogleCalendarEvent } from "../types";
 import { formatBytes, toolCardStyle, fieldValue, compactDetailsForKind, cleanDisplayPath } from "../utils";
@@ -258,12 +258,14 @@ export function ToolResultCards({ cards, onDeleteCalendarEvent, language = "en" 
 export function ImageProposalCard({
       proposal,
       disabled,
+      forceCollapsed = false,
       onGenerate,
       onCancel,
       language = "en",
     }: {
           proposal: ImageProposal;
           disabled: boolean;
+          forceCollapsed?: boolean;
           onGenerate: (prompt: string) => void;
           onCancel: () => void;
           language?: DisplayLanguage;
@@ -271,6 +273,11 @@ export function ImageProposalCard({
     const labels = uiText(language);
     const [draftPrompt, setDraftPrompt] = useState(proposal.prompt);
     const [open, setOpen] = useState(true);
+    useEffect(() => {
+      if (forceCollapsed) {
+        setOpen(false);
+      }
+    }, [forceCollapsed]);
     const modeLabel = proposal.mode.replace(/_/g, " ");
     const modeText = "Mode";
     const maskText = "Mask";
@@ -349,18 +356,25 @@ export function ImageProposalCard({
 export function ActionProposalCard({
       proposal,
       disabled,
+      forceCollapsed = false,
       onApprove,
       onCancel,
       language = "en",
     }: {
           proposal: ActionProposal;
           disabled: boolean;
+          forceCollapsed?: boolean;
           onApprove: () => void;
           onCancel: () => void;
           language?: DisplayLanguage;
         }) {
     const labels = uiText(language);
     const [open, setOpen] = useState(true);
+    useEffect(() => {
+      if (forceCollapsed) {
+        setOpen(false);
+      }
+    }, [forceCollapsed]);
     const actionTitle = "Action request";
     const detailsLabel = "Details";
     const riskClass = proposal.risk_level === "high"

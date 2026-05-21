@@ -2535,7 +2535,8 @@ fn previous_explicit_route(messages: &[ReactChatMessage]) -> Option<ToolRoute> {
         .enumerate()
         .rev()
         .filter(|(index, message)| message.role == "user" && Some(*index) != latest_index)
-        .find_map(|(_, message)| route_for_request(&content_text(&message.content)))
+        .next()
+        .and_then(|(_, message)| route_for_request(&content_text(&message.content)))
 }
 
 fn request_adds_context_details(text: &str) -> bool {
@@ -3473,7 +3474,23 @@ fn tool_allowed_for_route_kind(call: &ToolCall, route: Option<ToolRoute>) -> Res
                 ))
             }
         }
-        None => Ok(()),
+        None => {
+            if is_gmail_tool(&call.tool)
+                || is_calendar_tool(&call.tool)
+                || call.tool == "weather_forecast"
+                || is_google_workspace_tool(&call.tool)
+                || is_workspace_file_tool(&call.tool)
+                || is_web_tool(&call.tool)
+                || is_media_preview_tool(&call.tool)
+            {
+                Err(format!(
+                    "{} is not relevant to this request. No matching tool route was detected.",
+                    call.tool
+                ))
+            } else {
+                Ok(())
+            }
+        }
     }
 }
 
@@ -3856,9 +3873,8 @@ fn recent_pending_image_proposal(messages: &[ReactChatMessage]) -> Option<ImageP
     messages
         .iter()
         .rev()
-        .filter(|message| message.role == "assistant")
-        .take(8)
-        .find_map(|message| parse_pending_image_proposal_text(&content_text(&message.content)))
+        .find(|message| message.role == "assistant")
+        .and_then(|message| parse_pending_image_proposal_text(&content_text(&message.content)))
 }
 
 async fn call_chat(
@@ -8902,6 +8918,63 @@ propose_image_generation(mask_prompt="sky and clouds", mode="image_to_image", pr
             Some(&proposal),
             false
         ));
+    }
+
+    #[test]
+    fn older_image_proposal_is_not_pending_after_normal_assistant_reply() {
+        let messages = vec![
+            ReactChatMessage {
+                role: "assistant".to_string(),
+                content: json!(
+                    "Pending image proposal awaiting approval:\nPrompt: A rainy tea table beside a stream\nMode: text_to_image"
+                ),
+            },
+            ReactChatMessage {
+                role: "user".to_string(),
+                content: json!("ý tưởng khác đi"),
+            },
+            ReactChatMessage {
+                role: "assistant".to_string(),
+                content: json!("Em có vài ý tưởng khác: cà phê, phố đêm, hoặc khu vườn nhỏ."),
+            },
+            ReactChatMessage {
+                role: "user".to_string(),
+                content: json!("cà phê đi"),
+            },
+        ];
+        assert!(recent_pending_image_proposal(&messages).is_none());
+    }
+
+    #[test]
+    fn old_calendar_context_does_not_leak_into_image_feedback() {
+        let messages = vec![
+            ReactChatMessage {
+                role: "user".to_string(),
+                content: json!("check lịch tháng này cho anh"),
+            },
+            ReactChatMessage {
+                role: "assistant".to_string(),
+                content: json!("Tháng này có vài sự kiện trong lịch của anh."),
+            },
+            ReactChatMessage {
+                role: "user".to_string(),
+                content: json!("tạo ảnh một bát phở thật đẹp"),
+            },
+            ReactChatMessage {
+                role: "assistant".to_string(),
+                content: json!("Ảnh đã xong đây.\n[image attached]"),
+            },
+            ReactChatMessage {
+                role: "user".to_string(),
+                content: json!("đây là bát bún đấy chứ có phải phở đâu"),
+            },
+        ];
+        assert_eq!(contextual_route_for_messages(&messages), None);
+        let call = ToolCall {
+            tool: "google_calendar_check".to_string(),
+            arguments: json!({ "date": "today" }),
+        };
+        assert!(tool_allowed_for_context(&call, &messages).is_err());
     }
 
     #[test]

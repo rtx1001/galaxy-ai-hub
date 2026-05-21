@@ -754,13 +754,15 @@ export const isExplicitApprovalText = (text: string) => {
 export const findPendingImageProposal = (chatMessages: ChatMessage[]) => {
   for (let messageIndex = chatMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
     const message = chatMessages[messageIndex];
-    if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+    if (message.role !== "assistant") continue;
+    if (!Array.isArray(message.content)) return null;
     for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex -= 1) {
       const part = message.content[partIndex];
       if (part.type === "image_proposal") {
         return { messageId: message.id, partIndex, proposal: part.image_proposal };
       }
     }
+    return null;
   }
   return null;
 };
@@ -768,13 +770,15 @@ export const findPendingImageProposal = (chatMessages: ChatMessage[]) => {
 export const findPendingActionProposal = (chatMessages: ChatMessage[]) => {
   for (let messageIndex = chatMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
     const message = chatMessages[messageIndex];
-    if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+    if (message.role !== "assistant") continue;
+    if (!Array.isArray(message.content)) return null;
     for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex -= 1) {
       const part = message.content[partIndex];
       if (part.type === "action_proposal") {
         return { messageId: message.id, partIndex, proposal: part.action_proposal };
       }
     }
+    return null;
   }
   return null;
 };

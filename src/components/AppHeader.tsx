@@ -7,6 +7,7 @@ import { ModelLoadStatus } from "../types";
 
 type AppHeaderProps = {
   activeTaskType: "none" | "llm" | "voice" | "image";
+  appVersion: string;
   availableUpdate: AvailableUpdate | null;
   brainStatus: "Idle" | "Loading" | "Ready" | "Thinking" | "Error";
   dateTimeLine: string;
@@ -26,6 +27,7 @@ type AppHeaderProps = {
 
 export function AppHeader({
   activeTaskType,
+  appVersion,
   availableUpdate,
   brainStatus,
   dateTimeLine,
@@ -63,7 +65,9 @@ export function AppHeader({
         </IconButton>
       </div>
       <div className="mt-3 text-center text-[11px] font-medium text-[#9aa0a6]">
-        {dateTimeLine}
+        <span>Galaxy AI Hub {appVersion}</span>
+        <span className="mx-2 text-[#5f6368]">·</span>
+        <span>{dateTimeLine}</span>
       </div>
 
       {availableUpdate && (

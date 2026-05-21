@@ -21,6 +21,7 @@ mod weather;
 
 use std::{collections::HashMap, sync::Mutex};
 use tauri::menu::{MenuBuilder, MenuItem};
+use tauri::{LogicalSize, Size};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager, State};
 
@@ -30,6 +31,8 @@ struct TrayMenuState {
 }
 
 const MINIMIZE_TO_TRAY_ENABLED: bool = false;
+const DEFAULT_WINDOW_WIDTH: f64 = 1220.0;
+const DEFAULT_WINDOW_HEIGHT: f64 = 820.0;
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -45,6 +48,16 @@ fn cleanup_runtime_processes(app: &tauri::AppHandle) {
 
     let omnivoice_state = app.state::<omnivoice_runtime::OmniVoiceRuntimeState>();
     omnivoice_runtime::shutdown_omnivoice_process(omnivoice_state.inner());
+}
+
+fn apply_startup_window_layout(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_size(Size::Logical(LogicalSize {
+            width: DEFAULT_WINDOW_WIDTH,
+            height: DEFAULT_WINDOW_HEIGHT,
+        }));
+        let _ = window.center();
+    }
 }
 
 #[tauri::command]
@@ -89,6 +102,7 @@ pub fn run() {
         .manage(agent_shell::ShellApprovalState::default())
         .setup(|app| {
             let app_handle = app.handle().clone();
+            apply_startup_window_layout(&app_handle);
             if MINIMIZE_TO_TRAY_ENABLED {
                 tauri::async_runtime::spawn({
                     let app_handle = app_handle.clone();

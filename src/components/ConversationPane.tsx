@@ -96,7 +96,7 @@ export function ConversationPane({
                   <dl className="mt-2 grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px] leading-4 sm:grid-cols-[82px_minmax(0,1fr)]">
                     <dt className="font-semibold text-[#9aa0a6]">CPU</dt>
                     <dd className="min-w-0 break-words text-[#e3e3e3]">{systemInfo.cpu_name}</dd>
-                    <dt className="font-semibold text-[#9aa0a6]">GPU ? VRAM</dt>
+                    <dt className="font-semibold text-[#9aa0a6]">GPU - RAM</dt>
                     <dd className="min-w-0 break-words text-[#e3e3e3]">{hardwareGpuLabel}</dd>
                     <dt className="font-semibold text-[#9aa0a6]">RAM</dt>
                     <dd className="min-w-0 break-words text-[#e3e3e3]">{hardwareRamLabel}</dd>
@@ -163,6 +163,7 @@ export function ConversationPane({
                             key={partIndex}
                             proposal={part.image_proposal}
                             disabled={isGeneratingImage}
+                            forceCollapsed={index < messages.length - 1}
                             language="en"
                             onCancel={() => onDismissImageProposal(message.id, partIndex)}
                             onGenerate={(prompt) => onGenerateImage(prompt, part.image_proposal.mode, part.image_proposal.mask_prompt ?? undefined)}
@@ -172,6 +173,7 @@ export function ConversationPane({
                             key={partIndex}
                             proposal={part.action_proposal}
                             disabled={isApproving}
+                            forceCollapsed={index < messages.length - 1}
                             language="en"
                             onCancel={() => onDismissChatPart(message.id, partIndex, "Action was cancelled.")}
                             onApprove={() => onApproveActionProposal(message.id, partIndex, part.action_proposal)}

@@ -32,7 +32,7 @@ export function useAppDerivedState(options: UseAppDerivedStateOptions) {
   const selectedGoogleEvents = options.googleCalendarEvents.filter((event) =>
     googleEventMatchesDate(event, options.selectedAutomationDate),
   );
-  const hardwareGpuLabel = options.systemInfo?.gpu_details.replace(/\s*\(([^)]+)\)\s*$/, " - $1") ?? "";
+  const hardwareGpuLabel = options.systemInfo?.gpu_details.replace(/\s*\(([\d.]+\s*GB)\s+VRAM\)\s*$/, " - $1") ?? "";
   const hardwareRamLabel = options.systemInfo ? `${(options.systemInfo.total_ram_mb / 1024).toFixed(1)} GB` : "Unknown";
   const conversationLogoClass = options.messagesLength === 0
     ? "hidden"

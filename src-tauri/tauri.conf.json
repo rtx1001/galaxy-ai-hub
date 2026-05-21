@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Galaxy AI Hub",
-        "width": 1200,
-        "height": 900,
+        "width": 1220,
+        "height": 820,
         "center": true,
         "backgroundColor": "#0f1115",
         "minWidth": 480,
