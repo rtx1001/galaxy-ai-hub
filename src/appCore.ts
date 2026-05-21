@@ -838,6 +838,9 @@ export const compactContentForStorage = (content: ChatMessage["content"]): ChatM
       if (part.type === "action_proposal") {
         return part;
       }
+      if (part.type === "file_preview") {
+        return part;
+      }
       return null;
     })
     .filter((part): part is ChatContentPart => Boolean(part));
@@ -923,6 +926,41 @@ export const parseStoredChatSession = (raw: string): ChatMessage[] => {
                 typeof part.action_proposal.title === "string"
               ) {
                 return { type: "action_proposal", action_proposal: part.action_proposal };
+              }
+              if (
+                part.type === "file_preview" &&
+                part.file_preview &&
+                typeof part.file_preview.path === "string" &&
+                typeof part.file_preview.name === "string" &&
+                typeof part.file_preview.mime_type === "string"
+              ) {
+                return {
+                  type: "file_preview",
+                  file_preview: {
+                    path: part.file_preview.path,
+                    name: part.file_preview.name,
+                    extension:
+                      typeof part.file_preview.extension === "string"
+                        ? part.file_preview.extension
+                        : "",
+                    mime_type: part.file_preview.mime_type,
+                    size_bytes:
+                      typeof part.file_preview.size_bytes === "number"
+                        ? part.file_preview.size_bytes
+                        : 0,
+                    data_url:
+                      typeof part.file_preview.data_url === "string"
+                        ? part.file_preview.data_url
+                        : null,
+                    text:
+                      typeof part.file_preview.text === "string" ? part.file_preview.text : null,
+                    perception:
+                      typeof part.file_preview.perception === "string"
+                        ? part.file_preview.perception
+                        : null,
+                    truncated: Boolean(part.file_preview.truncated),
+                  },
+                };
               }
               return null;
             })

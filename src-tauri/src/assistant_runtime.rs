@@ -603,6 +603,106 @@ fn image_reference_data_url(value: &str) -> Option<String> {
         .map(|image| image.data_url)
 }
 
+fn telegram_input_dir() -> PathBuf {
+    assistant_runtime_dir().join("telegram-input")
+}
+
+fn sanitize_telegram_file_name(name: &str) -> String {
+    let trimmed = name.trim();
+    let cleaned = trimmed
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_' | ' ') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let without_paths = Path::new(&cleaned)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("telegram-file")
+        .trim()
+        .to_string();
+    if without_paths.is_empty() {
+        "telegram-file".to_string()
+    } else {
+        without_paths.chars().take(96).collect()
+    }
+}
+
+fn extension_from_mime_or_name(mime: &str, file_name: &str) -> String {
+    if let Some(extension) = Path::new(file_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.trim_start_matches('.').to_ascii_lowercase())
+        .filter(|value| !value.is_empty() && value.len() <= 12)
+    {
+        return extension;
+    }
+    match mime.to_ascii_lowercase().as_str() {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/png" => "png",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "application/pdf" => "pdf",
+        "text/plain" => "txt",
+        "audio/mpeg" => "mp3",
+        "audio/ogg" => "ogg",
+        "audio/wav" | "audio/x-wav" => "wav",
+        "video/mp4" => "mp4",
+        _ => "bin",
+    }
+    .to_string()
+}
+
+fn save_telegram_downloaded_file(
+    bytes: &[u8],
+    display_name: &str,
+    mime_type: &str,
+) -> Result<PathBuf, String> {
+    let input_dir = telegram_input_dir();
+    std::fs::create_dir_all(&input_dir)
+        .map_err(|error| format!("Could not create Telegram input folder: {}", error))?;
+    let safe_name = sanitize_telegram_file_name(display_name);
+    let extension = extension_from_mime_or_name(mime_type, &safe_name);
+    let hash = stable_bytes_hash(bytes);
+
+    for entry in std::fs::read_dir(&input_dir)
+        .map_err(|error| format!("Could not read Telegram input folder: {}", error))?
+        .flatten()
+    {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        if !file_name.starts_with(&format!("telegram-{}-", hash)) {
+            continue;
+        }
+        if std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0) == bytes.len() as u64 {
+            return Ok(path);
+        }
+    }
+
+    let stem = Path::new(&safe_name)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("file");
+    let output = input_dir.join(format!("telegram-{}-{}.{}", hash, stem, extension));
+    std::fs::write(&output, bytes)
+        .map_err(|error| format!("Could not save Telegram file: {}", error))?;
+    Ok(output)
+}
+
 fn stable_bytes_hash(bytes: &[u8]) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in bytes {
@@ -1259,11 +1359,165 @@ async fn send_telegram_message_chunked(
 ) {
     let chunks = telegram_message_chunks(text);
     for (index, chunk) in chunks.iter().enumerate() {
-        let _ = send_telegram_message(client, token, chat_id, chunk).await;
+        let mut send_result = send_telegram_message(client, token, chat_id, chunk).await;
+        if let Err(error) = send_result {
+            append_runtime_log(
+                "telegram",
+                &format!(
+                    "chunk send failed, retrying chunk {}/{}: {}",
+                    index + 1,
+                    chunks.len(),
+                    error
+                ),
+            );
+            tokio::time::sleep(Duration::from_millis(650)).await;
+            send_result = send_telegram_message(client, token, chat_id, chunk).await;
+        }
+        if let Err(error) = send_result {
+            append_runtime_log(
+                "telegram",
+                &format!(
+                    "chunk send failed permanently chunk {}/{}: {}",
+                    index + 1,
+                    chunks.len(),
+                    error
+                ),
+            );
+        }
         if index + 1 < chunks.len() {
             tokio::time::sleep(Duration::from_millis(120)).await;
         }
     }
+}
+
+fn telegram_photo_file_id(message: &Value) -> Option<String> {
+    message
+        .get("photo")
+        .and_then(Value::as_array)
+        .and_then(|photos| {
+            photos
+                .iter()
+                .max_by_key(|photo| photo.get("file_size").and_then(Value::as_u64).unwrap_or(0))
+        })
+        .and_then(|photo| photo.get("file_id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn telegram_document_file(message: &Value) -> Option<(String, String, String, u64)> {
+    let document = message.get("document")?;
+    let file_id = document.get("file_id").and_then(Value::as_str)?.to_string();
+    let name = document
+        .get("file_name")
+        .and_then(Value::as_str)
+        .unwrap_or("telegram-file")
+        .to_string();
+    let mime = document
+        .get("mime_type")
+        .and_then(Value::as_str)
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    let size = document
+        .get("file_size")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    Some((file_id, name, mime, size))
+}
+
+async fn download_telegram_file(
+    client: &reqwest::Client,
+    token: &str,
+    file_id: &str,
+    display_name: &str,
+    mime_type: &str,
+) -> Result<TelegramIncomingFile, String> {
+    let file_meta = client
+        .get(format!("https://api.telegram.org/bot{}/getFile", token))
+        .query(&[("file_id", file_id)])
+        .send()
+        .await
+        .map_err(|error| format!("Could not ask Telegram for file info: {}", error))?;
+    let file_meta_text = file_meta
+        .text()
+        .await
+        .map_err(|error| format!("Could not read Telegram file info: {}", error))?;
+    let file_meta_json = serde_json::from_str::<Value>(&file_meta_text)
+        .map_err(|_| format!("Telegram returned unreadable file info: {}", file_meta_text))?;
+    if !file_meta_json
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(format!("Telegram getFile failed: {}", file_meta_text));
+    }
+    let file_path = file_meta_json
+        .get("result")
+        .and_then(|result| result.get("file_path"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "Telegram getFile did not return a file path: {}",
+                file_meta_text
+            )
+        })?;
+    let bytes = client
+        .get(format!(
+            "https://api.telegram.org/file/bot{}/{}",
+            token, file_path
+        ))
+        .send()
+        .await
+        .map_err(|error| format!("Could not download Telegram file: {}", error))?
+        .bytes()
+        .await
+        .map_err(|error| format!("Could not read Telegram file bytes: {}", error))?;
+    let size_bytes = bytes.len() as u64;
+    let local_path = save_telegram_downloaded_file(&bytes, display_name, mime_type)?;
+    let is_image = mime_type.to_ascii_lowercase().starts_with("image/");
+    Ok(TelegramIncomingFile {
+        local_path: local_path.to_string_lossy().to_string(),
+        display_name: display_name.to_string(),
+        mime_type: mime_type.to_string(),
+        size_bytes,
+        is_image,
+    })
+}
+
+async fn download_telegram_message_files(
+    client: &reqwest::Client,
+    token: &str,
+    message: &Value,
+) -> Vec<TelegramIncomingFile> {
+    let mut files = Vec::new();
+
+    if let Some(file_id) = telegram_photo_file_id(message) {
+        match download_telegram_file(client, token, &file_id, "telegram-photo.jpg", "image/jpeg")
+            .await
+        {
+            Ok(file) => files.push(file),
+            Err(error) => {
+                append_runtime_log("telegram", &format!("photo download failed: {}", error))
+            }
+        }
+    }
+
+    if let Some((file_id, name, mime, size)) = telegram_document_file(message) {
+        if size > 50 * 1024 * 1024 {
+            append_runtime_log(
+                "telegram",
+                &format!("ignored oversized document {} bytes name={}", size, name),
+            );
+        } else {
+            match download_telegram_file(client, token, &file_id, &name, &mime).await {
+                Ok(file) => files.push(file),
+                Err(error) => {
+                    append_runtime_log("telegram", &format!("document download failed: {}", error))
+                }
+            }
+        }
+    }
+
+    files
 }
 
 async fn send_telegram_message_with_keyboard(
@@ -1941,9 +2195,18 @@ fn start_telegram_action_loop(
 struct StoredChatSessionMessage {
     id: String,
     role: String,
-    content: String,
+    content: Value,
     #[serde(default)]
     thinking: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct TelegramIncomingFile {
+    local_path: String,
+    display_name: String,
+    mime_type: String,
+    size_bytes: u64,
+    is_image: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -2219,6 +2482,112 @@ fn extract_message_text(content: &Value) -> String {
         .to_string()
 }
 
+fn content_has_non_text_part(content: &Value) -> bool {
+    content.as_array().is_some_and(|parts| {
+        parts.iter().any(|part| {
+            !matches!(
+                part.get("type").and_then(Value::as_str),
+                Some("text") | None
+            )
+        })
+    })
+}
+
+fn compact_react_content_for_storage(content: &Value) -> Value {
+    if let Some(text) = content.as_str() {
+        return json!(text.chars().take(12_000).collect::<String>());
+    }
+    if let Some(parts) = content.as_array() {
+        let compact = parts
+            .iter()
+            .filter_map(|part| {
+                let part_type = part.get("type").and_then(Value::as_str)?;
+                match part_type {
+                    "text" => {
+                        let text = part
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .chars()
+                            .take(12_000)
+                            .collect::<String>();
+                        (!text.trim().is_empty()).then(|| json!({ "type": "text", "text": text }))
+                    }
+                    "image_url" => part.get("image_url").map(|image| {
+                        json!({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": image.get("url").and_then(Value::as_str).unwrap_or_default(),
+                                "local_path": image.get("local_path").and_then(Value::as_str).unwrap_or_default()
+                            }
+                        })
+                    }),
+                    "image_proposal" => part.get("image_proposal").map(|proposal| {
+                        json!({ "type": "image_proposal", "image_proposal": proposal })
+                    }),
+                    "action_proposal" => part.get("action_proposal").map(|proposal| {
+                        json!({ "type": "action_proposal", "action_proposal": proposal })
+                    }),
+                    "file_preview" => part
+                        .get("file_preview")
+                        .map(|preview| json!({ "type": "file_preview", "file_preview": preview })),
+                    _ => None,
+                }
+            })
+            .collect::<Vec<_>>();
+        if !compact.is_empty() {
+            return Value::Array(compact);
+        }
+    }
+    json!(extract_message_text(content)
+        .chars()
+        .take(12_000)
+        .collect::<String>())
+}
+
+fn build_telegram_user_content(text: &str, files: &[TelegramIncomingFile]) -> Value {
+    let mut parts = Vec::new();
+    let text = text.trim();
+    if !text.is_empty() {
+        parts.push(json!({ "type": "text", "text": text }));
+    } else if files.iter().any(|file| file.is_image) {
+        parts.push(json!({ "type": "text", "text": "Sent an image from Telegram." }));
+    } else if !files.is_empty() {
+        parts.push(json!({ "type": "text", "text": "Sent a file from Telegram." }));
+    }
+    for file in files {
+        if file.is_image {
+            parts.push(json!({
+                "type": "image_url",
+                "image_url": {
+                    "url": "",
+                    "local_path": file.local_path
+                }
+            }));
+        } else {
+            parts.push(json!({
+                "type": "file_preview",
+                "file_preview": {
+                    "path": file.local_path,
+                    "name": file.display_name,
+                    "extension": extension_from_mime_or_name(&file.mime_type, &file.display_name),
+                    "mime_type": file.mime_type,
+                    "size_bytes": file.size_bytes,
+                    "data_url": null,
+                    "text": null,
+                    "perception": null,
+                    "truncated": false
+                }
+            }));
+        }
+    }
+    if parts.len() == 1 && text.len() > 0 && files.is_empty() {
+        json!(text)
+    } else {
+        Value::Array(parts)
+    }
+}
+
 fn load_personality_memory(personality_id: &str) -> String {
     list_local_memory(Some(personality_memory_kind(personality_id)), Some(20))
         .ok()
@@ -2486,11 +2855,12 @@ fn load_personality_chat_history(personality_id: &str) -> Vec<ReactChatMessage> 
         .into_iter()
         .filter(|message| {
             (message.role == "user" || message.role == "assistant")
-                && !message.content.trim().is_empty()
+                && (!extract_message_text(&message.content).trim().is_empty()
+                    || content_has_non_text_part(&message.content))
         })
         .map(|message| ReactChatMessage {
             role: message.role,
-            content: json!(message.content),
+            content: message.content,
         })
         .collect()
 }
@@ -2508,13 +2878,13 @@ fn persist_personality_chat_history(personality_id: &str, history: &[ReactChatMe
         .map(|(index, message)| StoredChatSessionMessage {
             id: format!("telegram-{}-{}", now_unix(), index),
             role: message.role,
-            content: extract_message_text(&message.content)
-                .chars()
-                .take(12_000)
-                .collect::<String>(),
+            content: compact_react_content_for_storage(&message.content),
             thinking: None,
         })
-        .filter(|message| !message.content.trim().is_empty())
+        .filter(|message| {
+            !extract_message_text(&message.content).trim().is_empty()
+                || content_has_non_text_part(&message.content)
+        })
         .collect::<Vec<_>>();
 
     if let Ok(raw) = serde_json::to_string(&compact) {
@@ -3575,12 +3945,37 @@ async fn telegram_poll_loop(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .trim();
+            let incoming_files = download_telegram_message_files(&client, &token, message).await;
+            if !incoming_files.is_empty() {
+                append_runtime_log(
+                    "telegram",
+                    &format!(
+                        "received {} file(s): {}",
+                        incoming_files.len(),
+                        incoming_files
+                            .iter()
+                            .map(|file| format!(
+                                "{} {} {}",
+                                file.display_name, file.mime_type, file.local_path
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    ),
+                );
+                if let Some(image) = incoming_files.iter().rev().find(|file| file.is_image) {
+                    if let Ok(mut guard) = session.lock() {
+                        guard
+                            .last_image_by_chat
+                            .insert(chat_id, image.local_path.clone());
+                    }
+                }
+            }
             let voice_intent = telegram_voice_intent(text);
             let auto_voice = session.lock().unwrap().auto_voice;
             let wants_voice_reply =
                 !is_guest && (auto_voice || voice_intent == TelegramVoiceIntent::Once);
 
-            if text.is_empty() {
+            if text.is_empty() && incoming_files.is_empty() {
                 let _ = send_telegram_message(
                     &client,
                     &token,
@@ -3603,7 +3998,7 @@ async fn telegram_poll_loop(
 
             let command_text = text.to_ascii_lowercase();
             let command_text = command_text.trim();
-            if command_text == "/help" {
+            if incoming_files.is_empty() && command_text == "/help" {
                 let _ = send_telegram_message(
                     &client,
                     &token,
@@ -3613,7 +4008,8 @@ async fn telegram_poll_loop(
                 .await;
                 continue;
             }
-            if command_text == "/status" || command_text == "status" {
+            if incoming_files.is_empty() && (command_text == "/status" || command_text == "status")
+            {
                 let _ = send_telegram_message(
                     &client,
                     &token,
@@ -3665,7 +4061,13 @@ async fn telegram_poll_loop(
             }
 
             // Built-in commands
-            match text.to_ascii_lowercase().trim() {
+            match if incoming_files.is_empty() {
+                text.to_ascii_lowercase()
+            } else {
+                String::new()
+            }
+            .trim()
+            {
                 "/start" => {
                     let mut history = load_personality_chat_history(&profile.personality_id);
                     ensure_personality_greeting(&mut history, &profile.greeting);
@@ -3711,10 +4113,33 @@ async fn telegram_poll_loop(
             if !is_guest {
                 ensure_personality_greeting(&mut history, &profile.greeting);
             }
+            let user_content = build_telegram_user_content(text, &incoming_files);
+            let user_log_text = if incoming_files.is_empty() {
+                text.to_string()
+            } else {
+                let file_summary = incoming_files
+                    .iter()
+                    .map(|file| {
+                        format!(
+                            "{} ({}) {}",
+                            file.display_name, file.mime_type, file.local_path
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                if text.trim().is_empty() {
+                    format!("[Telegram attachment] {}", file_summary)
+                } else {
+                    format!("{}\n[Telegram attachment] {}", text, file_summary)
+                }
+            };
             history.push(ReactChatMessage {
                 role: "user".to_string(),
-                content: serde_json::json!(text),
+                content: user_content,
             });
+            if !is_guest {
+                persist_personality_chat_history(&profile.personality_id, &history);
+            }
             let react_messages: Vec<ReactChatMessage> = history
                 .iter()
                 .rev()
@@ -3885,7 +4310,7 @@ async fn telegram_poll_loop(
                     append_telegram_chat_log(
                         id,
                         guest_name.as_deref().unwrap_or(&from_name),
-                        text,
+                        &user_log_text,
                         &reply_text,
                     );
                 }
@@ -3902,7 +4327,7 @@ async fn telegram_poll_loop(
                 let updated_memory = update_personality_memory_after_turn(
                     &profile.personality_id,
                     &profile.personality_memory,
-                    text,
+                    &user_log_text,
                     &reply_text,
                 );
                 if updated_memory != profile.personality_memory {
@@ -4334,32 +4759,40 @@ fn voice_language_hint_from_path(path: &Path) -> Option<&'static str> {
         .filter(|token| !token.is_empty())
         .collect();
 
-    if tokens.iter().any(|token| matches!(*token, "vi" | "vn" | "vie"))
+    if tokens
+        .iter()
+        .any(|token| matches!(*token, "vi" | "vn" | "vie"))
         || file_name.contains("vietnam")
     {
         return Some("vi");
     }
-    if tokens.iter().any(|token| matches!(*token, "en" | "eng"))
-        || file_name.contains("english")
-    {
+    if tokens.iter().any(|token| matches!(*token, "en" | "eng")) || file_name.contains("english") {
         return Some("en");
     }
-    if tokens.iter().any(|token| matches!(*token, "th" | "tha" | "thai"))
+    if tokens
+        .iter()
+        .any(|token| matches!(*token, "th" | "tha" | "thai"))
         || file_name.contains("thai")
     {
         return Some("th");
     }
-    if tokens.iter().any(|token| matches!(*token, "ja" | "jp" | "jpn"))
+    if tokens
+        .iter()
+        .any(|token| matches!(*token, "ja" | "jp" | "jpn"))
         || file_name.contains("japanese")
     {
         return Some("ja");
     }
-    if tokens.iter().any(|token| matches!(*token, "ko" | "kr" | "kor"))
+    if tokens
+        .iter()
+        .any(|token| matches!(*token, "ko" | "kr" | "kor"))
         || file_name.contains("korean")
     {
         return Some("ko");
     }
-    if tokens.iter().any(|token| matches!(*token, "zh" | "cn" | "zho" | "chi"))
+    if tokens
+        .iter()
+        .any(|token| matches!(*token, "zh" | "cn" | "zho" | "chi"))
         || file_name.contains("chinese")
         || file_name.contains("mandarin")
     {

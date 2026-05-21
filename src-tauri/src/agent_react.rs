@@ -93,6 +93,98 @@ fn extract_chat_reply_text(body: &Value) -> String {
         .to_string()
 }
 
+fn chat_finish_reason(body: &Value) -> String {
+    body.get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("finish_reason"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+fn chat_hit_token_limit(body: &Value) -> bool {
+    matches!(
+        chat_finish_reason(body).as_str(),
+        "length" | "max_tokens" | "token_limit" | "max_output_tokens"
+    )
+}
+
+fn append_reply_part(accumulated: &mut String, next: &str) {
+    let next = next.trim();
+    if next.is_empty() {
+        return;
+    }
+    if accumulated.trim().is_empty() {
+        accumulated.push_str(next);
+        return;
+    }
+    let overlap = accumulated
+        .chars()
+        .rev()
+        .take(240)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    let next_prefix = next.chars().take(240).collect::<String>();
+    if !overlap.is_empty() && next_prefix.starts_with(overlap.trim()) {
+        let skip = overlap.trim().chars().count();
+        accumulated.push_str(next.chars().skip(skip).collect::<String>().as_str());
+        return;
+    }
+    accumulated.push_str("\n\n");
+    accumulated.push_str(next);
+}
+
+async fn call_chat_text_with_continuation(
+    request_messages: Vec<Value>,
+    sampling: SamplingConfig,
+    max_tokens: u32,
+    thinking_enabled: bool,
+) -> Result<(String, String), String> {
+    let mut messages = request_messages;
+    let mut answer = String::new();
+    let mut thinking = String::new();
+
+    for continuation_index in 0..3 {
+        let reply = call_chat(
+            messages.clone(),
+            None,
+            sampling,
+            max_tokens,
+            thinking_enabled,
+        )
+        .await?;
+        append_thinking(&mut thinking, &extract_chat_reasoning_text(&reply));
+        let part = extract_chat_reply_text(&reply);
+        append_reply_part(&mut answer, &part);
+
+        if !chat_hit_token_limit(&reply) || part.trim().is_empty() {
+            break;
+        }
+
+        append_thinking(
+            &mut thinking,
+            "Reply continuation: the model reached its token limit, so the app asked it to continue from the same answer.",
+        );
+        messages.push(json!({
+            "role": "assistant",
+            "content": answer
+        }));
+        messages.push(json!({
+            "role": "user",
+            "content": if continuation_index >= 1 {
+                "Finish the previous answer from where it stopped. Keep it concise. Do not restart, summarize, or repeat earlier text."
+            } else {
+                "Continue the previous answer exactly from where it stopped. Do not restart, summarize, or repeat earlier text."
+            }
+        }));
+    }
+
+    Ok((answer.trim().to_string(), thinking))
+}
+
 pub async fn generate_plain_text_reply(
     messages: Vec<Value>,
     sampling: SamplingConfig,
@@ -1512,14 +1604,168 @@ fn content_text(content: &Value) -> String {
                     }
                     if part.get("type").and_then(Value::as_str) == Some("image_url") {
                         return Some("[image attached]".to_string());
-                    } else {
-                        return None;
                     }
+                    if part.get("type").and_then(Value::as_str) == Some("file_preview") {
+                        let preview = part.get("file_preview")?;
+                        let name = preview
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("file");
+                        let path = preview
+                            .get("path")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        let mime = preview
+                            .get("mime_type")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        return Some(format!(
+                            "[file attached: {}]\nPath: {}\nType: {}",
+                            name, path, mime
+                        ));
+                    }
+                    if part.get("type").and_then(Value::as_str) == Some("image_proposal") {
+                        let prompt = part
+                            .get("image_proposal")
+                            .and_then(|proposal| proposal.get("prompt"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        return Some(format!("[image request: {}]", prompt));
+                    }
+                    if part.get("type").and_then(Value::as_str) == Some("action_proposal") {
+                        let title = part
+                            .get("action_proposal")
+                            .and_then(|proposal| proposal.get("title"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("action request");
+                        return Some(format!("[action request: {}]", title));
+                    }
+                    None
                 })
                 .collect::<Vec<_>>()
                 .join("\n")
         })
         .unwrap_or_default()
+}
+
+fn model_image_part_from_image_url(image: &Value) -> Option<Value> {
+    let url = image
+        .get("url")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let local_path = image
+        .get("local_path")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let final_url = if !local_path.is_empty() {
+        file_tools::read_local_image_data_url(local_path.to_string())
+            .ok()
+            .map(|image| image.data_url)
+    } else if !url.is_empty() {
+        Some(url.to_string())
+    } else {
+        None
+    }?;
+    if final_url.trim().is_empty() {
+        return None;
+    }
+    Some(json!({
+        "type": "image_url",
+        "image_url": {
+            "url": final_url
+        }
+    }))
+}
+
+fn model_image_part_from_file_preview(preview: &Value) -> Option<Value> {
+    let mime = preview
+        .get("mime_type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !mime.starts_with("image/") {
+        return None;
+    }
+    if let Some(data_url) = preview
+        .get("data_url")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Some(json!({
+            "type": "image_url",
+            "image_url": {
+                "url": data_url
+            }
+        }));
+    }
+    preview
+        .get("path")
+        .and_then(Value::as_str)
+        .and_then(|path| {
+            file_tools::read_local_image_data_url(path.to_string())
+                .ok()
+                .map(|image| {
+                    json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image.data_url
+                        }
+                    })
+                })
+        })
+}
+
+fn model_content_parts(content: &Value) -> Option<Value> {
+    let parts = content.as_array()?;
+    let mut model_parts = Vec::new();
+    for part in parts {
+        match part.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(text) = part
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                {
+                    model_parts.push(json!({ "type": "text", "text": text }));
+                }
+            }
+            Some("image_url") => {
+                if let Some(image_part) = part
+                    .get("image_url")
+                    .and_then(model_image_part_from_image_url)
+                {
+                    model_parts.push(image_part);
+                }
+            }
+            Some("file_preview") => {
+                if let Some(image_part) = part
+                    .get("file_preview")
+                    .and_then(model_image_part_from_file_preview)
+                {
+                    model_parts.push(image_part);
+                } else {
+                    let text = content_text(&json!([part]));
+                    if !text.trim().is_empty() {
+                        model_parts.push(json!({ "type": "text", "text": text }));
+                    }
+                }
+            }
+            Some("image_proposal") | Some("action_proposal") => {
+                let text = content_text(&json!([part]));
+                if !text.trim().is_empty() {
+                    model_parts.push(json!({ "type": "text", "text": text }));
+                }
+            }
+            _ => {}
+        }
+    }
+    if model_parts.is_empty() {
+        None
+    } else {
+        Some(Value::Array(model_parts))
+    }
 }
 
 fn content_has_image(content: &Value) -> bool {
@@ -1556,6 +1802,14 @@ fn chat_content_for_model(message: &ReactChatMessage) -> Value {
         .unwrap_or_else(|| message.content.clone());
 
     if message.role == "assistant" && content_has_image(&parsed) {
+        return Value::String(content_text(&parsed));
+    }
+
+    if let Some(parts) = model_content_parts(&parsed) {
+        return parts;
+    }
+
+    if parsed.is_array() || parsed.is_object() {
         return Value::String(content_text(&parsed));
     }
 
@@ -7137,19 +7391,14 @@ pub async fn agent_jan_chat_core(
                     }));
                     continue;
                 }
-                let final_reply = call_chat(
+                let (assistant_text, final_thinking) = call_chat_text_with_continuation(
                     request_messages.clone(),
-                    None,
                     sampling,
                     max_tokens,
                     thinking_enabled,
                 )
                 .await?;
-                append_thinking(
-                    &mut accumulated_thinking,
-                    &extract_chat_reasoning_text(&final_reply),
-                );
-                let assistant_text = extract_chat_reply_text(&final_reply);
+                append_thinking(&mut accumulated_thinking, &final_thinking);
                 if let Some((name, arguments, _, _)) =
                     first_model_tool_call(&json!({}), &assistant_text)
                 {
@@ -7332,19 +7581,10 @@ pub async fn agent_jan_chat_core(
         "role": "system",
         "content": "Tool loop limit reached. Give the final answer from the verified tool observations already available."
     }));
-    let final_reply = call_chat(
-        request_messages,
-        None,
-        sampling,
-        max_tokens,
-        thinking_enabled,
-    )
-    .await?;
-    append_thinking(
-        &mut accumulated_thinking,
-        &extract_chat_reasoning_text(&final_reply),
-    );
-    let answer = extract_chat_reply_text(&final_reply);
+    let (answer, final_thinking) =
+        call_chat_text_with_continuation(request_messages, sampling, max_tokens, thinking_enabled)
+            .await?;
+    append_thinking(&mut accumulated_thinking, &final_thinking);
     if let Some((name, arguments, _, _)) = first_model_tool_call(&json!({}), &answer) {
         append_thinking(
             &mut accumulated_thinking,
@@ -7507,29 +7747,9 @@ pub async fn agent_jan_chat_no_tools_core(
         }
     }
 
-    let assistant_reply = call_chat(
-        request_messages,
-        None,
-        sampling,
-        max_tokens,
-        thinking_enabled,
-    )
-    .await?;
-    let thinking = extract_chat_reasoning_text(&assistant_reply);
-    let choice = assistant_reply
-        .get("choices")
-        .and_then(Value::as_array)
-        .and_then(|choices| choices.first());
-    let message = choice
-        .and_then(|choice| choice.get("message"))
-        .cloned()
-        .unwrap_or_default();
-    let assistant_text = message
-        .get("content")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let (assistant_text, thinking) =
+        call_chat_text_with_continuation(request_messages, sampling, max_tokens, thinking_enabled)
+            .await?;
     Ok(ReactChatResult {
         answer: assistant_text
             .strip_prefix("RESPONSE:")

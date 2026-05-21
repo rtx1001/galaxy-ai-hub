@@ -170,9 +170,9 @@ export function UserProfileModal({
   if (!open) return null;
   const autoSpeech = selectedProfile?.auto_speech ?? true;
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="max-h-[92vh] w-full max-w-[780px] overflow-hidden rounded-[24px] border border-[#282a2c] bg-[#1e1f20] shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between gap-3 border-b border-[#282a2c] px-5 py-4">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4 py-3 backdrop-blur-sm" onClick={onClose}>
+      <div className="flex max-h-[calc(100vh-32px)] w-full max-w-[780px] flex-col overflow-hidden rounded-[24px] border border-[#282a2c] bg-[#1e1f20] shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#282a2c] px-5 py-3">
           <div className="min-w-0">
             <div className="text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--accent-color)" }}>User Profile</div>
             <div className="mt-1 truncate text-lg font-bold text-[#f1f3f4]">{userName.trim() || "You"}</div>
@@ -182,23 +182,23 @@ export function UserProfileModal({
           </IconButton>
         </div>
 
-        <div className="grid min-h-0 gap-4 px-5 py-4 md:h-[620px] md:grid-cols-[minmax(0,0.9fr)_minmax(320px,1fr)]">
-          <div className="flex min-h-0 flex-col gap-3 rounded-2xl border border-[#282a2c] bg-[#1b1c1e] p-4">
+        <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto px-4 py-3 md:h-[500px] md:grid-cols-[minmax(0,0.88fr)_minmax(320px,1fr)] md:overflow-hidden">
+          <div className="flex min-h-0 flex-col gap-2.5 rounded-2xl border border-[#282a2c] bg-[#1b1c1e] p-3">
             <div className="flex justify-center">
-              <button type="button" onClick={onChooseAvatar} className="group relative h-40 w-40 shrink-0 overflow-hidden rounded-[20px] ring-1 ring-[#282a2c]" title="Change avatar">
-                <AvatarImage src={userAvatar} fallback={userName || "You"} className="h-full w-full rounded-[20px]" />
+              <button type="button" onClick={onChooseAvatar} className="group relative h-32 w-32 shrink-0 overflow-hidden rounded-[18px] ring-1 ring-[#282a2c]" title="Change avatar">
+                <AvatarImage src={userAvatar} fallback={userName || "You"} className="h-full w-full rounded-[18px]" />
                 <span className="absolute inset-0 hidden items-center justify-center bg-black/45 text-[#e3e3e3] group-hover:flex">
                   <CameraIcon className="h-6 w-6" />
                 </span>
               </button>
             </div>
             <label className="block">
-              <span className="mb-2 block text-xs font-semibold text-[#c4c7c5]">Profile name</span>
-              <input value={userName} onChange={(event) => onUserNameChange(event.target.value)} className="h-11 w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 text-sm font-semibold text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Your name" />
+              <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">Profile name</span>
+              <input value={userName} onChange={(event) => onUserNameChange(event.target.value)} className="h-10 w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 text-sm font-semibold text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Your name" />
             </label>
             <label className="flex min-h-0 flex-1 flex-col">
-              <span className="mb-2 block text-xs font-semibold text-[#c4c7c5]">About you</span>
-              <textarea value={userDescription} onChange={(event) => onUserDescriptionChange(event.target.value)} rows={8} className="min-h-[250px] flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-3 text-sm leading-6 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Details the assistant should remember about you." />
+              <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">About you</span>
+              <textarea value={userDescription} onChange={(event) => onUserDescriptionChange(event.target.value)} rows={7} className="min-h-[160px] flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm leading-5 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Details the assistant should remember about you." />
             </label>
           </div>
           <VoicePanel
@@ -298,9 +298,9 @@ export function CharacterProfileModal({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="max-h-[92vh] w-full max-w-[780px] overflow-hidden rounded-[24px] border border-[#282a2c] bg-[#1e1f20] shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between gap-3 border-b border-[#282a2c] px-5 py-4">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4 py-3 backdrop-blur-sm" onClick={onClose}>
+      <div className="flex max-h-[calc(100vh-32px)] w-full max-w-[780px] flex-col overflow-hidden rounded-[24px] border border-[#282a2c] bg-[#1e1f20] shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#282a2c] px-5 py-3">
           <div className="min-w-0">
             <div className="text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--accent-color)" }}>Assistant Profile</div>
             <div className="mt-1 truncate text-lg font-bold text-[#f1f3f4]">{preset?.name || "Assistant"}</div>
@@ -310,23 +310,23 @@ export function CharacterProfileModal({
           </IconButton>
         </div>
 
-        <div className="grid min-h-0 gap-4 px-5 py-4 md:h-[620px] md:grid-cols-[minmax(0,0.9fr)_minmax(320px,1fr)]">
-          <div className="flex min-h-0 flex-col gap-3 rounded-2xl border border-[#282a2c] bg-[#1b1c1e] p-4">
+        <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto px-4 py-3 md:h-[500px] md:grid-cols-[minmax(0,0.88fr)_minmax(320px,1fr)] md:overflow-hidden">
+          <div className="flex min-h-0 flex-col gap-2.5 rounded-2xl border border-[#282a2c] bg-[#1b1c1e] p-3">
             <div className="flex justify-center">
-              <button type="button" onClick={onChooseAvatar} className="group relative h-40 w-40 shrink-0 overflow-hidden rounded-[20px] ring-1 ring-[#282a2c]" title="Change avatar">
-                <AvatarImage src={preset?.avatar || fallbackAvatar} fallback={preset?.name || "AI"} className="h-full w-full rounded-[20px]" />
+              <button type="button" onClick={onChooseAvatar} className="group relative h-32 w-32 shrink-0 overflow-hidden rounded-[18px] ring-1 ring-[#282a2c]" title="Change avatar">
+                <AvatarImage src={preset?.avatar || fallbackAvatar} fallback={preset?.name || "AI"} className="h-full w-full rounded-[18px]" />
                 <span className="absolute inset-0 hidden items-center justify-center bg-black/45 text-[#e3e3e3] group-hover:flex">
                   <CameraIcon className="h-6 w-6" />
                 </span>
               </button>
             </div>
             <label className="block">
-              <span className="mb-2 block text-xs font-semibold text-[#c4c7c5]">Character name</span>
-              <input value={nameDraft} onChange={(event) => onNameChange(event.target.value)} className="h-11 w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 text-sm font-semibold text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Assistant name" />
+              <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">Character name</span>
+              <input value={nameDraft} onChange={(event) => onNameChange(event.target.value)} className="h-10 w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 text-sm font-semibold text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Assistant name" />
             </label>
             <label className="flex min-h-0 flex-1 flex-col">
-              <span className="mb-2 block text-xs font-semibold text-[#c4c7c5]">Personality</span>
-              <textarea value={personality} onChange={(event) => onPersonalityChange(event.target.value)} rows={8} className="min-h-[250px] flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-3 text-sm leading-6 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Describe how this assistant should think, speak, and behave." />
+              <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">Personality</span>
+              <textarea value={personality} onChange={(event) => onPersonalityChange(event.target.value)} rows={7} className="min-h-[160px] flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm leading-5 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Describe how this assistant should think, speak, and behave." />
             </label>
           </div>
           <VoicePanel
@@ -391,8 +391,8 @@ export function ClearMemoryConfirmModal({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onCancel}>
-      <div className="mx-4 w-full max-w-sm rounded-[24px] border border-[#282a2c] bg-[#1e1f20] p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4 py-3 backdrop-blur-sm" onClick={onCancel}>
+      <div className="w-full max-w-sm max-h-[calc(100vh-32px)] overflow-y-auto rounded-[24px] border border-[#282a2c] bg-[#1e1f20] p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="mb-4 flex items-center gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-300">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
@@ -442,8 +442,8 @@ export function DeleteProfileConfirmModal({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[205] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={onCancel}>
-      <div className="mx-4 w-full max-w-sm rounded-[24px] border border-[#282a2c] bg-[#1e1f20] p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+    <div className="fixed inset-0 z-[205] flex items-center justify-center bg-black/60 px-4 py-3 backdrop-blur-sm" onClick={onCancel}>
+      <div className="w-full max-w-sm max-h-[calc(100vh-32px)] overflow-y-auto rounded-[24px] border border-[#282a2c] bg-[#1e1f20] p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="mb-4 flex items-center gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-500/15 text-rose-200">
             <TrashIcon className="h-5 w-5" />
