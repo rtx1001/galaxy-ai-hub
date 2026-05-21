@@ -121,6 +121,7 @@ export function ConversationPane({
             const firstImagePartKey = firstImagePartIndex >= 0 ? `${message.id}:${firstImagePartIndex}` : "";
             const firstImageCollapsed = firstImagePartKey ? Boolean(collapsedImageParts[firstImagePartKey]) : false;
             const hasImageContent = Array.isArray(message.content) && message.content.some((part) => part.type === "image_url");
+            const hasApprovalContent = Array.isArray(message.content) && message.content.some((part) => part.type === "image_proposal" || part.type === "action_proposal");
             const isTypingIndicator = message.role === "assistant" && message.content === "" && index === messages.length - 1 && isStreaming;
 
             return (
@@ -131,7 +132,7 @@ export function ConversationPane({
                   </div>
                 )}
                 <div
-                  className={`chat-bubble min-w-0 max-w-[88%] overflow-hidden rounded-[28px] shadow-sm ring-1 ${hasImageContent ? "px-3 py-3" : isTypingIndicator ? "px-4 py-3" : "px-5 py-4"} ${
+                  className={`chat-bubble min-w-0 max-w-[88%] ${hasApprovalContent ? "w-[88%]" : ""} overflow-hidden rounded-[28px] shadow-sm ring-1 ${hasImageContent ? "px-3 py-3" : isTypingIndicator ? "px-4 py-3" : "px-5 py-4"} ${
                     message.role === "user" ? "text-[#e3e3e3]" : "bg-[#1e1f20] text-[#e3e3e3] ring-[#282a2c]"
                   }`}
                   style={message.role === "user" ? { backgroundColor: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent-soft-strong)" } : undefined}

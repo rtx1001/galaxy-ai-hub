@@ -3507,6 +3507,9 @@ fn tool_allowed_for_context(call: &ToolCall, messages: &[ReactChatMessage]) -> R
     {
         return Ok(());
     }
+    if call.tool == "propose_image_generation" {
+        return Ok(());
+    }
     if request_is_conversational_turn(&latest_text) {
         return Err(format!(
             "{} is not relevant here. The user is making normal conversation, so answer directly without tools.",
@@ -8928,6 +8931,22 @@ propose_image_generation(mask_prompt="sky and clouds", mode="image_to_image", pr
                 "prompt": "add a cowboy hat to the person",
                 "mode": "image_to_image",
                 "mask_prompt": "head and hair"
+            }),
+        };
+        assert!(tool_allowed_for_context(&call, &messages).is_ok());
+    }
+
+    #[test]
+    fn image_generation_tool_call_is_allowed_for_visual_request() {
+        let messages = vec![ReactChatMessage {
+            role: "user".to_string(),
+            content: json!("vẽ cho anh bức ảnh trời mưa ngồi uống trà thật thư thái đi"),
+        }];
+        let call = ToolCall {
+            tool: "propose_image_generation".to_string(),
+            arguments: json!({
+                "prompt": "A peaceful rainy day scene with a person sitting calmly and drinking tea by a window.",
+                "mode": "text_to_image"
             }),
         };
         assert!(tool_allowed_for_context(&call, &messages).is_ok());

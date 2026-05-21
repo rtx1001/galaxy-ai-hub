@@ -278,7 +278,7 @@ export function ImageProposalCard({
     <details
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
-      className="overflow-hidden rounded-[22px] border border-[#3b3420] bg-[#131314] shadow-sm"
+      className="w-full overflow-hidden rounded-[22px] border border-[#3b3420] bg-[#131314] shadow-sm"
     >
       <summary className="cursor-pointer select-none list-none px-3.5 py-3 [&::-webkit-details-marker]:hidden">
         <div className="flex items-center justify-between gap-3">
@@ -330,7 +330,10 @@ export function ImageProposalCard({
             <button
               type="button"
               disabled={disabled || !draftPrompt.trim()}
-              onClick={() => onGenerate(draftPrompt.trim())}
+              onClick={() => {
+                setOpen(false);
+                onGenerate(draftPrompt.trim());
+              }}
               className="rounded-full px-4 py-2 text-xs font-semibold text-[#0b0d10] transition disabled:cursor-not-allowed disabled:opacity-50"
               style={{ backgroundColor: "var(--accent-color)" }}
             >
@@ -357,6 +360,7 @@ export function ActionProposalCard({
           language?: DisplayLanguage;
         }) {
     const labels = uiText(language);
+    const [open, setOpen] = useState(true);
     const actionTitle = "Action request";
     const detailsLabel = "Details";
     const riskClass = proposal.risk_level === "high"
@@ -365,8 +369,13 @@ export function ActionProposalCard({
                 ? "bg-amber-500/15 text-amber-200"
                 : "text-[var(--accent-color)]";
     return (
-    <div className="overflow-hidden rounded-[22px] border border-[#282a2c] bg-[#131314]">
-      <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+    <details
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      className="w-full overflow-hidden rounded-[22px] border border-[#282a2c] bg-[#131314]"
+    >
+      <summary className="cursor-pointer select-none list-none px-3.5 py-3 [&::-webkit-details-marker]:hidden">
+      <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <span className="text-[10px] text-[var(--accent-color)]">▶</span>
             <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--accent-color)]" />
@@ -376,6 +385,7 @@ export function ActionProposalCard({
           {proposal.risk_level}
         </span>
       </div>
+      </summary>
       <div className="border-t border-[#282a2c] p-3">
         <div className="text-sm font-semibold text-[#f1f3f4]">{proposal.title}</div>
         <div className="mt-1 text-xs leading-5 text-[#c4c7c5]">{proposal.details}</div>
@@ -398,7 +408,10 @@ export function ActionProposalCard({
         <button
           type="button"
           disabled={disabled}
-          onClick={onApprove}
+          onClick={() => {
+            setOpen(false);
+            onApprove();
+          }}
           className="rounded-full px-4 py-2 text-xs font-semibold text-[#0b0d10] transition disabled:cursor-not-allowed disabled:opacity-50"
           style={{ backgroundColor: "var(--accent-color)" }}
         >
@@ -406,6 +419,6 @@ export function ActionProposalCard({
         </button>
       </div>
       </div>
-    </div>
+    </details>
     );
 }

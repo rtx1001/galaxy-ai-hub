@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function useConversationScroll({
   markUiInteraction,
@@ -14,33 +14,33 @@ export function useConversationScroll({
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
   const lastMessageCountRef = useRef(0);
 
-  const handleChatScroll = (event: React.UIEvent<HTMLDivElement>) => {
+  const handleChatScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     markUiInteraction();
     const target = event.target as HTMLDivElement;
     const isScrolledUp =
       target.scrollHeight - target.scrollTop - target.clientHeight > 150;
     setShowScrollBottom(isScrolledUp);
-  };
+  }, [markUiInteraction]);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     if (conversationScrollRef.current) {
       conversationScrollRef.current.scrollTo({
         top: conversationScrollRef.current.scrollHeight,
         behavior: "smooth",
       });
     }
-  };
+  }, []);
 
-  const snapConversationToBottom = () => {
+  const snapConversationToBottom = useCallback(() => {
     const container = conversationScrollRef.current;
     if (!container) return;
     container.scrollTo({
       top: container.scrollHeight,
       behavior: "auto",
     });
-  };
+  }, []);
 
-  const ensureConversationStartsAtBottom = () => {
+  const ensureConversationStartsAtBottom = useCallback(() => {
     window.requestAnimationFrame(() => {
       snapConversationToBottom();
       window.requestAnimationFrame(() => {
@@ -50,7 +50,7 @@ export function useConversationScroll({
     window.setTimeout(() => {
       snapConversationToBottom();
     }, 60);
-  };
+  }, [snapConversationToBottom]);
 
   useEffect(() => {
     if (messagesLength !== 0) {
