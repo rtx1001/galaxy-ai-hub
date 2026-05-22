@@ -432,6 +432,19 @@ details[open] > summary .details-chevron {
   min-height: 0;
 }
 
+.setup-hardware-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.setup-hardware-card .setup-preflight {
+  margin-top: auto;
+}
+
+.setup-hardware-card .setup-tier-row {
+  margin-bottom: 12px;
+}
+
 .setup-tier-badge {
   display: flex;
   width: 100%;
@@ -464,7 +477,7 @@ details[open] > summary .details-chevron {
 .setup-spec-list {
   display: grid;
   gap: 4px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .setup-spec-list div {
@@ -499,7 +512,7 @@ details[open] > summary .details-chevron {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 7px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .setup-tier-button,
@@ -521,6 +534,31 @@ details[open] > summary .details-chevron {
   border-color: color-mix(in srgb, var(--accent-color) 54%, transparent);
   background: color-mix(in srgb, var(--accent-color) 22%, #131314 78%);
   color: color-mix(in srgb, var(--accent-color) 76%, white 24%);
+}
+
+.setup-parts-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.setup-total-size {
+  min-width: 0;
+  overflow: hidden;
+  color: #9aa0a6;
+  font-size: 10.5px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.setup-total-size strong {
+  color: #f1f3f4;
+  font-weight: 900;
 }
 
 .setup-parts {
@@ -665,32 +703,8 @@ details[open] > summary .details-chevron {
   opacity: 0.72;
 }
 
-.setup-size-note {
-  margin-top: 8px;
-  min-height: 84px;
-  box-sizing: border-box;
-  border-radius: 16px;
-  border: 1px solid #282a2c;
-  background: #101113;
-  padding: 8px 10px;
-  color: #c4c7c5;
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.setup-size-note strong {
-  color: #f1f3f4;
-  font-weight: 850;
-}
-
-.setup-size-note span:last-child {
-  color: var(--accent-color);
-  font-weight: 800;
-  white-space: nowrap;
-}
-
 .setup-preflight {
-  margin-top: 8px;
+  margin-top: 12px;
   border-radius: 16px;
   border: 1px solid #282a2c;
   background: #101113;

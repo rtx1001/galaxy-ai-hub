@@ -516,6 +516,12 @@ const setupMbLabel = (mb: number) => {
   return `about ${Math.round(mb)} MB`;
 };
 
+export const setupFilesSizeLabel = (files: SetupFile[] | undefined, fallback = "Size pending") => {
+  if (!files?.length) return fallback;
+  const mb = files.reduce((sum, file) => sum + setupSizeHintToMb(file.size_hint), 0);
+  return `Estimated size: ${setupMbLabel(mb)}`;
+};
+
 export const setupDownloadSizeSummary = (catalog: SetupCatalog | null) => {
   if (!catalog) {
     return {
@@ -524,17 +530,15 @@ export const setupDownloadSizeSummary = (catalog: SetupCatalog | null) => {
     };
   }
   const parts = catalog.parts.map((part) => {
-    const mb = part.installed
-      ? 0
-      : part.files.reduce((sum, file) => sum + setupSizeHintToMb(file.size_hint), 0);
+    const mb = part.files.reduce((sum, file) => sum + setupSizeHintToMb(file.size_hint), 0);
     return {
       title: part.title,
-      size: part.installed ? "Ready" : setupMbLabel(mb),
+      size: setupMbLabel(mb),
     };
   });
   const totalMb = parts.reduce((sum, part) => sum + setupSizeHintToMb(part.size), 0);
   return {
-    total: totalMb > 0 ? `Total download size: ${setupMbLabel(totalMb)}` : "All selected parts are ready.",
+    total: totalMb > 0 ? `Total size: ${setupMbLabel(totalMb).replace(/^about\s+/i, "~")}` : "All selected parts are ready.",
     parts,
   };
 };

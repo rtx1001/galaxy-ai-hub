@@ -8,6 +8,7 @@ import {
   SetupTier,
   SystemInfo,
   setupDownloadSizeSummary,
+  setupFilesSizeLabel,
   setupPartIntro,
   setupPartModel,
   setupTierDescription,
@@ -145,19 +146,6 @@ export function SetupScreen({
                 </button>
               ))}
             </div>
-            <div className="setup-size-note">
-              <strong>{sizeSummary.total}</strong>
-              {sizeSummary.parts.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {sizeSummary.parts.map((part) => (
-                    <div key={part.title} className="flex items-center justify-between gap-3">
-                      <span>{part.title}</span>
-                      <span>{part.size}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
             <div className="setup-preflight">
               <div className="setup-preflight-title">Fresh PC check</div>
               <div className="setup-preflight-list">
@@ -173,11 +161,26 @@ export function SetupScreen({
           </section>
 
           <section className="setup-card setup-parts-card">
-            <div className="setup-card-title">What will be installed</div>
+            <div className="setup-parts-header">
+              <div className="setup-card-title">What will be installed</div>
+              <div className="setup-total-size">
+                {(() => {
+                  const match = sizeSummary.total.match(/^(Total size:\s*)(.+)$/i);
+                  return match ? (
+                    <>
+                      <span>{match[1]}</span>
+                      <strong>{match[2]}</strong>
+                    </>
+                  ) : (
+                    <strong>{sizeSummary.total}</strong>
+                  );
+                })()}
+              </div>
+            </div>
             <div className="setup-parts">
               {SETUP_PARTS.map((part) => {
                 const catalogPart = setupCatalog?.parts.find((item) => item.key === part.key);
-                const sizeLabel = catalogPart?.files.map((file) => file.size_hint).join(" + ") || part.note;
+                const sizeLabel = setupFilesSizeLabel(catalogPart?.files, part.note);
                 const isActivePart = setupInstalling && activeSetupPartKey === part.key;
                 const statusLabel = catalogPart?.installed
                   ? "Installed"
