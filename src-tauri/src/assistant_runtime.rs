@@ -230,6 +230,52 @@ fn voice_worker_script_path() -> PathBuf {
     voice_runtime_dir().join("voice_runtime.py")
 }
 
+fn voice_models_dir() -> PathBuf {
+    voice_runtime_dir().join("models")
+}
+
+fn selected_whisper_model_marker_path() -> PathBuf {
+    voice_runtime_dir().join("selected-whisper-model.txt")
+}
+
+fn selected_whisper_model_dir() -> Option<PathBuf> {
+    if let Ok(marker) = std::fs::read_to_string(selected_whisper_model_marker_path()) {
+        let path = PathBuf::from(marker.trim());
+        if path.join("model.bin").exists() && path.join("config.json").exists() {
+            return Some(path);
+        }
+    }
+    [
+        "faster-whisper-medium",
+        "faster-whisper-small",
+        "faster-whisper-base",
+        "faster-whisper-tiny",
+    ]
+    .iter()
+    .map(|name| voice_models_dir().join(name))
+    .find(|path| path.join("model.bin").exists() && path.join("config.json").exists())
+}
+
+fn selected_voice_helper_cache_label() -> String {
+    let model_name = selected_whisper_model_dir()
+        .and_then(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_ascii_lowercase())
+        })
+        .unwrap_or_else(|| "tiny".to_string());
+
+    if model_name.contains("medium") {
+        "high".to_string()
+    } else if model_name.contains("small") {
+        "balanced".to_string()
+    } else if model_name.contains("base") {
+        "light".to_string()
+    } else {
+        "tiny".to_string()
+    }
+}
+
 fn pip_cache_dir() -> PathBuf {
     assistant_runtime_dir().join("pip-cache")
 }
@@ -316,6 +362,7 @@ fn ensure_voice_dirs() -> Result<(), String> {
     std::fs::create_dir_all(voice_cache_dir()).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(voice_temp_dir()).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(prepared_voice_samples_dir()).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(voice_models_dir()).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(pip_cache_dir()).map_err(|e| e.to_string())?;
     cleanup_voice_temp_dir();
     cleanup_stale_prepared_samples();
@@ -458,17 +505,22 @@ fn install_voice_runtime_blocking(state: VoiceRuntimeState) {
             &state,
             VoiceSetupStatus {
                 state: "installing".to_string(),
-                message: "Downloading the tiny listening model...".to_string(),
+                message: "Preparing the listening model...".to_string(),
                 progress: 80,
                 ready: false,
             },
         );
 
-        let warmup = run_voice_python(&[
-            "warmup",
-            "--cache-dir",
-            voice_cache_dir().to_string_lossy().as_ref(),
-        ])?;
+        let mut warmup_args = vec![
+            "warmup".to_string(),
+            "--cache-dir".to_string(),
+            voice_cache_dir().to_string_lossy().to_string(),
+        ];
+        if let Some(model_dir) = selected_whisper_model_dir() {
+            warmup_args.push("--model-dir".to_string());
+            warmup_args.push(model_dir.to_string_lossy().to_string());
+        }
+        let warmup = run_voice_python(&warmup_args)?;
 
         if !warmup.status.success() {
             let stderr = String::from_utf8_lossy(&warmup.stderr).trim().to_string();
@@ -4696,10 +4748,10 @@ fn sanitized_file_stem(path: &Path) -> String {
     }
 }
 
-fn find_existing_prepared_sample_by_fingerprint(fingerprint: u64) -> Option<PathBuf> {
+fn find_existing_prepared_sample_by_fingerprint(label: &str, fingerprint: u64) -> Option<PathBuf> {
     let dir = prepared_voice_samples_dir();
     let entries = std::fs::read_dir(&dir).ok()?;
-    let suffix = format!("-{:016x}.wav", fingerprint);
+    let suffix = format!("-{}-{:016x}.wav", label, fingerprint);
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -4715,17 +4767,21 @@ fn find_existing_prepared_sample_by_fingerprint(fingerprint: u64) -> Option<Path
     None
 }
 
-fn prepared_voice_cache_path(path: &Path, source_bytes: &[u8]) -> PathBuf {
-    let fingerprint =
-        stable_bytes_fingerprint(&[PREPARED_VOICE_SAMPLE_VERSION.as_bytes(), source_bytes]);
+fn prepared_voice_cache_path(path: &Path, source_bytes: &[u8], label: &str) -> PathBuf {
+    let fingerprint = stable_bytes_fingerprint(&[
+        PREPARED_VOICE_SAMPLE_VERSION.as_bytes(),
+        label.as_bytes(),
+        source_bytes,
+    ]);
 
-    if let Some(existing) = find_existing_prepared_sample_by_fingerprint(fingerprint) {
+    if let Some(existing) = find_existing_prepared_sample_by_fingerprint(label, fingerprint) {
         return existing;
     }
 
     prepared_voice_samples_dir().join(format!(
-        "{}-{:016x}.wav",
+        "{}-{}-{:016x}.wav",
         sanitized_file_stem(path),
+        label,
         fingerprint
     ))
 }
@@ -4814,6 +4870,10 @@ fn voice_transcribe_args(audio_path: &Path, language_hint: Option<&str>) -> Vec<
         args.push("--language".to_string());
         args.push(language.to_string());
     }
+    if let Some(model_dir) = selected_whisper_model_dir() {
+        args.push("--model-dir".to_string());
+        args.push(model_dir.to_string_lossy().to_string());
+    }
     args
 }
 
@@ -4868,17 +4928,20 @@ fn prepare_voice_sample_for_omnivoice(file_path: &str) -> PathBuf {
         Err(_) => return path,
     };
 
-    let cache_path = prepared_voice_cache_path(&path, &source_bytes);
+    let helper_label = selected_voice_helper_cache_label();
+    let cache_path = prepared_voice_cache_path(&path, &source_bytes, &helper_label);
 
     if cache_path.exists() {
         return cache_path;
     }
 
     let staging_path = prepared_voice_samples_dir().join(format!(
-        "{}-{:016x}.tmp.wav",
+        "{}-{}-{:016x}.tmp.wav",
         sanitized_file_stem(&path),
+        helper_label,
         stable_bytes_fingerprint(&[
             PREPARED_VOICE_SAMPLE_VERSION.as_bytes(),
+            helper_label.as_bytes(),
             source_bytes.as_slice(),
             b"staging",
         ])
@@ -4899,9 +4962,10 @@ fn prepare_voice_sample_for_omnivoice(file_path: &str) -> PathBuf {
             append_runtime_log(
                 "voice",
                 &format!(
-                    "prepared voice sample original={} prepared={} original_bytes={} prepared_bytes={} hz={} mono=true normalized=true took_ms={}",
+                    "prepared voice sample original={} prepared={} helper_tier={} original_bytes={} prepared_bytes={} hz={} mono=true normalized=true took_ms={}",
                     path.display(),
                     cache_path.display(),
+                    helper_label,
                     original_size,
                     prepared_size,
                     PREPARED_VOICE_SAMPLE_RATE,

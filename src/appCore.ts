@@ -368,7 +368,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 export type SetupTier = "light" | "balanced" | "high";
-export type SetupPartKey = "brain" | "voice" | "image";
+export type SetupPartKey = "brain" | "voice" | "voice_helper" | "image";
 
 export type SetupPart = {
   key: SetupPartKey;

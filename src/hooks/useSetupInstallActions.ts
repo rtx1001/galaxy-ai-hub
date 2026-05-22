@@ -132,7 +132,6 @@ export function useSetupInstallActions(options: UseSetupInstallActionsOptions) {
     options.setSetupScreenOpen(false);
     options.setLeftPanelOpen(true);
     options.setRightPanelOpen(true);
-    window.setTimeout(() => options.ensureConversationStartsAtBottom(), 0);
   };
 
   return {

@@ -1506,6 +1506,7 @@ function App() {
       setupNotice={setupNotice}
       setupPreflight={setupPreflight}
       setupProgress={setupProgress}
+      setupScreenOpen={setupScreenOpen}
       setupTierOverride={setupTierOverride}
       showScrollBottom={showScrollBottom}
       speakMessageText={speakMessageText}

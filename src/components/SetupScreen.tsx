@@ -236,8 +236,8 @@ export function SetupScreen({
                 );
               })}
               {(() => {
-                const voicePart = setupCatalog?.parts.find((item) => item.key === "voice");
-                const helperInstalled = Boolean(voicePart?.installed);
+                const helperPart = setupCatalog?.parts.find((item) => item.key === "voice_helper");
+                const helperInstalled = Boolean(helperPart?.installed);
                 const statusLabel = helperInstalled ? "Installed" : "Missing";
                 return (
                   <div className={`setup-part ${helperInstalled ? "installed" : ""}`}>
@@ -251,13 +251,13 @@ export function SetupScreen({
                       </div>
                       <div className="setup-part-intro">The part that listens and prepares voice samples.</div>
                       <div className="setup-part-model">Speech recognition and voice preparation</div>
-                      <div className="setup-part-size">Included with the voice setup</div>
+                      <div className="setup-part-size">{setupFilesSizeLabel(helperPart?.files, "Included with the voice setup")}</div>
                     </div>
                     <button
                       type="button"
                       className={`setup-part-state ${helperInstalled ? "installed" : ""}`}
-                      onClick={() => onInstallPart("voice")}
-                      disabled={setupInstalling || !voicePart || helperInstalled}
+                      onClick={() => onInstallPart("voice_helper")}
+                      disabled={setupInstalling || !helperPart || helperInstalled}
                       title={statusLabel}
                     >
                       {helperInstalled ? <CheckIcon className="h-3.5 w-3.5" /> : <DownloadIcon className="h-3.5 w-3.5" />}

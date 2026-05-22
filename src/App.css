@@ -304,10 +304,13 @@ details[open] > summary .details-chevron {
 }
 
 .setup-screen {
+  width: 100%;
+  height: 100vh;
   min-height: 100vh;
   box-sizing: border-box;
   display: grid;
   place-items: center;
+  overflow: hidden;
   padding: 18px;
   color: #e3e3e3;
   background:
@@ -320,10 +323,11 @@ details[open] > summary .details-chevron {
   position: relative;
   width: min(940px, calc(100vw - 36px));
   min-height: 0;
+  height: auto;
   max-height: calc(100vh - 36px);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
   border-radius: 26px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(30, 31, 32, 0.94);
@@ -420,7 +424,8 @@ details[open] > summary .details-chevron {
   grid-template-columns: minmax(270px, 0.85fr) minmax(380px, 1.2fr);
   gap: 12px;
   padding: 10px;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  overflow: visible;
   align-items: stretch;
 }
 
@@ -767,6 +772,7 @@ details[open] > summary .details-chevron {
 
 .setup-footer {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -913,6 +919,17 @@ details[open] > summary .details-chevron {
 }
 
 @media (max-width: 780px) {
+  .setup-screen {
+    align-items: start;
+    padding: 10px;
+  }
+
+  .setup-shell {
+    width: min(100%, calc(100vw - 20px));
+    max-height: calc(100vh - 20px);
+    border-radius: 22px;
+  }
+
   .setup-hero,
   .setup-footer {
     align-items: stretch;

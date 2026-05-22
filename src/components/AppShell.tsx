@@ -332,6 +332,29 @@ export function AppShell(props: AppShellProps) {
           props.deleteGoogleEvent(eventId).catch((error: unknown) => console.error("Google event delete error:", error));
         }}
       />
+      {props.setupScreenOpen && (
+        <div className="fixed inset-0 z-[100]">
+          <SetupScreen
+            theme={props.selectedThemeSwatch}
+            brandLogo={brandLogo}
+            systemInfo={props.systemInfo}
+            hardwareGpuLabel={props.hardwareGpuLabel}
+            hardwareRamLabel={props.hardwareRamLabel}
+            activeSetupTier={props.activeSetupTier}
+            recommendedSetupTier={props.detectedSetupTier}
+            onSelectSetupTier={props.chooseSetupTier}
+            setupCatalog={props.setupCatalog}
+            setupInstalling={props.setupInstalling}
+            activeSetupPartKey={props.activeSetupPartKey}
+            setupPreflight={props.setupPreflight}
+            setupProgress={props.setupProgress}
+            onClose={props.closeSetupScreen}
+            onChooseFiles={props.closeSetupScreen}
+            onInstall={() => void props.handleInstallSetupBundle()}
+            onInstallPart={(partKey) => void props.handleInstallSetupPart(partKey)}
+          />
+        </div>
+      )}
     </>
   );
 }

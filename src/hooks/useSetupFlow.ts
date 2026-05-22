@@ -46,8 +46,7 @@ export function useSetupFlow({
   const setupHasMissingFiles = Boolean(
     setupCatalog?.parts.some((part) => !part.installed),
   );
-  const firstStartupSetupNeeded =
-    setupScreenOpen || (!setupCompleted && !selectedModelPath);
+  const firstStartupSetupNeeded = !setupCompleted && !selectedModelPath;
   const activeSetupPartKey = setupProgress?.part_key || "";
 
   useEffect(() => {

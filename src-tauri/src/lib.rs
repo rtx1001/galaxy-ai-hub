@@ -21,9 +21,9 @@ mod weather;
 
 use std::{collections::HashMap, sync::Mutex};
 use tauri::menu::{MenuBuilder, MenuItem};
-use tauri::{LogicalSize, Size};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager, State};
+use tauri::{LogicalSize, Size};
 
 struct TrayMenuState {
     telegram_toggle: MenuItem<tauri::Wry>,

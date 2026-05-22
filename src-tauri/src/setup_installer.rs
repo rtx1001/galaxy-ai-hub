@@ -105,9 +105,10 @@ fn webview2_available() -> bool {
 }
 
 fn app_folder_writable() -> bool {
-    let probe = app_root_dir()
-        .join("logs")
-        .join(format!("preflight-{}.tmp", chrono::Utc::now().timestamp_millis()));
+    let probe = app_root_dir().join("logs").join(format!(
+        "preflight-{}.tmp",
+        chrono::Utc::now().timestamp_millis()
+    ));
     if let Some(parent) = probe.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -278,6 +279,69 @@ fn voice_files(tier: &str) -> Vec<SetupFile> {
         .join("models")
         .join("omnivoice.cpp");
     vec![
+        setup_file(
+            &format!("Voice base {}", quant_label),
+            "Serveurperso/OmniVoice-GGUF",
+            base_file,
+            root.join(base_file),
+            size_hint,
+        ),
+        setup_file(
+            &format!("Voice tokenizer {}", quant_label),
+            "Serveurperso/OmniVoice-GGUF",
+            tokenizer_file,
+            root.join(tokenizer_file),
+            "about 30 MB",
+        ),
+    ]
+}
+
+struct WhisperChoice {
+    model_name: &'static str,
+    repo: &'static str,
+    size_hint: &'static str,
+}
+
+fn whisper_choice(tier: &str) -> WhisperChoice {
+    match tier {
+        "light" => WhisperChoice {
+            model_name: "faster-whisper-base",
+            repo: "Systran/faster-whisper-base",
+            size_hint: "about 145 MB",
+        },
+        "high" => WhisperChoice {
+            model_name: "faster-whisper-medium",
+            repo: "Systran/faster-whisper-medium",
+            size_hint: "about 1.53 GB",
+        },
+        _ => WhisperChoice {
+            model_name: "faster-whisper-small",
+            repo: "Systran/faster-whisper-small",
+            size_hint: "about 484 MB",
+        },
+    }
+}
+
+fn voice_helper_model_dir(tier: &str) -> PathBuf {
+    let choice = whisper_choice(tier);
+    app_root_dir()
+        .join("assistant-runtime")
+        .join("voice")
+        .join("models")
+        .join(choice.model_name)
+}
+
+fn voice_helper_marker_path() -> PathBuf {
+    app_root_dir()
+        .join("assistant-runtime")
+        .join("voice")
+        .join("selected-whisper-model.txt")
+}
+
+fn voice_helper_files(tier: &str) -> Vec<SetupFile> {
+    let choice = whisper_choice(tier);
+    let model_dir = voice_helper_model_dir(tier);
+    vec![
         setup_archive_file(
             "Voice engine",
             "https://github.com/rtx1001/galaxy-ai-hub/releases/latest/download/GalaxyAIHub-voice-runtime-win64.zip",
@@ -292,18 +356,32 @@ fn voice_files(tier: &str) -> Vec<SetupFile> {
             "about 160 MB",
         ),
         setup_file(
-            &format!("Voice base {}", quant_label),
-            "Serveurperso/OmniVoice-GGUF",
-            base_file,
-            root.join(base_file),
-            size_hint,
+            "Whisper config",
+            choice.repo,
+            "config.json",
+            model_dir.join("config.json"),
+            "about 3 KB",
         ),
         setup_file(
-            &format!("Voice tokenizer {}", quant_label),
-            "Serveurperso/OmniVoice-GGUF",
-            tokenizer_file,
-            root.join(tokenizer_file),
-            "about 30 MB",
+            "Whisper model",
+            choice.repo,
+            "model.bin",
+            model_dir.join("model.bin"),
+            choice.size_hint,
+        ),
+        setup_file(
+            "Whisper tokenizer",
+            choice.repo,
+            "tokenizer.json",
+            model_dir.join("tokenizer.json"),
+            "about 2.2 MB",
+        ),
+        setup_file(
+            "Whisper vocabulary",
+            choice.repo,
+            "vocabulary.txt",
+            model_dir.join("vocabulary.txt"),
+            "about 460 KB",
         ),
     ]
 }
@@ -413,11 +491,16 @@ fn file_installed(file: &SetupFile) -> bool {
         return extract_path.exists();
     }
     let path = absolute_from_display(&file.destination);
-    path.exists()
-        && path
-            .metadata()
-            .map(|meta| meta.len() > 1024 * 1024)
-            .unwrap_or(false)
+    if !path.exists() {
+        return false;
+    }
+    let min_size = match path.extension().and_then(|value| value.to_str()) {
+        Some("json" | "txt" | "yml" | "yaml") => 16,
+        _ => 1024 * 1024,
+    };
+    path.metadata()
+        .map(|meta| meta.len() > min_size)
+        .unwrap_or(false)
 }
 
 fn files_installed(files: &[SetupFile]) -> bool {
@@ -582,9 +665,8 @@ fn copy_runtime_files(source_dir: &Path, destination_dir: &Path) -> Result<(), S
         let path = entry.path();
         if path.is_file() {
             let target = destination_dir.join(entry.file_name());
-            std::fs::copy(&path, &target).map_err(|e| {
-                format!("Could not copy runtime file {}: {}", path.display(), e)
-            })?;
+            std::fs::copy(&path, &target)
+                .map_err(|e| format!("Could not copy runtime file {}: {}", path.display(), e))?;
         }
     }
     Ok(())
@@ -607,7 +689,11 @@ fn extract_archive(file: &SetupFile, archive_path: &Path) -> Result<(), String> 
         )
     })?;
     let mut command = Command::new("tar.exe");
-    command.arg("-xf").arg(archive_path).arg("-C").arg(&extract_to);
+    command
+        .arg("-xf")
+        .arg(archive_path)
+        .arg("-C")
+        .arg(&extract_to);
     crate::process_util::hide_window(&mut command);
     let status = command
         .status()
@@ -627,7 +713,10 @@ fn extract_archive(file: &SetupFile, archive_path: &Path) -> Result<(), String> 
         }
     }
     if !file_installed(file) {
-        return Err(format!("{} extracted, but required files were not found.", file.label));
+        return Err(format!(
+            "{} extracted, but required files were not found.",
+            file.label
+        ));
     }
     Ok(())
 }
@@ -655,7 +744,11 @@ fn run_curl_download(file: &SetupFile, temp: &Path, resume: bool) -> Result<(), 
     Ok(())
 }
 
-fn install_downloaded_file(file: &SetupFile, temp: &Path, destination: &Path) -> Result<(), String> {
+fn install_downloaded_file(
+    file: &SetupFile,
+    temp: &Path,
+    destination: &Path,
+) -> Result<(), String> {
     if temp
         .metadata()
         .map(|meta| meta.len() <= 1024 * 1024)
@@ -748,10 +841,15 @@ fn download_file(
     Ok(())
 }
 
-fn setup_files_for_part(tier: &str, part_key: &str, has_nvidia_gpu: bool) -> Result<Vec<SetupFile>, String> {
+fn setup_files_for_part(
+    tier: &str,
+    part_key: &str,
+    has_nvidia_gpu: bool,
+) -> Result<Vec<SetupFile>, String> {
     match part_key {
         "brain" => Ok(brain_files(tier)),
         "voice" => Ok(voice_files(tier)),
+        "voice_helper" => Ok(voice_helper_files(tier)),
         "image" => Ok(image_files(tier, has_nvidia_gpu)),
         _ => Err(format!("Unknown setup part: {}", part_key)),
     }
@@ -761,7 +859,23 @@ fn write_metadata_for_part(tier: &str, part_key: &str) -> Result<(), String> {
     if part_key == "brain" {
         write_brain_model_yml(tier)?;
     }
+    if part_key == "voice_helper" {
+        write_voice_helper_marker(tier)?;
+    }
     Ok(())
+}
+
+fn write_voice_helper_marker(tier: &str) -> Result<(), String> {
+    let model_dir = voice_helper_model_dir(tier);
+    if let Some(parent) = voice_helper_marker_path().parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Could not create voice helper folder: {}", e))?;
+    }
+    std::fs::write(
+        voice_helper_marker_path(),
+        model_dir.to_string_lossy().to_string(),
+    )
+    .map_err(|e| format!("Could not write selected voice helper model: {}", e))
 }
 
 #[tauri::command]
@@ -773,6 +887,7 @@ pub fn get_setup_catalog(tier: String, has_nvidia_gpu: Option<bool>) -> SetupCat
     let has_nvidia_gpu = has_nvidia_gpu.unwrap_or(false);
     let brain = brain_files(&tier);
     let voice = voice_files(&tier);
+    let voice_helper = voice_helper_files(&tier);
     let image = image_files(&tier, has_nvidia_gpu);
     SetupCatalog {
         tier: tier.clone(),
@@ -786,8 +901,14 @@ pub fn get_setup_catalog(tier: String, has_nvidia_gpu: Option<bool>) -> SetupCat
             SetupPartCatalog {
                 key: "voice".to_string(),
                 title: "Voice".to_string(),
-                installed: files_installed(&voice) && omnivoice_engine_installed(),
+                installed: files_installed(&voice),
                 files: voice,
+            },
+            SetupPartCatalog {
+                key: "voice_helper".to_string(),
+                title: "Voice Helper".to_string(),
+                installed: files_installed(&voice_helper) && omnivoice_engine_installed(),
+                files: voice_helper,
             },
             SetupPartCatalog {
                 key: "image".to_string(),
@@ -859,7 +980,8 @@ pub fn get_setup_preflight(tier: String, has_nvidia_gpu: Option<bool>) -> SetupP
             if curl_ok && tar_ok {
                 "Windows download and archive tools are available.".to_string()
             } else {
-                "Windows curl.exe or tar.exe is missing, so automatic setup may not work.".to_string()
+                "Windows curl.exe or tar.exe is missing, so automatic setup may not work."
+                    .to_string()
             },
         ),
         preflight_check(
@@ -869,7 +991,8 @@ pub fn get_setup_preflight(tier: String, has_nvidia_gpu: Option<bool>) -> SetupP
             if writable_ok {
                 "The app folder is writable.".to_string()
             } else {
-                "The app folder is not writable. Move it outside protected folders and try again.".to_string()
+                "The app folder is not writable. Move it outside protected folders and try again."
+                    .to_string()
             },
         ),
         preflight_check(
@@ -928,6 +1051,7 @@ pub async fn install_setup_bundle(
     tauri::async_runtime::spawn_blocking(move || -> Result<SetupInstallResult, String> {
         let mut all_files = Vec::new();
         all_files.extend(brain_files(&install_tier));
+        all_files.extend(voice_helper_files(&install_tier));
         all_files.extend(voice_files(&install_tier));
         all_files.extend(image_files(&install_tier, install_has_nvidia_gpu));
         let file_count = all_files.len();
@@ -951,6 +1075,7 @@ pub async fn install_setup_bundle(
             "Writing model metadata...".to_string(),
         );
         write_brain_model_yml(&install_tier)?;
+        write_voice_helper_marker(&install_tier)?;
         emit_progress(
             &app,
             "complete",

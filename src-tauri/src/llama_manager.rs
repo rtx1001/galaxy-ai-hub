@@ -1,6 +1,6 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     collections::HashMap,
@@ -655,7 +655,11 @@ fn relaunch_model(
     let child = command
         .spawn()
         .map_err(|e| format!("Failed to start llama-server.exe: {}", e))?;
-    append_model_log(&format!("process started pid={} model={}", child.id(), model_path));
+    append_model_log(&format!(
+        "process started pid={} model={}",
+        child.id(),
+        model_path
+    ));
     *process_guard = Some(child);
     Ok((has_vision, placement.applied_gpu_layers))
 }
@@ -966,12 +970,18 @@ pub fn start_model_state(
         match child.try_wait() {
             Ok(None) => true,
             Ok(Some(status)) => {
-                append_model_log(&format!("existing process exited before start request status={}", status));
+                append_model_log(&format!(
+                    "existing process exited before start request status={}",
+                    status
+                ));
                 *process_guard = None;
                 false
             }
             Err(error) => {
-                append_model_log(&format!("could not poll existing process before start request error={}", error));
+                append_model_log(&format!(
+                    "could not poll existing process before start request error={}",
+                    error
+                ));
                 false
             }
         }
