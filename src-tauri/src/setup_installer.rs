@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
+use sysinfo::Disks;
 use tauri::Emitter;
 
 use crate::app_paths;
@@ -49,8 +50,84 @@ pub struct SetupInstallProgress {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupPreflightCheck {
+    pub key: String,
+    pub label: String,
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupPreflightReport {
+    pub checks: Vec<SetupPreflightCheck>,
+    pub ready: bool,
+}
+
 fn app_root_dir() -> PathBuf {
     app_paths::app_root_dir()
+}
+
+fn preflight_check(key: &str, label: &str, ok: bool, message: String) -> SetupPreflightCheck {
+    SetupPreflightCheck {
+        key: key.to_string(),
+        label: label.to_string(),
+        status: if ok { "ok" } else { "attention" }.to_string(),
+        message,
+    }
+}
+
+fn command_available(command_name: &str) -> bool {
+    let mut command = Command::new("where.exe");
+    command.arg(command_name);
+    crate::process_util::hide_window(&mut command);
+    command
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn webview2_available() -> bool {
+    let registry_keys = [
+        r"HKLM\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F1E7A2DF-5D0D-4D6B-8E1D-95E2C5DB0B21}",
+        r"HKCU\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F1E7A2DF-5D0D-4D6B-8E1D-95E2C5DB0B21}",
+        r"HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F1E7A2DF-5D0D-4D6B-8E1D-95E2C5DB0B21}",
+    ];
+    registry_keys.iter().any(|key| {
+        let mut command = Command::new("reg.exe");
+        command.arg("query").arg(key).arg("/v").arg("pv");
+        crate::process_util::hide_window(&mut command);
+        command
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    })
+}
+
+fn app_folder_writable() -> bool {
+    let probe = app_root_dir()
+        .join("logs")
+        .join(format!("preflight-{}.tmp", chrono::Utc::now().timestamp_millis()));
+    if let Some(parent) = probe.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::write(&probe, b"ok") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn app_disk_free_mb() -> Option<u64> {
+    let root = app_root_dir();
+    let disks = Disks::new_with_refreshed_list();
+    disks
+        .iter()
+        .filter(|disk| root.starts_with(disk.mount_point()))
+        .max_by_key(|disk| disk.mount_point().as_os_str().len())
+        .map(|disk| disk.available_space() / 1024 / 1024)
 }
 
 fn portable_models_dir() -> PathBuf {
@@ -724,6 +801,116 @@ pub fn get_setup_catalog(tier: String, has_nvidia_gpu: Option<bool>) -> SetupCat
             .display()
             .to_string(),
     }
+}
+
+fn size_hint_to_mb(size_hint: &str) -> u64 {
+    let label = size_hint.to_lowercase();
+    let number = label
+        .split_whitespace()
+        .find_map(|item| item.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    if label.contains("gb") {
+        (number * 1024.0) as u64
+    } else {
+        number as u64
+    }
+}
+
+#[tauri::command]
+pub fn get_setup_preflight(tier: String, has_nvidia_gpu: Option<bool>) -> SetupPreflightReport {
+    let tier = match tier.as_str() {
+        "light" | "balanced" | "high" => tier,
+        _ => "balanced".to_string(),
+    };
+    let has_nvidia_gpu = has_nvidia_gpu.unwrap_or(false);
+    let catalog = get_setup_catalog(tier, Some(has_nvidia_gpu));
+    let webview_ok = webview2_available();
+    let curl_ok = command_available("curl.exe");
+    let tar_ok = command_available("tar.exe");
+    let writable_ok = app_folder_writable();
+    let gpu_ok = !has_nvidia_gpu || command_available("nvidia-smi.exe");
+    let missing_mb = catalog
+        .parts
+        .iter()
+        .filter(|part| !part.installed)
+        .flat_map(|part| part.files.iter())
+        .map(|file| size_hint_to_mb(&file.size_hint))
+        .sum::<u64>();
+    let needed_mb = missing_mb.saturating_add(4096);
+    let free_mb = app_disk_free_mb();
+    let disk_ok = free_mb.map(|free| free > needed_mb).unwrap_or(false);
+    let all_components_ready = catalog.parts.iter().all(|part| part.installed);
+
+    let checks = vec![
+        preflight_check(
+            "webview2",
+            "Windows app runtime",
+            webview_ok,
+            if webview_ok {
+                "WebView runtime is available.".to_string()
+            } else {
+                "WebView runtime was not detected. If the app opened normally, this PC is probably still OK.".to_string()
+            },
+        ),
+        preflight_check(
+            "downloader",
+            "Downloader tools",
+            curl_ok && tar_ok,
+            if curl_ok && tar_ok {
+                "Windows download and archive tools are available.".to_string()
+            } else {
+                "Windows curl.exe or tar.exe is missing, so automatic setup may not work.".to_string()
+            },
+        ),
+        preflight_check(
+            "writable",
+            "Portable folder access",
+            writable_ok,
+            if writable_ok {
+                "The app folder is writable.".to_string()
+            } else {
+                "The app folder is not writable. Move it outside protected folders and try again.".to_string()
+            },
+        ),
+        preflight_check(
+            "disk",
+            "Storage space",
+            disk_ok,
+            match free_mb {
+                Some(free) => format!(
+                    "About {:.1} GB free. Setup may need about {:.1} GB.",
+                    free as f64 / 1024.0,
+                    needed_mb as f64 / 1024.0
+                ),
+                None => "Could not read free disk space for this folder.".to_string(),
+            },
+        ),
+        preflight_check(
+            "gpu",
+            "GPU driver",
+            gpu_ok,
+            if has_nvidia_gpu {
+                "NVIDIA driver tools are visible to the app.".to_string()
+            } else {
+                "No NVIDIA GPU detected. CPU/light setup can still run.".to_string()
+            },
+        ),
+        preflight_check(
+            "components",
+            "Local AI parts",
+            all_components_ready,
+            if all_components_ready {
+                "Brain, Voice, and Image Studio parts are ready.".to_string()
+            } else {
+                "Some AI parts still need to be installed or repaired.".to_string()
+            },
+        ),
+    ];
+    let ready = checks
+        .iter()
+        .filter(|check| check.key != "components")
+        .all(|check| check.status == "ok");
+    SetupPreflightReport { checks, ready }
 }
 
 #[tauri::command]

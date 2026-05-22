@@ -351,6 +351,8 @@ function App() {
     setSetupInstalling,
     setupNotice,
     setSetupNotice,
+    setupPreflight,
+    setSetupPreflight,
     setupProgress,
     setSetupProgress,
     activeSetupTier,
@@ -1346,6 +1348,7 @@ function App() {
     setSetupCompleted,
     setSetupInstalling,
     setSetupNotice,
+    setSetupPreflight,
     setSetupProgress,
     setSetupScreenOpen,
     setupCatalog,
@@ -1501,6 +1504,7 @@ function App() {
       setupCatalog={setupCatalog}
       setupInstalling={setupInstalling}
       setupNotice={setupNotice}
+      setupPreflight={setupPreflight}
       setupProgress={setupProgress}
       setupTierOverride={setupTierOverride}
       showScrollBottom={showScrollBottom}

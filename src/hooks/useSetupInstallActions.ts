@@ -1,6 +1,6 @@
 import { Dispatch, SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { SetupCatalog, SetupInstallProgress, SetupInstallResult, SetupPartKey, SetupTier, SystemInfo } from "../appCore";
+import { SetupCatalog, SetupInstallProgress, SetupInstallResult, SetupPartKey, SetupPreflightReport, SetupTier, SystemInfo } from "../appCore";
 
 type UseSetupInstallActionsOptions = {
   activeSetupTier: SetupTier;
@@ -17,6 +17,7 @@ type UseSetupInstallActionsOptions = {
   setSetupCompleted: Dispatch<SetStateAction<boolean>>;
   setSetupInstalling: Dispatch<SetStateAction<boolean>>;
   setSetupNotice: Dispatch<SetStateAction<string>>;
+  setSetupPreflight: Dispatch<SetStateAction<SetupPreflightReport | null>>;
   setSetupProgress: Dispatch<SetStateAction<SetupInstallProgress | null>>;
   setSetupScreenOpen: Dispatch<SetStateAction<boolean>>;
   setupCatalog: SetupCatalog | null;
@@ -25,8 +26,17 @@ type UseSetupInstallActionsOptions = {
 };
 
 export function useSetupInstallActions(options: UseSetupInstallActionsOptions) {
+  const refreshPreflight = async () => {
+    const report = await invoke<SetupPreflightReport>("get_setup_preflight", {
+      tier: options.activeSetupTier,
+      hasNvidiaGpu: options.systemInfo?.has_nvidia_gpu ?? false,
+    });
+    options.setSetupPreflight(report);
+  };
+
   const finishSuccessfulSetupInstall = async (result: SetupInstallResult) => {
     options.setSetupCatalog(result.catalog);
+    await refreshPreflight().catch(() => undefined);
     options.setModelFolder(result.catalog.brain_model_folder);
     options.setSelectedModelPath(result.catalog.selected_brain_model_path);
     options.setSetupCompleted(true);
@@ -91,6 +101,7 @@ export function useSetupInstallActions(options: UseSetupInstallActionsOptions) {
         hasNvidiaGpu: options.systemInfo?.has_nvidia_gpu ?? false,
       });
       options.setSetupCatalog(result.catalog);
+      await refreshPreflight().catch(() => undefined);
       options.setSetupNotice(result.message);
       if (partKey === "brain") {
         options.setModelFolder(result.catalog.brain_model_folder);

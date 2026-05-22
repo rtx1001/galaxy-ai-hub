@@ -419,6 +419,18 @@ export type SetupInstallProgress = {
   message: string;
 };
 
+export type SetupPreflightCheck = {
+  key: string;
+  label: string;
+  status: "ok" | "attention" | string;
+  message: string;
+};
+
+export type SetupPreflightReport = {
+  checks: SetupPreflightCheck[];
+  ready: boolean;
+};
+
 export const SETUP_PARTS: SetupPart[] = [
   {
     key: "brain",

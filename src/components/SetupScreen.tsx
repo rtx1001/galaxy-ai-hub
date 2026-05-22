@@ -4,6 +4,7 @@ import {
   SetupCatalog,
   SetupInstallProgress,
   SetupPartKey,
+  SetupPreflightReport,
   SetupTier,
   SystemInfo,
   setupDownloadSizeSummary,
@@ -32,6 +33,7 @@ type SetupScreenProps = {
   setupCatalog: SetupCatalog | null;
   setupInstalling: boolean;
   activeSetupPartKey: string;
+  setupPreflight: SetupPreflightReport | null;
   setupProgress: SetupInstallProgress | null;
   onClose: () => void;
   onChooseFiles: () => void;
@@ -51,6 +53,7 @@ export function SetupScreen({
   setupCatalog,
   setupInstalling,
   activeSetupPartKey,
+  setupPreflight,
   setupProgress,
   onClose,
   onChooseFiles,
@@ -154,6 +157,18 @@ export function SetupScreen({
                   ))}
                 </div>
               )}
+            </div>
+            <div className="setup-preflight">
+              <div className="setup-preflight-title">Fresh PC check</div>
+              <div className="setup-preflight-list">
+                {(setupPreflight?.checks || []).slice(0, 6).map((check) => (
+                  <div key={check.key} className={`setup-preflight-item ${check.status === "ok" ? "ok" : "attention"}`} title={check.message}>
+                    <span />
+                    <strong>{check.label}</strong>
+                  </div>
+                ))}
+                {!setupPreflight && <div className="setup-preflight-empty">Checking this PC...</div>}
+              </div>
             </div>
           </section>
 

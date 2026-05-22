@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   SetupCatalog,
   SetupInstallProgress,
+  SetupPreflightReport,
   SetupTier,
   SystemInfo,
   setupTierFromSystem,
@@ -34,6 +35,7 @@ export function useSetupFlow({
   const [setupCatalog, setSetupCatalog] = useState<SetupCatalog | null>(null);
   const [setupInstalling, setSetupInstalling] = useState(false);
   const [setupNotice, setSetupNotice] = useState("");
+  const [setupPreflight, setSetupPreflight] = useState<SetupPreflightReport | null>(null);
   const [setupProgress, setSetupProgress] =
     useState<SetupInstallProgress | null>(null);
   const setupRepairPromptedRef = useRef(false);
@@ -81,6 +83,12 @@ export function useSetupFlow({
         console.error("Setup catalog error:", error);
         setSetupNotice(error instanceof Error ? error.message : String(error));
       });
+    invoke<SetupPreflightReport>("get_setup_preflight", {
+      tier: activeSetupTier,
+      hasNvidiaGpu: systemInfo?.has_nvidia_gpu ?? false,
+    })
+      .then(setSetupPreflight)
+      .catch((error) => console.error("Setup preflight error:", error));
   }, [settingsLoaded, activeSetupTier, systemInfo]);
 
   useEffect(() => {
@@ -126,6 +134,8 @@ export function useSetupFlow({
     setSetupInstalling,
     setupNotice,
     setSetupNotice,
+    setupPreflight,
+    setSetupPreflight,
     setupProgress,
     setSetupProgress,
     activeSetupTier,

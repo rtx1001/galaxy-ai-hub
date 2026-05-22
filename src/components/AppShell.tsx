@@ -38,6 +38,7 @@ export function AppShell(props: AppShellProps) {
         setupCatalog={props.setupCatalog}
         setupInstalling={props.setupInstalling}
         activeSetupPartKey={props.activeSetupPartKey}
+        setupPreflight={props.setupPreflight}
         setupProgress={props.setupProgress}
         onClose={props.closeSetupScreen}
         onChooseFiles={props.closeSetupScreen}
