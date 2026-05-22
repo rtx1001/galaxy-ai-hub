@@ -354,6 +354,7 @@ function App() {
     setupProgress,
     setSetupProgress,
     activeSetupTier,
+    detectedSetupTier,
     firstStartupSetupNeeded,
     activeSetupPartKey,
     chooseSetupTier,
@@ -1329,6 +1330,7 @@ function App() {
   const {
     closeSetupScreen,
     handleInstallSetupBundle,
+    handleInstallSetupPart,
   } = useSetupInstallActions({
     activeSetupTier,
     ensureConversationStartsAtBottom,
@@ -1355,6 +1357,7 @@ function App() {
     <AppShell
       activeSetupPartKey={activeSetupPartKey}
       activeSetupTier={activeSetupTier}
+      detectedSetupTier={detectedSetupTier}
       activeTaskType={activeTaskType}
       appVersion={`v${CURRENT_APP_VERSION}`}
       approveActionProposal={approveActionProposal}
@@ -1407,6 +1410,7 @@ function App() {
       handleComposerInput={handleComposerInput}
       handleGenerateImage={handleGenerateImage}
       handleInstallSetupBundle={handleInstallSetupBundle}
+      handleInstallSetupPart={handleInstallSetupPart}
       handleMicToggle={handleMicToggle}
       handleSend={handleSend}
       hardwareGpuLabel={hardwareGpuLabel}

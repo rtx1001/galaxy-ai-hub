@@ -58,6 +58,16 @@ export function SpeakerIcon({ className = "h-5 w-5" }: { className?: string }) {
   );
 }
 
+export function EarIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M6 8.5a6 6 0 0 1 12 0c0 4.7-4.8 5.3-4.8 8.6 0 1.8-1.4 3.4-3.4 3.4-1.4 0-2.7-.8-3.2-2" />
+      <path d="M9.2 8.8a2.9 2.9 0 0 1 5.8 0c0 2.9-3.6 3.4-3.6 5.8" />
+      <path d="M4 10.5v-2a8 8 0 0 1 16 0v1.6" />
+    </svg>
+  );
+}
+
 export function SparkIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -84,6 +94,22 @@ export function DownloadIcon({ className = "h-5 w-5" }: { className?: string }) 
       <path d="M12 3v12" />
       <path d="M7 10l5 5 5-5" />
       <path d="M5 21h14" />
+    </svg>
+  );
+}
+
+export function CheckIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+export function WrenchIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M21.2 5.05a6.35 6.35 0 0 1-8.02 8.02L6.05 20.2a2.25 2.25 0 0 1-3.18-3.18L10 9.9a6.35 6.35 0 0 1 8.02-8.02l-3.66 3.66 3.18 3.18z" />
     </svg>
   );
 }

@@ -201,6 +201,19 @@ fn voice_files(tier: &str) -> Vec<SetupFile> {
         .join("models")
         .join("omnivoice.cpp");
     vec![
+        setup_archive_file(
+            "Voice engine",
+            "https://github.com/rtx1001/galaxy-ai-hub/releases/latest/download/GalaxyAIHub-voice-runtime-win64.zip",
+            app_root_dir()
+                .join("assistant-runtime")
+                .join("download-cache")
+                .join("GalaxyAIHub-voice-runtime-win64.zip"),
+            app_root_dir()
+                .join("assistant-runtime")
+                .join("voice-tts")
+                .join("bin"),
+            "about 160 MB",
+        ),
         setup_file(
             &format!("Voice base {}", quant_label),
             "Serveurperso/OmniVoice-GGUF",
@@ -317,6 +330,9 @@ fn file_installed(file: &SetupFile) -> bool {
         if extract_path.ends_with(Path::new("bin").join("stable-diffusion")) {
             return image_runtime_installed();
         }
+        if extract_path.ends_with(Path::new("voice-tts").join("bin")) {
+            return omnivoice_engine_installed();
+        }
         return extract_path.exists();
     }
     let path = absolute_from_display(&file.destination);
@@ -342,6 +358,7 @@ fn omnivoice_engine_installed() -> bool {
         "ggml-base.dll",
         "ggml-cpu.dll",
         "ggml-cuda.dll",
+        "libomp140.x86_64.dll",
     ];
     required_files.iter().all(|file_name| {
         bin_dir
@@ -476,24 +493,20 @@ fn find_dir_containing(root: &Path, file_name: &str) -> Option<PathBuf> {
 fn copy_runtime_files(source_dir: &Path, destination_dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(destination_dir).map_err(|e| {
         format!(
-            "Could not create image engine folder {}: {}",
+            "Could not create runtime folder {}: {}",
             destination_dir.display(),
             e
         )
     })?;
     for entry in std::fs::read_dir(source_dir)
-        .map_err(|e| format!("Could not read extracted image engine: {}", e))?
+        .map_err(|e| format!("Could not read extracted runtime: {}", e))?
         .flatten()
     {
         let path = entry.path();
         if path.is_file() {
             let target = destination_dir.join(entry.file_name());
             std::fs::copy(&path, &target).map_err(|e| {
-                format!(
-                    "Could not copy image engine file {}: {}",
-                    path.display(),
-                    e
-                )
+                format!("Could not copy runtime file {}: {}", path.display(), e)
             })?;
         }
     }
@@ -525,13 +538,63 @@ fn extract_archive(file: &SetupFile, archive_path: &Path) -> Result<(), String> 
     if !status.success() {
         return Err(format!("Could not extract {}", file.label));
     }
-    if !image_runtime_installed() {
+    if extract_to.ends_with(Path::new("bin").join("stable-diffusion")) && !image_runtime_installed()
+    {
         if let Some(runtime_dir) = find_dir_containing(&extract_to, "sd-cli.exe") {
+            copy_runtime_files(&runtime_dir, &extract_to)?;
+        }
+    }
+    if extract_to.ends_with(Path::new("voice-tts").join("bin")) && !omnivoice_engine_installed() {
+        if let Some(runtime_dir) = find_dir_containing(&extract_to, "omnivoice-tts.exe") {
             copy_runtime_files(&runtime_dir, &extract_to)?;
         }
     }
     if !file_installed(file) {
         return Err(format!("{} extracted, but required files were not found.", file.label));
+    }
+    Ok(())
+}
+
+fn remove_incomplete_download(temp: &Path) {
+    if temp.exists() {
+        let _ = std::fs::remove_file(temp);
+    }
+}
+
+fn run_curl_download(file: &SetupFile, temp: &Path, resume: bool) -> Result<(), String> {
+    let mut command = Command::new("curl.exe");
+    command.arg("--ssl-no-revoke").arg("-L").arg("--fail");
+    if resume {
+        command.arg("-C").arg("-");
+    }
+    command.arg("-o").arg(temp).arg(&file.url);
+    crate::process_util::hide_window(&mut command);
+    let status = command
+        .status()
+        .map_err(|e| format!("Could not start downloader: {}", e))?;
+    if !status.success() {
+        return Err(format!("Download failed for {}", file.label));
+    }
+    Ok(())
+}
+
+fn install_downloaded_file(file: &SetupFile, temp: &Path, destination: &Path) -> Result<(), String> {
+    if temp
+        .metadata()
+        .map(|meta| meta.len() <= 1024 * 1024)
+        .unwrap_or(true)
+    {
+        return Err(format!("Downloaded file looks incomplete: {}", file.label));
+    }
+    if file.extract_to.is_some() {
+        extract_archive(file, temp)?;
+        let _ = std::fs::remove_file(temp);
+    } else {
+        if destination.exists() {
+            let _ = std::fs::remove_file(destination);
+        }
+        std::fs::rename(temp, destination)
+            .map_err(|e| format!("Could not move downloaded file into place: {}", e))?;
     }
     Ok(())
 }
@@ -567,38 +630,35 @@ fn download_file(
             .map_err(|e| format!("Could not create model folder {}: {}", parent.display(), e))?;
     }
     let temp = destination.with_extension("download");
-    let mut command = Command::new("curl.exe");
-    command
-        .arg("--ssl-no-revoke")
-        .arg("-L")
-        .arg("-C")
-        .arg("-")
-        .arg("-o")
-        .arg(&temp)
-        .arg(&file.url);
-    crate::process_util::hide_window(&mut command);
-    let status = command
-        .status()
-        .map_err(|e| format!("Could not start downloader: {}", e))?;
-    if !status.success() {
-        return Err(format!("Download failed for {}", file.label));
-    }
-    if temp
-        .metadata()
-        .map(|meta| meta.len() <= 1024 * 1024)
-        .unwrap_or(true)
-    {
-        return Err(format!("Downloaded file looks incomplete: {}", file.label));
-    }
-    if file.extract_to.is_some() {
-        extract_archive(file, &temp)?;
-        let _ = std::fs::remove_file(&temp);
-    } else {
-        if destination.exists() {
-            let _ = std::fs::remove_file(&destination);
+    let mut last_error = None;
+    for attempt in 0..2 {
+        let resume = attempt == 0 && temp.exists();
+        let download_result = run_curl_download(file, &temp, resume);
+        if let Err(error) = download_result {
+            last_error = Some(error);
+            remove_incomplete_download(&temp);
+            continue;
         }
-        std::fs::rename(&temp, &destination)
-            .map_err(|e| format!("Could not move downloaded file into place: {}", e))?;
+        let result = install_downloaded_file(file, &temp, &destination);
+        match result {
+            Ok(()) => {
+                last_error = None;
+                break;
+            }
+            Err(error) => {
+                last_error = Some(error);
+                remove_incomplete_download(&temp);
+                if let Some(extract_to) = &file.extract_to {
+                    let extract_path = absolute_from_display(extract_to);
+                    if extract_path.exists() && !file_installed(file) {
+                        let _ = std::fs::remove_dir_all(extract_path);
+                    }
+                }
+            }
+        }
+    }
+    if let Some(error) = last_error {
+        return Err(error);
     }
     emit_progress(
         app,
@@ -608,6 +668,22 @@ fn download_file(
         file_count,
         format!("Installed {}.", file.label),
     );
+    Ok(())
+}
+
+fn setup_files_for_part(tier: &str, part_key: &str, has_nvidia_gpu: bool) -> Result<Vec<SetupFile>, String> {
+    match part_key {
+        "brain" => Ok(brain_files(tier)),
+        "voice" => Ok(voice_files(tier)),
+        "image" => Ok(image_files(tier, has_nvidia_gpu)),
+        _ => Err(format!("Unknown setup part: {}", part_key)),
+    }
+}
+
+fn write_metadata_for_part(tier: &str, part_key: &str) -> Result<(), String> {
+    if part_key == "brain" {
+        write_brain_model_yml(tier)?;
+    }
     Ok(())
 }
 
@@ -699,6 +775,53 @@ pub async fn install_setup_bundle(
         Ok(SetupInstallResult {
             success: true,
             message: "Local companion models are installed.".to_string(),
+            catalog: get_setup_catalog(install_tier, Some(install_has_nvidia_gpu)),
+        })
+    })
+    .await
+    .map_err(|e| format!("Installer task failed: {}", e))?
+}
+
+#[tauri::command]
+pub async fn install_setup_part(
+    app: tauri::AppHandle,
+    tier: String,
+    part_key: String,
+    has_nvidia_gpu: Option<bool>,
+) -> Result<SetupInstallResult, String> {
+    let tier = match tier.as_str() {
+        "light" | "balanced" | "high" => tier,
+        _ => "balanced".to_string(),
+    };
+    let install_tier = tier.clone();
+    let install_part_key = part_key.clone();
+    let install_has_nvidia_gpu = has_nvidia_gpu.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || -> Result<SetupInstallResult, String> {
+        let files = setup_files_for_part(&install_tier, &install_part_key, install_has_nvidia_gpu)?;
+        let file_count = files.len();
+        emit_progress(
+            &app,
+            "starting",
+            None,
+            0,
+            file_count,
+            format!("Preparing {} files...", install_part_key),
+        );
+        for (index, file) in files.iter().enumerate() {
+            download_file(&app, file, index + 1, file_count)?;
+        }
+        write_metadata_for_part(&install_tier, &install_part_key)?;
+        emit_progress(
+            &app,
+            "complete",
+            None,
+            file_count,
+            file_count,
+            format!("{} is ready.", install_part_key),
+        );
+        Ok(SetupInstallResult {
+            success: true,
+            message: format!("{} is ready.", install_part_key),
             catalog: get_setup_catalog(install_tier, Some(install_has_nvidia_gpu)),
         })
     })

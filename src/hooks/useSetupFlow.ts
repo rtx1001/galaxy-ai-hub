@@ -129,6 +129,7 @@ export function useSetupFlow({
     setupProgress,
     setSetupProgress,
     activeSetupTier,
+    detectedSetupTier,
     setupHasMissingFiles,
     firstStartupSetupNeeded,
     activeSetupPartKey,

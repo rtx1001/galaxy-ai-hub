@@ -7,6 +7,7 @@ $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $targetDir = Join-Path $root "src-tauri\target\$Configuration"
 $portableRoot = Join-Path $root "release\GalaxyAIHub-portable"
 $zipPath = Join-Path $root "release\GalaxyAIHub-portable.zip"
+$voiceRuntimeZipPath = Join-Path $root "release\GalaxyAIHub-voice-runtime-win64.zip"
 
 Push-Location $root
 try {
@@ -46,12 +47,18 @@ try {
         Copy-Item -LiteralPath $_.FullName -Destination $voiceTtsBinDest -Force
       }
 
+    $libompSource = Join-Path $root "src-tauri\engine\libomp140.x86_64.dll"
+    if ((-not (Test-Path (Join-Path $voiceTtsBinDest "libomp140.x86_64.dll"))) -and (Test-Path $libompSource)) {
+      Copy-Item -LiteralPath $libompSource -Destination $voiceTtsBinDest -Force
+    }
+
     $requiredVoiceRuntimeFiles = @(
       "omnivoice-tts.exe",
       "ggml.dll",
       "ggml-base.dll",
       "ggml-cpu.dll",
-      "ggml-cuda.dll"
+      "ggml-cuda.dll",
+      "libomp140.x86_64.dll"
     )
     foreach ($fileName in $requiredVoiceRuntimeFiles) {
       $runtimeFile = Join-Path $voiceTtsBinDest $fileName
@@ -59,6 +66,11 @@ try {
         throw "Portable voice runtime is incomplete. Missing $fileName"
       }
     }
+
+    if (Test-Path $voiceRuntimeZipPath) {
+      Remove-Item -LiteralPath $voiceRuntimeZipPath -Force
+    }
+    Compress-Archive -Path (Join-Path $voiceTtsBinDest "*") -DestinationPath $voiceRuntimeZipPath -Force
   }
 
   $samplesSource = Join-Path $root "assistant-runtime\voice\voice_samples"

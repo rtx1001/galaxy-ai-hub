@@ -512,15 +512,17 @@ export const setupDownloadSizeSummary = (catalog: SetupCatalog | null) => {
     };
   }
   const parts = catalog.parts.map((part) => {
-    const mb = part.files.reduce((sum, file) => sum + setupSizeHintToMb(file.size_hint), 0);
+    const mb = part.installed
+      ? 0
+      : part.files.reduce((sum, file) => sum + setupSizeHintToMb(file.size_hint), 0);
     return {
       title: part.title,
-      size: setupMbLabel(mb),
+      size: part.installed ? "Ready" : setupMbLabel(mb),
     };
   });
   const totalMb = parts.reduce((sum, part) => sum + setupSizeHintToMb(part.size), 0);
   return {
-    total: `Total download size: ${setupMbLabel(totalMb)}`,
+    total: totalMb > 0 ? `Total download size: ${setupMbLabel(totalMb)}` : "All selected parts are ready.",
     parts,
   };
 };

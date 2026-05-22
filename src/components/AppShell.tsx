@@ -33,16 +33,16 @@ export function AppShell(props: AppShellProps) {
         hardwareGpuLabel={props.hardwareGpuLabel}
         hardwareRamLabel={props.hardwareRamLabel}
         activeSetupTier={props.activeSetupTier}
-        setupTierOverride={props.setupTierOverride}
+        recommendedSetupTier={props.detectedSetupTier}
         onSelectSetupTier={props.chooseSetupTier}
         setupCatalog={props.setupCatalog}
         setupInstalling={props.setupInstalling}
         activeSetupPartKey={props.activeSetupPartKey}
         setupProgress={props.setupProgress}
-        setupNotice={props.setupNotice}
         onClose={props.closeSetupScreen}
         onChooseFiles={props.closeSetupScreen}
         onInstall={() => void props.handleInstallSetupBundle()}
+        onInstallPart={(partKey) => void props.handleInstallSetupPart(partKey)}
       />
     );
   }

@@ -186,6 +186,7 @@ pub fn run() {
             downloader::get_engine_info,
             setup_installer::get_setup_catalog,
             setup_installer::install_setup_bundle,
+            setup_installer::install_setup_part,
             agent_store::remember_local_memory,
             agent_store::list_local_memory,
             agent_store::forget_local_memory,

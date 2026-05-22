@@ -111,6 +111,35 @@ fn omnivoice_tts_executable_path() -> PathBuf {
         })
 }
 
+fn missing_omnivoice_runtime_files() -> Vec<String> {
+    let exe_path = omnivoice_tts_executable_path();
+    let Some(bin_dir) = exe_path.parent() else {
+        return vec!["voice runtime folder".to_string()];
+    };
+    [
+        "omnivoice-tts.exe",
+        "ggml.dll",
+        "ggml-base.dll",
+        "ggml-cpu.dll",
+        "ggml-cuda.dll",
+        "libomp140.x86_64.dll",
+    ]
+    .iter()
+    .filter_map(|file_name| {
+        let path = bin_dir.join(file_name);
+        let ready = path
+            .metadata()
+            .map(|meta| meta.len() > 16 * 1024)
+            .unwrap_or(false);
+        if ready {
+            None
+        } else {
+            Some(file_name.to_string())
+        }
+    })
+    .collect()
+}
+
 fn ensure_dirs() -> Result<(), String> {
     std::fs::create_dir_all(omnivoice_runtime_dir())
         .map_err(|e| format!("Could not prepare the OmniVoice runtime folder: {}", e))?;
@@ -463,6 +492,23 @@ fn ensure_omnivoice_ready(
         let error = format!(
             "OmniVoice GGUF engine was not found. Expected {}.",
             omnivoice_tts_executable_path().to_string_lossy()
+        );
+        set_status(
+            state,
+            VoiceSetupStatus {
+                state: "error".to_string(),
+                message: error.clone(),
+                progress: 100,
+                ready: false,
+            },
+        );
+        return Err(error);
+    }
+    let missing_runtime = missing_omnivoice_runtime_files();
+    if !missing_runtime.is_empty() {
+        let error = format!(
+            "OmniVoice GGUF engine is missing runtime files: {}. Open Downloads and repair Voice.",
+            missing_runtime.join(", ")
         );
         set_status(
             state,

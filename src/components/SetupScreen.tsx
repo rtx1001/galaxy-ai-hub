@@ -1,8 +1,9 @@
-import { BrainIcon, BrushIcon, CloseIcon, SpeakerIcon } from "./Icons";
+import { BrainIcon, BrushIcon, CheckIcon, CloseIcon, DownloadIcon, MicIcon, SpeakerIcon, WrenchIcon } from "./Icons";
 import {
   SETUP_PARTS,
   SetupCatalog,
   SetupInstallProgress,
+  SetupPartKey,
   SetupTier,
   SystemInfo,
   setupDownloadSizeSummary,
@@ -11,6 +12,7 @@ import {
   setupTierDescription,
   setupTierLabel,
 } from "../appCore";
+import { CURRENT_APP_VERSION } from "../hooks/useAvailableUpdate";
 
 type SetupTheme = {
   accent: string;
@@ -25,16 +27,16 @@ type SetupScreenProps = {
   hardwareGpuLabel: string;
   hardwareRamLabel: string;
   activeSetupTier: SetupTier;
-  setupTierOverride: SetupTier | null;
+  recommendedSetupTier: SetupTier;
   onSelectSetupTier: (tier: SetupTier) => void;
   setupCatalog: SetupCatalog | null;
   setupInstalling: boolean;
   activeSetupPartKey: string;
   setupProgress: SetupInstallProgress | null;
-  setupNotice: string;
   onClose: () => void;
   onChooseFiles: () => void;
   onInstall: () => void;
+  onInstallPart: (partKey: SetupPartKey) => void;
 };
 
 export function SetupScreen({
@@ -44,25 +46,31 @@ export function SetupScreen({
   hardwareGpuLabel,
   hardwareRamLabel,
   activeSetupTier,
-  setupTierOverride,
+  recommendedSetupTier,
   onSelectSetupTier,
   setupCatalog,
   setupInstalling,
   activeSetupPartKey,
   setupProgress,
-  setupNotice,
   onClose,
   onChooseFiles,
   onInstall,
+  onInstallPart,
 }: SetupScreenProps) {
   const hasInstalledParts = Boolean(setupCatalog?.parts.some((part) => part.installed));
   const hasMissingParts = Boolean(setupCatalog?.parts.some((part) => !part.installed));
   const sizeSummary = setupDownloadSizeSummary(setupCatalog);
-  const installButtonLabel = setupInstalling
+  const tierLabel = setupTierLabel(activeSetupTier);
+  const recommendedTierLabel = setupTierLabel(recommendedSetupTier);
+  const installButtonLabel = !setupCatalog
+    ? "Checking..."
+    : setupInstalling
     ? "Installing..."
-    : hasInstalledParts && hasMissingParts
+    : !hasMissingParts
+      ? `Start ${tierLabel}`
+      : hasInstalledParts
       ? "Repair missing files"
-      : "Install recommended setup";
+      : `Install ${tierLabel}`;
 
   return (
     <div
@@ -91,23 +99,19 @@ export function SetupScreen({
             <img src={brandLogo} alt="" aria-hidden="true" />
           </div>
           <div className="min-w-0">
-            <div className="setup-kicker">Welcome to Galaxy</div>
+            <div className="setup-kicker">Welcome to Galaxy AI Hub</div>
             <h1 className="setup-title">Build your local AI companion</h1>
-            <p className="setup-copy">
-              Galaxy needs three local parts before it can chat, speak, and create images.
-              Pick the setup that fits this PC, then let the app prepare everything in this folder.
-            </p>
+            <p className="setup-copy">Version {CURRENT_APP_VERSION}</p>
           </div>
         </div>
 
         <div className="setup-grid">
           <section className="setup-card setup-hardware-card">
-            <div className="setup-card-title">Recommended setup</div>
+            <div className="setup-card-title">Selected Setup</div>
             <div className="setup-tier-badge">
               <span>{setupTierLabel(activeSetupTier)}</span>
-              <small>{setupTierOverride ? "Selected by you" : "Picked for this PC"}</small>
+              <small>{setupTierDescription(activeSetupTier)}</small>
             </div>
-            <p className="setup-muted">{setupTierDescription(activeSetupTier)}</p>
             <div className="setup-spec-list">
               <div>
                 <span>CPU</span>
@@ -160,15 +164,25 @@ export function SetupScreen({
                 const catalogPart = setupCatalog?.parts.find((item) => item.key === part.key);
                 const sizeLabel = catalogPart?.files.map((file) => file.size_hint).join(" + ") || part.note;
                 const isActivePart = setupInstalling && activeSetupPartKey === part.key;
-                const partState = catalogPart?.installed
-                  ? "Ready"
+                const statusLabel = catalogPart?.installed
+                  ? "Installed"
+                  : setupCatalog
+                    ? "Missing"
+                    : "Checking";
+                const actionLabel = catalogPart?.installed
+                  ? "Installed"
                   : isActivePart
                     ? setupProgress?.stage === "ready"
-                      ? "Ready"
+                      ? "Installed"
                       : "Installing"
-                    : setupInstalling
-                      ? "Queued"
-                      : "Needed";
+                    : hasInstalledParts
+                      ? "Repair"
+                      : "Install";
+                const ActionIcon = catalogPart?.installed
+                  ? CheckIcon
+                  : hasInstalledParts
+                    ? WrenchIcon
+                    : DownloadIcon;
 
                 return (
                   <div key={part.key} className={`setup-part ${catalogPart?.installed ? "installed" : ""} ${isActivePart ? "active" : ""}`}>
@@ -182,23 +196,67 @@ export function SetupScreen({
                       )}
                     </div>
                     <div className="min-w-0">
-                      <div className="setup-part-title">{part.title}</div>
+                      <div className="setup-part-title-row">
+                        <span className="setup-part-title">{part.title}</span>
+                        <span className="setup-part-status-text">{statusLabel}</span>
+                      </div>
                       <div className="setup-part-intro">{setupPartIntro(part)}</div>
                       <div className="setup-part-model">{setupPartModel(part, activeSetupTier)}</div>
                       <div className="setup-part-size">{sizeLabel}</div>
                     </div>
-                    <div className="setup-part-state">{partState}</div>
+                    <button
+                      type="button"
+                      className={`setup-part-state ${catalogPart?.installed ? "installed" : ""}`}
+                      onClick={() => onInstallPart(part.key)}
+                      disabled={setupInstalling || !catalogPart || catalogPart.installed}
+                      title={statusLabel}
+                    >
+                      <ActionIcon className={actionLabel === "Repair" ? "h-4.5 w-4.5" : "h-3.5 w-3.5"} />
+                      <span>{actionLabel}</span>
+                    </button>
                   </div>
                 );
               })}
+              {(() => {
+                const voicePart = setupCatalog?.parts.find((item) => item.key === "voice");
+                const helperInstalled = Boolean(voicePart?.installed);
+                const statusLabel = helperInstalled ? "Installed" : "Missing";
+                return (
+                  <div className={`setup-part ${helperInstalled ? "installed" : ""}`}>
+                    <div className="setup-part-icon">
+                      <MicIcon className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="setup-part-title-row">
+                        <span className="setup-part-title">Voice Helper</span>
+                        <span className="setup-part-status-text">{statusLabel}</span>
+                      </div>
+                      <div className="setup-part-intro">The part that listens and prepares voice samples.</div>
+                      <div className="setup-part-model">Speech recognition and voice preparation</div>
+                      <div className="setup-part-size">Included with the voice setup</div>
+                    </div>
+                    <button
+                      type="button"
+                      className={`setup-part-state ${helperInstalled ? "installed" : ""}`}
+                      onClick={() => onInstallPart("voice")}
+                      disabled={setupInstalling || !voicePart || helperInstalled}
+                      title={statusLabel}
+                    >
+                      {helperInstalled ? <CheckIcon className="h-3.5 w-3.5" /> : <DownloadIcon className="h-3.5 w-3.5" />}
+                      <span>{helperInstalled ? "Installed" : "Install"}</span>
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </section>
         </div>
 
         <div className="setup-footer">
           <div className="setup-footer-info">
-            <div className="setup-footer-note">
-              {setupNotice || "You can change models later. First startup only prepares a working default setup."}
+            <div className="setup-footer-note setup-recommended-indicator">
+              <span />
+              <strong>Recommended setup: <b>{recommendedTierLabel}</b></strong>
             </div>
             {(setupInstalling || setupProgress) && (
               <div className="setup-progress" role="status" aria-live="polite">
@@ -228,7 +286,7 @@ export function SetupScreen({
               type="button"
               className="setup-primary-button"
               onClick={onInstall}
-              disabled={setupInstalling}
+              disabled={setupInstalling || !setupCatalog}
             >
               {installButtonLabel}
             </button>
