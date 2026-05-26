@@ -30,7 +30,7 @@ export function useRuntimePromptBuilders(options: UseRuntimePromptBuildersOption
     `Google: ${options.googleConnected ? "online" : "offline"}`,
     `Telegram: ${options.telegramRunning ? "online" : "offline"}`,
     `Voice: input ${options.voiceInputReady ? "ready" : "not ready"}, tts ${options.omniVoiceReady ? "ready" : "not ready"}`,
-    "Image: local Qwen image model",
+    "Image: local Image Studio model",
   ].join(" | ");
 
   const buildAssistantRuntimePrompt = () => {
@@ -60,7 +60,7 @@ Gmail: ${options.googleConnected ? "online" : "offline"}
 Telegram control: ${options.telegramRunning ? "online" : "offline"}
 Voice input: ${options.voiceInputReady ? "ready" : "not ready"}
 Voice TTS: ${options.omniVoiceReady ? "ready" : "not ready"}
-Image generation: local Qwen image model
+Image generation: local Image Studio model
 User location: ${options.localContext}`,
     ].join("");
   };

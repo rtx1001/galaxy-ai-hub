@@ -46,7 +46,8 @@ export function useSetupFlow({
   const setupHasMissingFiles = Boolean(
     setupCatalog?.parts.some((part) => !part.installed),
   );
-  const firstStartupSetupNeeded = !setupCompleted && !selectedModelPath;
+  const hasWorkingBrainModel = Boolean(selectedModelPath);
+  const firstStartupSetupNeeded = !setupCompleted && !hasWorkingBrainModel;
   const activeSetupPartKey = setupProgress?.part_key || "";
 
   useEffect(() => {
@@ -97,6 +98,7 @@ export function useSetupFlow({
       setupScreenOpen ||
       !setupCatalog ||
       !setupHasMissingFiles ||
+      hasWorkingBrainModel ||
       setupRepairPromptedRef.current
     ) {
       return;
@@ -112,6 +114,7 @@ export function useSetupFlow({
     setupScreenOpen,
     setupCatalog,
     setupHasMissingFiles,
+    hasWorkingBrainModel,
   ]);
 
   const chooseSetupTier = (tier: SetupTier) => {

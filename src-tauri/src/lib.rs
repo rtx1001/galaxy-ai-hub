@@ -11,6 +11,7 @@ mod downloader;
 mod engine_paths;
 mod file_tools;
 mod google_calendar;
+mod image_runtime;
 mod llama_manager;
 mod omnivoice_runtime;
 mod process_util;
@@ -43,6 +44,8 @@ fn show_main_window(app: &tauri::AppHandle) {
 }
 
 fn cleanup_runtime_processes(app: &tauri::AppHandle) {
+    image_runtime::shutdown_image_server();
+
     let llama_state = app.state::<llama_manager::LlamaState>();
     llama_manager::shutdown_model_process(llama_state.inner());
 
@@ -251,6 +254,7 @@ pub fn run() {
             assistant_runtime::transcribe_audio,
             omnivoice_runtime::synthesize_speech,
             assistant_runtime::generate_image,
+            assistant_runtime::stop_image_generation,
             assistant_runtime::test_telegram_bot,
             assistant_runtime::start_telegram_bot,
             assistant_runtime::stop_telegram_bot,

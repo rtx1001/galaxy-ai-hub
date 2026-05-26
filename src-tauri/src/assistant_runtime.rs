@@ -6,10 +6,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{
-    collections::HashMap,
-    io::{Cursor, Write},
-};
+use std::{collections::HashMap, io::Write};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -168,25 +165,6 @@ struct WhisperStdout {
 const VOICE_RUNTIME_SCRIPT: &str = include_str!("../python/voice_runtime.py");
 const PREPARED_VOICE_SAMPLE_VERSION: &str = "v5-mono22050-normfade-8s-langhint";
 const PREPARED_VOICE_SAMPLE_RATE: u32 = 22_050;
-const DEFAULT_QWEN_IMAGE_MODELS: &[&str] = &[
-    "Qwen-Rapid-NSFW-v23_Q8_0.gguf",
-    "Qwen-Rapid-NSFW-v23_Q6_K.gguf",
-    "Qwen-Rapid-NSFW-v23_Q5_K.gguf",
-    "Qwen-Rapid-NSFW-v23_Q4_K.gguf",
-    "Qwen-Rapid-NSFW-v23_Q3_K.gguf",
-    "Qwen-Rapid-NSFW-v23_Q2_K.gguf",
-];
-const DEFAULT_QWEN_IMAGE_LLMS: &[&str] = &[
-    "Qwen2.5-VL-7B-Instruct.Q8_0.gguf",
-    "Qwen2.5-VL-7B-Instruct.Q6_K.gguf",
-    "Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf",
-    "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
-    "Qwen2.5-VL-7B-Instruct.Q3_K_M.gguf",
-    "Qwen2.5-VL-7B-Instruct.Q2_K.gguf",
-];
-const DEFAULT_QWEN_IMAGE_VISION: &str = "Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf";
-const DEFAULT_QWEN_IMAGE_VAE: &str = "qwen_image_vae.safetensors";
-
 fn app_root_dir() -> PathBuf {
     crate::app_paths::app_root_dir()
 }
@@ -590,14 +568,14 @@ fn decode_data_url(data_url: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Could not decode the recorded audio: {}", e))
 }
 
-fn now_millis() -> u128 {
+pub(crate) fn now_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
 }
 
-fn append_runtime_log(area: &str, message: &str) {
+pub(crate) fn append_runtime_log(area: &str, message: &str) {
     let log_dir = app_root_dir().join("logs");
     if std::fs::create_dir_all(&log_dir).is_err() {
         return;
@@ -618,7 +596,7 @@ fn append_runtime_log(area: &str, message: &str) {
     }
 }
 
-fn compact_trace_text(text: &str, limit: usize) -> String {
+pub(crate) fn compact_trace_text(text: &str, limit: usize) -> String {
     let collapsed = text
         .replace('\r', " ")
         .replace('\n', " ")
@@ -632,14 +610,6 @@ fn compact_trace_text(text: &str, limit: usize) -> String {
 pub fn append_app_log(message: String) -> Result<(), String> {
     append_runtime_log("app", &message);
     Ok(())
-}
-
-fn image_extension_from_mime(mime: &str) -> &'static str {
-    match mime.to_ascii_lowercase().as_str() {
-        "image/jpeg" | "image/jpg" => "jpg",
-        "image/webp" => "webp",
-        _ => "png",
-    }
 }
 
 fn image_reference_data_url(value: &str) -> Option<String> {
@@ -755,386 +725,13 @@ fn save_telegram_downloaded_file(
     Ok(output)
 }
 
-fn stable_bytes_hash(bytes: &[u8]) -> String {
+pub(crate) fn stable_bytes_hash(bytes: &[u8]) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in bytes {
         hash ^= *byte as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("{:016x}", hash)
-}
-
-fn find_existing_sdcpp_input_image(
-    input_dir: &Path,
-    extension: &str,
-    bytes: &[u8],
-) -> Option<PathBuf> {
-    let expected_extension = extension.trim_start_matches('.').to_ascii_lowercase();
-    let entries = std::fs::read_dir(input_dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        if !file_name.starts_with("galaxy-input-") {
-            continue;
-        }
-        let actual_extension = path
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if actual_extension != expected_extension {
-            continue;
-        }
-        let Ok(metadata) = std::fs::metadata(&path) else {
-            continue;
-        };
-        if metadata.len() != bytes.len() as u64 {
-            continue;
-        }
-        if std::fs::read(&path).ok().as_deref() == Some(bytes) {
-            return Some(path);
-        }
-    }
-    None
-}
-
-fn png_pixels_to_jpeg_rgb(
-    pixels: &[u8],
-    color_type: png::ColorType,
-    width: usize,
-    height: usize,
-) -> Result<Vec<u8>, String> {
-    let pixel_count = width
-        .checked_mul(height)
-        .ok_or_else(|| "Generated image is too large to convert.".to_string())?;
-    let mut rgb = Vec::with_capacity(pixel_count * 3);
-
-    match color_type {
-        png::ColorType::Rgb => {
-            if pixels.len() < pixel_count * 3 {
-                return Err("Generated RGB image data is incomplete.".to_string());
-            }
-            rgb.extend_from_slice(&pixels[..pixel_count * 3]);
-        }
-        png::ColorType::Rgba => {
-            if pixels.len() < pixel_count * 4 {
-                return Err("Generated RGBA image data is incomplete.".to_string());
-            }
-            for chunk in pixels[..pixel_count * 4].chunks_exact(4) {
-                let alpha = chunk[3] as u16;
-                for channel in &chunk[..3] {
-                    let blended = ((*channel as u16 * alpha) + (255 * (255 - alpha))) / 255;
-                    rgb.push(blended as u8);
-                }
-            }
-        }
-        png::ColorType::Grayscale => {
-            if pixels.len() < pixel_count {
-                return Err("Generated grayscale image data is incomplete.".to_string());
-            }
-            for value in &pixels[..pixel_count] {
-                rgb.extend_from_slice(&[*value, *value, *value]);
-            }
-        }
-        png::ColorType::GrayscaleAlpha => {
-            if pixels.len() < pixel_count * 2 {
-                return Err("Generated grayscale-alpha image data is incomplete.".to_string());
-            }
-            for chunk in pixels[..pixel_count * 2].chunks_exact(2) {
-                let alpha = chunk[1] as u16;
-                let blended = ((chunk[0] as u16 * alpha) + (255 * (255 - alpha))) / 255;
-                let value = blended as u8;
-                rgb.extend_from_slice(&[value, value, value]);
-            }
-        }
-        png::ColorType::Indexed => {
-            return Err(
-                "Generated indexed PNG was not expanded before JPEG conversion.".to_string(),
-            );
-        }
-    }
-
-    Ok(rgb)
-}
-
-fn convert_png_to_jpeg(source_path: &Path, target_path: &Path, quality: u8) -> Result<(), String> {
-    let original = std::fs::read(source_path)
-        .map_err(|e| format!("Could not read generated PNG for JPEG conversion: {}", e))?;
-    let mut decoder = png::Decoder::new(Cursor::new(&original));
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = decoder
-        .read_info()
-        .map_err(|e| format!("Could not parse generated PNG for JPEG conversion: {}", e))?;
-    let mut buffer = vec![0; reader.output_buffer_size()];
-    let info = reader
-        .next_frame(&mut buffer)
-        .map_err(|e| format!("Could not decode generated PNG for JPEG conversion: {}", e))?;
-    let pixels = &buffer[..info.buffer_size()];
-    let rgb = png_pixels_to_jpeg_rgb(
-        pixels,
-        info.color_type,
-        info.width as usize,
-        info.height as usize,
-    )?;
-    let mut jpeg = Vec::new();
-    let encoder = jpeg_encoder::Encoder::new(&mut jpeg, quality);
-    encoder
-        .encode(
-            &rgb,
-            info.width as u16,
-            info.height as u16,
-            jpeg_encoder::ColorType::Rgb,
-        )
-        .map_err(|e| format!("Could not encode generated JPEG: {}", e))?;
-    std::fs::write(target_path, jpeg)
-        .map_err(|e| format!("Could not save generated JPEG: {}", e))?;
-    Ok(())
-}
-
-fn sdcpp_dir() -> PathBuf {
-    assistant_runtime_dir().join("sdcpp")
-}
-
-fn sdcpp_qwen_edit_dir() -> PathBuf {
-    sdcpp_dir().join("models").join("qwen-edit")
-}
-
-fn sdcpp_output_dir() -> PathBuf {
-    sdcpp_dir().join("output")
-}
-
-fn sdcpp_input_dir() -> PathBuf {
-    sdcpp_dir().join("input")
-}
-
-fn sdcpp_cli_path() -> PathBuf {
-    app_root_dir()
-        .join("bin")
-        .join("stable-diffusion")
-        .join(if cfg!(windows) {
-            "sd-cli.exe"
-        } else {
-            "sd-cli"
-        })
-}
-
-fn qwen_image_paths() -> Option<(PathBuf, PathBuf, PathBuf, PathBuf)> {
-    let root = sdcpp_qwen_edit_dir();
-    let diffusion = DEFAULT_QWEN_IMAGE_MODELS
-        .iter()
-        .map(|name| root.join(name))
-        .find(|path| path.exists())?;
-    let vae = root.join("vae").join(DEFAULT_QWEN_IMAGE_VAE);
-    let llm = DEFAULT_QWEN_IMAGE_LLMS
-        .iter()
-        .map(|name| root.join("text_encoders").join(name))
-        .find(|path| path.exists())?;
-    let vision = root.join("text_encoders").join(DEFAULT_QWEN_IMAGE_VISION);
-    if sdcpp_cli_path().exists()
-        && diffusion.exists()
-        && vae.exists()
-        && llm.exists()
-        && vision.exists()
-    {
-        Some((diffusion, vae, llm, vision))
-    } else {
-        None
-    }
-}
-
-fn save_sdcpp_input_image(data_url_or_path: &str) -> Result<PathBuf, String> {
-    let value = data_url_or_path.trim();
-    if value.is_empty() {
-        return Err("No input image was provided.".to_string());
-    }
-    if !value.starts_with("data:image/") {
-        let path = PathBuf::from(value);
-        if path.exists() {
-            return Ok(path);
-        }
-        return Err(format!("The input image file was not found: {}", value));
-    }
-
-    let (mime, encoded) = value
-        .split_once(',')
-        .ok_or_else(|| "Attached image data is not a valid data URL.".to_string())?;
-    let mime_type = mime
-        .strip_prefix("data:")
-        .and_then(|value| value.split(';').next())
-        .unwrap_or("image/png");
-    let bytes = BASE64
-        .decode(encoded)
-        .map_err(|e| format!("Could not decode the attached image: {}", e))?;
-    let input_dir = sdcpp_input_dir();
-    std::fs::create_dir_all(&input_dir)
-        .map_err(|e| format!("Could not prepare the image input folder: {}", e))?;
-    let extension = image_extension_from_mime(mime_type);
-    if let Some(existing) = find_existing_sdcpp_input_image(&input_dir, extension, &bytes) {
-        return Ok(existing);
-    }
-    let path = input_dir.join(format!(
-        "galaxy-input-{}.{}",
-        stable_bytes_hash(&bytes),
-        extension
-    ));
-    if path.exists() {
-        return Ok(path);
-    }
-    std::fs::write(&path, bytes)
-        .map_err(|e| format!("Could not save the attached image: {}", e))?;
-    Ok(path)
-}
-
-async fn generate_image_with_sdcpp_qwen(
-    prompt: String,
-    init_image_data_url: Option<String>,
-    init_image_data_urls: Option<Vec<String>>,
-    mask_prompt: Option<String>,
-    width: Option<u32>,
-    height: Option<u32>,
-) -> Result<ImageGenerationResult, String> {
-    let (diffusion, vae, llm, vision) = qwen_image_paths()
-        .ok_or_else(|| "Qwen Image Edit files are not fully installed.".to_string())?;
-    let cli = sdcpp_cli_path();
-    let mut input_images = Vec::new();
-    if let Some(values) = init_image_data_urls {
-        for value in values {
-            let value = value.trim();
-            if !value.is_empty() {
-                input_images.push(save_sdcpp_input_image(value)?);
-            }
-        }
-    }
-    if input_images.is_empty() {
-        if let Some(path) = init_image_data_url
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(save_sdcpp_input_image)
-            .transpose()?
-        {
-            input_images.push(path);
-        }
-    }
-    let output_dir = sdcpp_output_dir();
-    std::fs::create_dir_all(&output_dir)
-        .map_err(|e| format!("Could not prepare the image output folder: {}", e))?;
-    let output_stem = format!("galaxy-qwen-{}", now_millis());
-    let raw_output_path = output_dir.join(format!("{}.png", output_stem));
-    let output_path = output_dir.join(format!("{}.jpg", output_stem));
-    let seed = (now_millis() % (u32::MAX as u128)) as u32;
-    let mode = if input_images.is_empty() {
-        "txt2img"
-    } else {
-        "img2img"
-    };
-    let width = width.unwrap_or(1024).clamp(256, 2048);
-    let height = height.unwrap_or(1024).clamp(256, 2048);
-
-    append_runtime_log(
-        "image-trace",
-        &format!(
-            "sdcpp-qwen mode={} refs={} size={}x{} steps=4 cfg=1 sampler=euler_a prompt=\"{}\" mask=\"{}\" output=\"{}\"",
-            mode,
-            input_images.len(),
-            width,
-            height,
-            compact_trace_text(&prompt, 600),
-            compact_trace_text(mask_prompt.as_deref().unwrap_or_default(), 100),
-            raw_output_path.display(),
-        ),
-    );
-
-    let output_for_task = raw_output_path.clone();
-    let output = tokio::task::spawn_blocking(move || {
-        let mut command = Command::new(cli);
-        command
-            .arg("--diffusion-model")
-            .arg(diffusion)
-            .arg("--vae")
-            .arg(vae)
-            .arg("--llm")
-            .arg(llm)
-            .arg("--llm_vision")
-            .arg(vision)
-            .arg("-W")
-            .arg(width.to_string())
-            .arg("-H")
-            .arg(height.to_string())
-            .arg("--cfg-scale")
-            .arg("1")
-            .arg("--sampling-method")
-            .arg("euler_a")
-            .arg("--steps")
-            .arg("4")
-            .arg("--flow-shift")
-            .arg("3")
-            .arg("--offload-to-cpu")
-            .arg("--diffusion-fa")
-            .arg("--qwen-image-zero-cond-t")
-            .arg("-p")
-            .arg(prompt)
-            .arg("--seed")
-            .arg(seed.to_string())
-            .arg("-o")
-            .arg(&output_for_task);
-        for path in input_images {
-            command.arg("-r").arg(path);
-        }
-
-        crate::process_util::hide_window(&mut command);
-        let output = command
-            .output()
-            .map_err(|e| format!("Could not start the local image engine: {}", e))?;
-        if !output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!(
-                "The local image engine failed. {}{}",
-                compact_trace_text(&stdout, 700),
-                compact_trace_text(&stderr, 1200)
-            ));
-        }
-        Ok(output)
-    })
-    .await
-    .map_err(|e| format!("The local image task failed: {}", e))??;
-
-    append_runtime_log(
-        "image-trace",
-        &format!(
-            "sdcpp-qwen completed stdout=\"{}\" stderr=\"{}\"",
-            compact_trace_text(&String::from_utf8_lossy(&output.stdout), 800),
-            compact_trace_text(&String::from_utf8_lossy(&output.stderr), 800),
-        ),
-    );
-
-    convert_png_to_jpeg(&raw_output_path, &output_path, 90)?;
-    let raw_size = std::fs::metadata(&raw_output_path)
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
-    let jpg_size = std::fs::metadata(&output_path)
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
-    let _ = std::fs::remove_file(&raw_output_path);
-    append_runtime_log(
-        "image-trace",
-        &format!("jpeg saved quality=90 {} -> {} bytes", raw_size, jpg_size),
-    );
-
-    let bytes = std::fs::read(&output_path)
-        .map_err(|e| format!("The local image engine did not save an output image: {}", e))?;
-    Ok(ImageGenerationResult {
-        image_base64: BASE64.encode(bytes),
-        mime_type: "image/jpeg".to_string(),
-        file_path: output_path.to_string_lossy().to_string(),
-    })
 }
 
 fn is_supported_voice_file(path: &PathBuf) -> bool {
@@ -2778,7 +2375,7 @@ fn build_personality_runtime_prompt(
         } else {
             "ready".to_string()
         },
-        "local Qwen image model".to_string(),
+        "local Image Studio model".to_string(),
         if settings.user_location_label.trim().is_empty() {
             "unknown".to_string()
         } else {
@@ -3257,6 +2854,7 @@ fn telegram_user_wants_voice(text: &str) -> bool {
         "read it aloud",
         "noi bang giong",
         "gui giong",
+        "tra loi bang giong",
         "tin nhan thoai",
         "doc bang giong",
         "doc len",
@@ -3679,7 +3277,7 @@ async fn execute_telegram_pending_approval(
                     }
                     .to_string());
                 }
-                let image = generate_image_with_sdcpp_qwen(
+                let image = crate::image_runtime::generate_image(
                     proposal.prompt,
                     None,
                     Some(init_images),
@@ -5173,7 +4771,7 @@ pub async fn generate_image(
     width: Option<u32>,
     height: Option<u32>,
 ) -> Result<ImageGenerationResult, String> {
-    generate_image_with_sdcpp_qwen(
+    let image = crate::image_runtime::generate_image(
         prompt,
         init_image_data_url,
         init_image_data_urls,
@@ -5181,7 +4779,18 @@ pub async fn generate_image(
         width,
         height,
     )
-    .await
+    .await?;
+    Ok(ImageGenerationResult {
+        image_base64: image.image_base64,
+        mime_type: image.mime_type,
+        file_path: image.file_path,
+    })
+}
+
+#[tauri::command]
+pub async fn stop_image_generation() -> Result<(), String> {
+    crate::image_runtime::shutdown_image_server();
+    Ok(())
 }
 
 #[tauri::command]

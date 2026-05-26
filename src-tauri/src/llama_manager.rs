@@ -146,97 +146,6 @@ fn model_looks_multimodal(model_path: &Path) -> bool {
     .any(|needle| name.contains(needle))
 }
 
-fn model_sidecar_yml_path(model_path: &Path) -> PathBuf {
-    model_path.with_extension("yml")
-}
-
-fn model_id_from_file_name(file_name: &str) -> String {
-    let stem = file_name
-        .strip_suffix(".gguf")
-        .or_else(|| file_name.strip_suffix(".GGUF"))
-        .unwrap_or(file_name);
-    stem.chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string()
-}
-
-fn yaml_plain_value(value: &str) -> String {
-    value
-        .replace('\\', "/")
-        .replace('\r', " ")
-        .replace('\n', " ")
-        .trim()
-        .to_string()
-}
-
-fn jan_model_relative_path(root: &Path, path: &Path) -> String {
-    let relative_path = path.strip_prefix(root).unwrap_or(path);
-    let base = root
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("models");
-    format!(
-        "llamacpp/models/{}/{}",
-        yaml_plain_value(base),
-        yaml_plain_value(&relative_path.to_string_lossy())
-    )
-}
-
-fn ensure_model_sidecar_yml(root: &Path, model_path: &Path) -> Result<Option<PathBuf>, String> {
-    let sidecar_path = model_sidecar_yml_path(model_path);
-    if sidecar_path.exists() {
-        return Ok(Some(sidecar_path));
-    }
-
-    let file_name = model_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| "Model file name is not valid Unicode.".to_string())?;
-    let model_id = model_path
-        .parent()
-        .and_then(|path| path.file_name())
-        .and_then(|value| value.to_str())
-        .map(yaml_plain_value)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| model_id_from_file_name(file_name));
-    let model_size_bytes = std::fs::metadata(model_path)
-        .map_err(|e| format!("Could not read model file metadata: {}", e))?
-        .len();
-    let mmproj_path = find_mmproj_path(model_path);
-    let mmproj_size_bytes = mmproj_path
-        .as_ref()
-        .and_then(|path| std::fs::metadata(path).ok())
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
-    let total_size_bytes = model_size_bytes.saturating_add(mmproj_size_bytes);
-    let mut content = String::new();
-    content.push_str("embedding: false\n");
-    if let Some(mmproj_path) = mmproj_path {
-        content.push_str(&format!(
-            "mmproj_path: {}\n",
-            jan_model_relative_path(root, &mmproj_path)
-        ));
-    }
-    content.push_str(&format!(
-        "model_path: {}\n",
-        jan_model_relative_path(root, model_path)
-    ));
-    content.push_str(&format!("name: {}\n", yaml_plain_value(&model_id)));
-    content.push_str(&format!("size_bytes: {}\n", total_size_bytes));
-
-    std::fs::write(&sidecar_path, content)
-        .map_err(|e| format!("Could not create model sidecar YAML: {}", e))?;
-    Ok(Some(sidecar_path))
-}
-
 fn summarize_load_from_log(log_text: &str) -> ModelLoadStatus {
     let meaningful_line = log_text
         .lines()
@@ -570,6 +479,9 @@ fn build_model_command(
     if server_help.contains("--cache-ram") {
         command.arg("--cache-ram").arg("512");
     }
+    if server_help.contains("--timeout") {
+        command.arg("--timeout").arg("600");
+    }
     if server_help.contains("--fit") {
         command.arg("--fit").arg("on");
     }
@@ -690,14 +602,6 @@ fn collect_gguf_files(root: &Path, current: &Path, found: &mut Vec<ModelLibraryE
 
         if !is_gguf || file_name.contains("mmproj") {
             continue;
-        }
-
-        if let Err(error) = ensure_model_sidecar_yml(root, &path) {
-            eprintln!(
-                "Could not create model sidecar YAML for {}: {}",
-                path.display(),
-                error
-            );
         }
 
         let relative_path = path
@@ -1270,11 +1174,9 @@ pub fn stop_model_state(state: &LlamaState) -> ModelStatus {
 #[cfg(test)]
 mod tests {
     use super::{
-        estimate_kv_cache_mb, jan_model_relative_path, model_id_from_file_name,
-        parse_observed_load_profile, plan_memory_placement_with_vram, reserved_vram_mb,
-        yaml_plain_value,
+        estimate_kv_cache_mb, parse_observed_load_profile, plan_memory_placement_with_vram,
+        reserved_vram_mb,
     };
-    use std::path::Path;
 
     #[test]
     fn kv_estimate_grows_with_context() {
@@ -1309,39 +1211,5 @@ common_params_fit_impl: will leave 6774 >= 1536 MiB of free device memory, no ch
         assert!(!observed.offload_kv_to_gpu);
         assert!(!observed.offload_mmproj_to_gpu);
         assert_eq!(observed.fit_target_mb, Some(1536));
-    }
-
-    #[test]
-    fn yaml_plain_value_normalizes_paths() {
-        assert_eq!(yaml_plain_value(r"folder\model.gguf"), "folder/model.gguf");
-    }
-
-    #[test]
-    fn model_id_from_file_name_keeps_common_model_chars() {
-        assert_eq!(
-            model_id_from_file_name("MiniCPM-V-4_6-Thinking-F16.gguf"),
-            "MiniCPM-V-4_6-Thinking-F16"
-        );
-    }
-
-    #[test]
-    fn jan_relative_path_matches_model_folder_shape() {
-        assert_eq!(
-            jan_model_relative_path(
-                Path::new(r"D:\Models\gemma-4-E4B-it-Q6_K"),
-                Path::new(r"D:\Models\gemma-4-E4B-it-Q6_K\model.gguf")
-            ),
-            "llamacpp/models/gemma-4-E4B-it-Q6_K/model.gguf"
-        );
-    }
-
-    #[test]
-    fn model_folder_name_is_plain_yaml_name() {
-        let folder_name = Path::new(r"D:\Models\gemma-4-E4B-it-Q6_K")
-            .file_name()
-            .and_then(|value| value.to_str())
-            .map(yaml_plain_value)
-            .unwrap();
-        assert_eq!(folder_name, "gemma-4-E4B-it-Q6_K");
     }
 }

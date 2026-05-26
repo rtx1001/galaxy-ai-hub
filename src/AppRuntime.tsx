@@ -48,6 +48,7 @@ import { useAppPanelContents } from "./hooks/useAppPanelContents";
 import { useAppLifecycleWiring } from "./hooks/useAppLifecycleWiring";
 import { useAppDerivedState } from "./hooks/useAppDerivedState";
 import { useSetupRuntimeEffects } from "./hooks/useSetupRuntimeEffects";
+import { useLongTaskNotice } from "./hooks/useLongTaskNotice";
 import {
   DEFAULT_SETTINGS,
   DisplayLanguage,
@@ -936,6 +937,65 @@ function App() {
     setComposerNotice,
     setIsStreaming,
   });
+  const longTaskLabel = isGeneratingImage
+    ? "Image generation"
+    : isTranscribing
+      ? "Voice transcription"
+      : activeTaskTypeRef.current === "voice" && !isAudioPlaying
+        ? "Voice generation"
+        : brainStatus === "Loading" || modelLoadStatus.state === "starting" || modelLoadStatus.state === "loading"
+          ? "Model loading"
+          : isStreaming || brainStatus === "Thinking"
+            ? "Chat response"
+            : voiceSetupStatus.state !== "idle" && !voiceSetupStatus.ready
+              ? "Voice setup"
+              : omniVoiceStatus.state !== "idle" && !omniVoiceStatus.ready
+                ? "Voice engine setup"
+                : "Task";
+  const longTaskBusy =
+    isGeneratingImage ||
+    isTranscribing ||
+    isStreaming ||
+    brainStatus === "Thinking" ||
+    brainStatus === "Loading" ||
+    modelLoadStatus.state === "starting" ||
+    modelLoadStatus.state === "loading" ||
+    (activeTaskTypeRef.current === "voice" && !isAudioPlaying) ||
+    (voiceSetupStatus.state !== "idle" && !voiceSetupStatus.ready) ||
+    (omniVoiceStatus.state !== "idle" && !omniVoiceStatus.ready);
+  const {
+    longTaskNotice,
+    longTaskLabel: longTaskNoticeLabel,
+    keepLongTaskRunning,
+  } = useLongTaskNotice({
+    busy: longTaskBusy,
+    taskLabel: longTaskLabel,
+  });
+  const stopLongTask = () => {
+    stopActiveResponse();
+    voicePlaybackRequestRef.current += 1;
+    stopActiveAudio();
+    setSpeakingMessageId(null);
+    setPreviewingVoicePath(null);
+    setIsGeneratingImage(false);
+    activeTaskTypeRef.current = "none";
+    setActiveTaskType("none");
+    void invoke("stop_omnivoice_engine").catch((error) => console.error("Stop voice engine error:", error));
+    void invoke("stop_image_generation").catch((error) => console.error("Stop image generation error:", error));
+    if (brainStatus === "Loading" || brainStatus === "Thinking" || isStreaming) {
+      void invoke("stop_model")
+        .then(() => {
+          setBrainStatus("Idle");
+          setModelLoadStatus({
+            state: "idle",
+            message: "No chat brain is loaded.",
+            progress: 0,
+          });
+        })
+        .catch((error) => console.error("Stop model error:", error));
+    }
+    setComposerNotice("Stopped.");
+  };
 
   useAutomationRunner({
     settingsLoaded,
@@ -1434,6 +1494,8 @@ function App() {
       linkedFolders={linkedFolders}
       liveConversation={liveConversation}
       loadModelPath={loadModelPath}
+      longTaskLabel={longTaskNoticeLabel}
+      longTaskNotice={longTaskNotice}
       markUiInteraction={markUiInteraction}
       messages={messages}
       modelLoadStatus={modelLoadStatus}
@@ -1513,6 +1575,7 @@ function App() {
       speakingMessageId={speakingMessageId}
       stopActiveAudio={stopActiveAudio}
       stopActiveResponse={stopActiveResponse}
+      stopLongTask={stopLongTask}
       systemInfo={systemInfo}
       themePickerOpen={themePickerOpen}
       themeSwatches={themeSwatches}
@@ -1525,6 +1588,7 @@ function App() {
       userAvatarPickerRef={userAvatarPickerRef}
       userName={userName}
       voicePlaybackRequestRef={voicePlaybackRequestRef}
+      keepLongTaskRunning={keepLongTaskRunning}
     />
   );
 }

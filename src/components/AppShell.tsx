@@ -293,6 +293,10 @@ export function AppShell(props: AppShellProps) {
                 props.setThemePickerOpen(false);
               }}
               onClearChat={() => props.setFreshChatConfirmOpen(true)}
+              longTaskNotice={props.longTaskNotice}
+              longTaskLabel={props.longTaskLabel}
+              onKeepLongTaskRunning={props.keepLongTaskRunning}
+              onStopLongTask={props.stopLongTask}
               onToggleQuickModelMenu={() => {
                 const next = !props.quickModelMenuOpen;
                 props.setModelMenuOpen(false);

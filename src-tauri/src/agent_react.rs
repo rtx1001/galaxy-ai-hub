@@ -1393,10 +1393,12 @@ fn trim_inline_token(token: &str) -> &str {
     })
 }
 
+#[cfg(test)]
 fn trim_natural_language_token(token: &str) -> &str {
     token.trim_matches(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '-' | '_' | '/' | '.')))
 }
 
+#[cfg(test)]
 fn natural_language_tokens<'a>(text: &'a str) -> Vec<&'a str> {
     text.split_whitespace()
         .map(trim_natural_language_token)
@@ -1847,20 +1849,6 @@ fn user_wants_vietnamese(text: &str) -> bool {
     )
 }
 
-fn conversation_wants_vietnamese(messages: &[ReactChatMessage]) -> bool {
-    let recent_user_texts = messages
-        .iter()
-        .rev()
-        .filter(|message| message.role == "user")
-        .take(6)
-        .map(|message| content_text(&message.content))
-        .collect::<Vec<_>>();
-
-    recent_user_texts
-        .iter()
-        .any(|text| user_wants_vietnamese(text))
-}
-
 fn image_approval_answer(vi: bool) -> String {
     if vi {
         "Em có thể tạo ảnh này. Anh duyệt để em bắt đầu nhé.".to_string()
@@ -1930,100 +1918,21 @@ fn text_has_vietnamese_diacritic(text: &str) -> bool {
     })
 }
 
-fn looks_like_latin_english_media_path(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    !text_has_thai_script(text)
-        && !text_has_cjk_script(text)
-        && !text_has_vietnamese_diacritic(text)
-        && !contains_any(
-            &lower,
-            &[
-                "viet",
-                "vietnam",
-                "nhac viet",
-                "nhạc việt",
-                "thai",
-                "thais",
-                "thailand",
-            ],
-        )
-        && text.chars().any(|ch| ch.is_ascii_alphabetic())
-}
-
 fn media_constraint_terms(user_text: &str, explicit_query: Option<&str>) -> Vec<String> {
-    let constraint_source = explicit_query
-        .map(|query| format!("{} {}", user_text, query))
-        .unwrap_or_else(|| user_text.to_string());
-    let lowered = constraint_source.to_lowercase();
-    let normalized = normalize_text(&constraint_source);
+    let _ = user_text;
     let mut terms = explicit_query
         .map(str::trim)
         .filter(|query| !query.is_empty())
         .filter(|query| !media_constraint_query_is_generic(query))
-        .map(|query| vec![query.to_lowercase()])
+        .map(|query| {
+            normalize_text(query)
+                .split(|ch: char| !ch.is_alphanumeric())
+                .filter(|token| !token.is_empty())
+                .filter(|token| !media_constraint_query_is_generic(token))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
-    if contains_any(&lowered, &["thái", "thai", "thái lan", "เพลงไทย"])
-        || text_has_thai_script(user_text)
-    {
-        terms.extend(
-            ["thai", "thais", "thailand", "เพลง", "ไทย"]
-                .iter()
-                .map(|term| term.to_string()),
-        );
-    }
-    if contains_any_folded(
-        &lowered,
-        &normalized,
-        &[
-            "tiếng việt",
-            "tieng viet",
-            "việt nam",
-            "viet nam",
-            "vietnamese",
-            "nhạc việt",
-            "nhac viet",
-        ],
-    ) {
-        terms.extend(
-            [
-                "viet",
-                "vietnam",
-                "vietnamese",
-                "việt",
-                "việt nam",
-                "nhạc việt",
-                "nhac viet",
-            ]
-            .iter()
-            .map(|term| term.to_string()),
-        );
-    }
-    if contains_any_folded(
-        &lowered,
-        &normalized,
-        &[
-            "tiếng anh",
-            "tieng anh",
-            "nhạc anh",
-            "nhac anh",
-            "english",
-            "us uk",
-            "us-uk",
-            "western song",
-        ],
-    ) {
-        terms.extend(
-            [
-                "english",
-                "us-uk",
-                "usuk",
-                "western",
-                "__latin_english_media__",
-            ]
-            .iter()
-            .map(|term| term.to_string()),
-        );
-    }
     terms.sort();
     terms.dedup();
     terms
@@ -2052,9 +1961,7 @@ fn media_matches_constraints(file: &file_tools::FileSearchResult, terms: &[Strin
     }
     let haystack = format!("{} {} {}", file.name, file.folder, file.path).to_lowercase();
     terms.iter().any(|term| {
-        (term == "__latin_english_media__" && looks_like_latin_english_media_path(&haystack))
-            || haystack.contains(term)
-            || (text_has_thai_script(term) && text_has_thai_script(&haystack))
+        haystack.contains(term) || (text_has_thai_script(term) && text_has_thai_script(&haystack))
     })
 }
 
@@ -2256,6 +2163,7 @@ fn request_wants_another(text: &str) -> bool {
         || contains_any_folded(&lowered, &normalized, &["khác", "bài khác", "ảnh khác"])
 }
 
+#[cfg(test)]
 fn request_is_broad_media_preview(text: &str) -> bool {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
@@ -2280,6 +2188,7 @@ fn request_is_broad_media_preview(text: &str) -> bool {
         || has_word_folded(&lowered, &normalized, &["khác"])
 }
 
+#[cfg(test)]
 fn request_names_specific_file(text: &str) -> bool {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
@@ -2782,6 +2691,7 @@ fn route_for_request(text: &str) -> Option<ToolRoute> {
     None
 }
 
+#[cfg(test)]
 fn previous_explicit_route(messages: &[ReactChatMessage]) -> Option<ToolRoute> {
     let latest_index = messages.iter().rposition(|message| message.role == "user");
     messages
@@ -2829,6 +2739,7 @@ fn request_adds_context_details(text: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn weather_location_stop_words() -> &'static [&'static str] {
     &[
         "anh",
@@ -2904,6 +2815,7 @@ fn weather_location_stop_words() -> &'static [&'static str] {
     ]
 }
 
+#[cfg(test)]
 fn looks_like_bare_weather_location(text: &str) -> bool {
     let tokens = natural_language_tokens(text);
     if tokens.is_empty() || tokens.len() > 4 {
@@ -3032,6 +2944,7 @@ fn request_wants_explanation_only(text: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn contextual_route_for_messages(messages: &[ReactChatMessage]) -> Option<ToolRoute> {
     let latest_text = latest_user_text(messages);
     route_for_request(&latest_text).or_else(|| {
@@ -3127,6 +3040,7 @@ fn recent_preview_paths(messages: &[ReactChatMessage]) -> Vec<String> {
     paths
 }
 
+#[cfg(test)]
 fn random_media_preview_allowed(text: &str, allow_follow_up: bool) -> bool {
     if request_wants_avatar_image_generation(text) {
         return false;
@@ -3624,18 +3538,22 @@ fn deterministic_google_workspace_call(messages: &[ReactChatMessage]) -> Option<
     None
 }
 
+#[cfg(test)]
 fn is_gmail_tool(tool: &str) -> bool {
     tool == "gmail_recent" || tool.starts_with("gmail_") || tool.starts_with("propose_gmail_")
 }
 
+#[cfg(test)]
 fn is_calendar_tool(tool: &str) -> bool {
     tool == "google_calendar_check" || tool.contains("calendar")
 }
 
+#[cfg(test)]
 fn is_google_workspace_tool(tool: &str) -> bool {
     tool.starts_with("google_") || tool.starts_with("propose_google_")
 }
 
+#[cfg(test)]
 fn is_workspace_file_tool(tool: &str) -> bool {
     matches!(
         tool,
@@ -3644,10 +3562,12 @@ fn is_workspace_file_tool(tool: &str) -> bool {
         || tool.contains("directory")
 }
 
+#[cfg(test)]
 fn is_web_tool(tool: &str) -> bool {
     tool == "web_search" || tool.starts_with("web_")
 }
 
+#[cfg(test)]
 fn is_media_preview_tool(tool: &str) -> bool {
     matches!(
         tool,
@@ -3656,6 +3576,7 @@ fn is_media_preview_tool(tool: &str) -> bool {
         || tool.starts_with("preview_")
 }
 
+#[cfg(test)]
 fn tool_allowed_for_route_kind(call: &ToolCall, route: Option<ToolRoute>) -> Result<(), String> {
     match route {
         Some(ToolRoute::Gmail) => {
@@ -3755,17 +3676,6 @@ fn tool_allowed_for_route(call: &ToolCall, user_text: &str) -> Result<(), String
 
 fn tool_allowed_for_context(call: &ToolCall, messages: &[ReactChatMessage]) -> Result<(), String> {
     let latest_text = latest_user_text(messages);
-    if request_wants_avatar_image_generation(&latest_text)
-        && matches!(
-            call.tool.as_str(),
-            "preview_random_media" | "preview_file" | "list_media_files"
-        )
-    {
-        return Err(format!(
-            "{} is not relevant here. The user is asking for the current assistant's own image, so use propose_image_generation with mode avatar_image.",
-            call.tool
-        ));
-    }
     if request_wants_explanation_only(&latest_text) {
         return Err(format!(
             "{} is not relevant here. The user is asking for an explanation of the current conversation, not a new lookup.",
@@ -3781,20 +3691,7 @@ fn tool_allowed_for_context(call: &ToolCall, messages: &[ReactChatMessage]) -> R
     if call.tool == "propose_image_generation" {
         return Ok(());
     }
-    if request_is_conversational_turn(&latest_text) {
-        return Err(format!(
-            "{} is not relevant here. The user is making normal conversation, so answer directly without tools.",
-            call.tool
-        ));
-    }
-    let route = contextual_route_for_messages(messages);
-    if route.is_none() && is_media_preview_tool(&call.tool) {
-        return Err(format!(
-            "{} is not relevant here. Media preview tools require an explicit media open/play/view request.",
-            call.tool
-        ));
-    }
-    tool_allowed_for_route_kind(call, route)
+    Ok(())
 }
 
 fn should_continue_after_observation(tool: &str, user_text: &str) -> bool {
@@ -4131,6 +4028,38 @@ fn recent_pending_image_proposal(messages: &[ReactChatMessage]) -> Option<ImageP
         .and_then(|message| parse_pending_image_proposal_text(&content_text(&message.content)))
 }
 
+fn normalize_chat_messages_for_templates(messages: Vec<Value>) -> Vec<Value> {
+    let mut leading_system_parts = Vec::new();
+    let mut normalized = Vec::new();
+
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if matches!(role, "system" | "developer") {
+            let text = extract_value_text(message.get("content").unwrap_or(&Value::Null));
+            if !text.trim().is_empty() {
+                leading_system_parts.push(text.trim().to_string());
+            }
+            continue;
+        }
+        normalized.push(message);
+    }
+
+    if !leading_system_parts.is_empty() {
+        normalized.insert(
+            0,
+            json!({
+                "role": "system",
+                "content": leading_system_parts.join("\n\n")
+            }),
+        );
+    }
+
+    normalized
+}
+
 async fn call_chat(
     messages: Vec<Value>,
     tools: Option<Value>,
@@ -4139,12 +4068,12 @@ async fn call_chat(
     thinking_enabled: bool,
 ) -> Result<Value, String> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_secs(600))
         .build()
         .map_err(|e| format!("Could not prepare chat request: {}", e))?;
 
     let mut payload = json!({
-        "messages": messages,
+        "messages": normalize_chat_messages_for_templates(messages),
         "temperature": sampling.temperature.clamp(0.0, 2.0),
         "top_k": sampling.top_k.min(200),
         "top_p": sampling.top_p.clamp(0.0, 1.0),
@@ -4172,8 +4101,8 @@ async fn call_chat(
         .await
         .map_err(|e| {
             format!(
-                "Connection to the brain failed while sending chat request to http://127.0.0.1:8080/v1/chat/completions: {}",
-                e
+                "Connection to the brain failed while sending chat request to http://127.0.0.1:8080/v1/chat/completions: {} ({:?})",
+                e, e
             )
         })?;
 
@@ -5539,14 +5468,13 @@ async fn execute_tool_result(
         }
         "list_media_files" => {
             let user_text = call_user_text(call);
-            let kind = inferred_media_kind(&user_text)
-                .map(str::to_string)
-                .or_else(|| {
-                    call.arguments
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .map(|value| value.trim().to_string())
-                })
+            let kind = call
+                .arguments
+                .get("kind")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .or_else(|| inferred_media_kind(&user_text).map(str::to_string))
                 .unwrap_or_else(|| "any".to_string());
             let matches =
                 file_tools::list_linked_media_files(kind.clone(), folders.to_vec(), Some(30))?;
@@ -5584,24 +5512,13 @@ async fn execute_tool_result(
         }
         "preview_random_media" => {
             let user_text = call_user_text(call);
-            let allow_follow_up = call
+            let kind = call
                 .arguments
-                .get("_preview_context")
+                .get("kind")
                 .and_then(Value::as_str)
-                == Some("follow_up");
-            if !random_media_preview_allowed(&user_text, allow_follow_up) {
-                return Ok(error_outcome(
-                    "This request is not asking to open or play random media.".to_string(),
-                ));
-            }
-            let kind = inferred_media_kind(&user_text)
-                .map(str::to_string)
-                .or_else(|| {
-                    call.arguments
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .map(|value| value.trim().to_string())
-                })
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .or_else(|| inferred_media_kind(&user_text).map(str::to_string))
                 .unwrap_or_else(|| "any".to_string());
             let mut matches = file_tools::list_linked_media_files(
                 kind.clone(),
@@ -5611,10 +5528,23 @@ async fn execute_tool_result(
             let explicit_query = call.arguments.get("query").and_then(Value::as_str);
             let constraint_terms = media_constraint_terms(&user_text, explicit_query);
             if !constraint_terms.is_empty() {
-                matches = matches
-                    .into_iter()
+                let constrained_matches = matches
+                    .iter()
+                    .cloned()
                     .filter(|file| media_matches_constraints(file, &constraint_terms))
                     .collect::<Vec<_>>();
+                if !constrained_matches.is_empty() {
+                    matches = constrained_matches;
+                } else if explicit_query
+                    .map(str::trim)
+                    .filter(|query| !query.is_empty())
+                    .is_none()
+                {
+                    matches = matches
+                        .into_iter()
+                        .filter(|file| media_matches_constraints(file, &constraint_terms))
+                        .collect::<Vec<_>>();
+                }
                 if matches.is_empty() {
                     return Ok(error_outcome(format!(
                         "No previewable {} files matched the requested media constraint: {}.",
@@ -6915,15 +6845,11 @@ fn protocol_retry_for_missing_tool(
     pending_image_proposal: Option<&ImageProposal>,
     has_recent_image_context: bool,
 ) -> Option<&'static str> {
-    if request_effectively_wants_image_generation(
+    let _ = (
         latest_user_text,
         pending_image_proposal,
         has_recent_image_context,
-    ) {
-        return Some(
-            "Protocol error: the user asked for image generation. Use propose_image_generation with the visual prompt, or ask a clarification if the image request is ambiguous. Do not claim an image was created without the tool.",
-        );
-    }
+    );
     if contextual_route.is_some() {
         return Some(
             "Protocol error: this user request requires a tool for live, local, or external data. Produce exactly one structured tool call, or ask a clarification. Do not claim that you checked, found, created, opened, or verified anything without a tool result.",
@@ -6947,15 +6873,11 @@ fn route_label(route: ToolRoute) -> &'static str {
 fn tool_planner_instruction(
     latest_user_text: &str,
     contextual_route: Option<ToolRoute>,
-    pending_image_proposal: Option<&ImageProposal>,
+    _pending_image_proposal: Option<&ImageProposal>,
     has_recent_image_context: bool,
     step: usize,
 ) -> String {
-    let image_required = request_effectively_wants_image_generation(
-        latest_user_text,
-        pending_image_proposal,
-        has_recent_image_context,
-    );
+    let image_required = false;
     let recent_image_hint = if has_recent_image_context {
         "Recent context contains an image. A short follow-up may refer to that image; decide from the whole conversation. If unclear, output NO_TOOL so the final answer can ask one short clarification."
     } else {
@@ -7137,12 +7059,8 @@ async fn plan_next_tool_call(
     step: usize,
 ) -> Result<(Option<ToolCall>, String), String> {
     let mut accumulated_thinking = String::new();
-    let tool_required = contextual_route.is_some()
-        || request_effectively_wants_image_generation(
-            latest_user_text,
-            pending_image_proposal,
-            has_recent_image_context,
-        );
+    let _ = (pending_image_proposal, has_recent_image_context);
+    let tool_required = contextual_route.is_some();
     if tool_required {
         let route_text = contextual_route
             .map(route_label)
@@ -7329,8 +7247,8 @@ pub async fn agent_jan_chat_core(
     }
 
     let latest_text = latest_user_text(&messages);
-    let vi = user_wants_vietnamese(&latest_text) || conversation_wants_vietnamese(&messages);
-    let contextual_route = contextual_route_for_messages(&messages);
+    let vi = user_wants_vietnamese(&latest_text);
+    let contextual_route = None;
     let pending_image_proposal = recent_pending_image_proposal(&messages);
     let has_recent_image_context = recent_image_context(&messages);
     let tools = tool_schema();
@@ -7378,12 +7296,7 @@ pub async fn agent_jan_chat_core(
         let raw_tool_call = match planned_tool_call {
             Some(raw_tool_call) => raw_tool_call,
             None => {
-                let tool_required_this_turn = contextual_route.is_some()
-                    || request_effectively_wants_image_generation(
-                        &latest_text,
-                        pending_image_proposal.as_ref(),
-                        has_recent_image_context,
-                    );
+                let tool_required_this_turn = contextual_route.is_some();
                 if tool_required_this_turn && step < 7 {
                     request_messages.push(json!({
                         "role": "system",
@@ -7800,6 +7713,35 @@ mod tests {
     }
 
     #[test]
+    fn chat_message_normalization_keeps_system_only_at_beginning() {
+        let messages = vec![
+            json!({ "role": "system", "content": "base" }),
+            json!({ "role": "user", "content": "hello" }),
+            json!({ "role": "assistant", "content": "hi" }),
+            json!({ "role": "system", "content": "planner correction" }),
+            json!({ "role": "developer", "content": "transport hint" }),
+            json!({ "role": "user", "content": "continue" }),
+        ];
+        let normalized = normalize_chat_messages_for_templates(messages);
+        assert_eq!(normalized.len(), 4);
+        assert_eq!(
+            normalized[0].get("role").and_then(Value::as_str),
+            Some("system")
+        );
+        let system_text = normalized[0]
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(system_text.contains("base"));
+        assert!(system_text.contains("planner correction"));
+        assert!(system_text.contains("transport hint"));
+        assert!(normalized
+            .iter()
+            .skip(1)
+            .all(|message| message.get("role").and_then(Value::as_str) != Some("system")));
+    }
+
+    #[test]
     fn tool_schema_and_validator_names_stay_in_sync() {
         let schema = tool_schema();
         let mut schema_names = schema
@@ -7823,11 +7765,11 @@ mod tests {
     }
 
     #[test]
-    fn planner_instruction_for_avatar_requests_forces_avatar_tool_mode() {
+    fn planner_instruction_for_avatar_requests_exposes_image_modes_without_forcing_route() {
         let instruction =
             tool_planner_instruction("gửi ảnh của em cho anh xem", None, None, false, 0);
         assert!(instruction.contains("PRIVATE TOOL PLANNER"));
-        assert!(instruction.contains("mode avatar_image"));
+        assert!(instruction.contains("avatar_image"));
         assert!(instruction.contains("one structured tool call"));
     }
 
@@ -7906,9 +7848,18 @@ mod tests {
     }
 
     #[test]
-    fn thai_media_request_builds_language_constraints() {
+    fn user_text_language_terms_do_not_force_media_constraints() {
         let terms = media_constraint_terms("mở bài hát tiếng Thái Lan khác đi", None);
-        assert!(terms.iter().any(|term| term == "thai"));
+        assert!(
+            terms.is_empty(),
+            "language phrases in user text should not become hard-coded media filters: {:?}",
+            terms
+        );
+    }
+
+    #[test]
+    fn explicit_media_query_builds_simple_filename_constraints() {
+        let terms = media_constraint_terms("", Some("Thais"));
         assert!(terms.iter().any(|term| term == "thais"));
         let thai_file = file_tools::FileSearchResult {
             path: "D:\\Music\\Thais\\001.ลมหนาว.mp3".to_string(),
@@ -7929,10 +7880,11 @@ mod tests {
     }
 
     #[test]
-    fn vietnamese_media_request_builds_language_constraints() {
+    fn explicit_vietnamese_media_query_builds_simple_filename_constraints() {
         let terms = media_constraint_terms("mở cho anh một bài hát tiếng Việt khác đi", None);
+        assert!(terms.is_empty());
+        let terms = media_constraint_terms("", Some("Viet"));
         assert!(terms.iter().any(|term| term == "viet"));
-        assert!(terms.iter().any(|term| term == "vietnam"));
         let vietnamese_file = file_tools::FileSearchResult {
             path: "D:\\Music\\My Viet fav\\Em ke anh nghe - Linh Phi.mp3".to_string(),
             name: "Em ke anh nghe - Linh Phi.mp3".to_string(),
@@ -7952,9 +7904,14 @@ mod tests {
     }
 
     #[test]
-    fn english_media_request_accepts_latin_media_without_language_label() {
+    fn english_media_request_does_not_invent_language_filter() {
         let terms = media_constraint_terms("play an English song for me", None);
-        assert!(terms.iter().any(|term| term == "__latin_english_media__"));
+        assert!(
+            terms.is_empty(),
+            "English-language phrasing should not become a hidden filename filter: {:?}",
+            terms
+        );
+        let terms = media_constraint_terms("", Some("Rock"));
         let english_file = file_tools::FileSearchResult {
             path: "D:\\Music\\Rock\\05 - My Way.MP3".to_string(),
             name: "05 - My Way.MP3".to_string(),
@@ -8286,7 +8243,7 @@ mod tests {
     }
 
     #[test]
-    fn conversational_vietnamese_nghe_particle_blocks_media_tool_call() {
+    fn conversational_vietnamese_nghe_particle_does_not_keyword_block_model_tool_call() {
         let messages = vec![ReactChatMessage {
             role: "user".to_string(),
             content: json!("chị Linh cần gì thì nhớ hỗ trợ nghe chưa em"),
@@ -8295,7 +8252,7 @@ mod tests {
             tool: "preview_random_media".to_string(),
             arguments: json!({ "kind": "audio" }),
         };
-        assert!(tool_allowed_for_context(&call, &messages).is_err());
+        assert!(tool_allowed_for_context(&call, &messages).is_ok());
     }
 
     #[test]
@@ -8471,7 +8428,7 @@ Path: D:\Music\song.mp3"
             },
             text,
         );
-        assert!(tool_allowed_for_context(&media_call, &messages).is_err());
+        assert!(tool_allowed_for_context(&media_call, &messages).is_ok());
     }
 
     #[test]
@@ -8655,7 +8612,7 @@ Path: D:\Music\song.mp3"
             contextual_route_for_messages(&messages),
             Some(ToolRoute::Weather)
         );
-        assert!(tool_allowed_for_context(&call, &messages).is_err());
+        assert!(tool_allowed_for_context(&call, &messages).is_ok());
     }
 
     #[test]
@@ -8869,7 +8826,7 @@ Path: D:\Music\song.mp3"
     }
 
     #[test]
-    fn conversational_turn_blocks_web_search_tool_call() {
+    fn conversational_turn_does_not_keyword_block_model_tool_call() {
         let messages = vec![ReactChatMessage {
             role: "user".to_string(),
             content: json!("em có vui khi gặp anh ko"),
@@ -8881,7 +8838,7 @@ Path: D:\Music\song.mp3"
             },
             "em có vui khi gặp anh ko",
         );
-        assert!(tool_allowed_for_context(&call, &messages).is_err());
+        assert!(tool_allowed_for_context(&call, &messages).is_ok());
     }
 
     #[test]
@@ -9194,7 +9151,7 @@ propose_image_generation(mask_prompt="sky and clouds", mode="image_to_image", pr
             tool: "google_calendar_check".to_string(),
             arguments: json!({ "date": "today" }),
         };
-        assert!(tool_allowed_for_context(&call, &messages).is_err());
+        assert!(tool_allowed_for_context(&call, &messages).is_ok());
     }
 
     #[test]
@@ -9513,25 +9470,11 @@ propose_image_generation(mask_prompt="sky and clouds", mode="image_to_image", pr
     }
 
     #[test]
-    fn approval_reply_uses_recent_conversation_language() {
-        let messages = vec![
-            ReactChatMessage {
-                role: "user".to_string(),
-                content: json!("tạo ảnh một con mèo đang ngồi bên cửa sổ"),
-            },
-            ReactChatMessage {
-                role: "assistant".to_string(),
-                content: json!("Em có thể tạo ảnh này. Anh duyệt để em bắt đầu nhé."),
-            },
-            ReactChatMessage {
-                role: "user".to_string(),
-                content: json!("ok"),
-            },
-        ];
-        assert!(conversation_wants_vietnamese(&messages));
+    fn approval_reply_uses_latest_user_language_only() {
+        let latest_user_text = "send me another pic of you, but full body shot";
         assert_eq!(
-            image_approval_answer(conversation_wants_vietnamese(&messages)),
-            "Em có thể tạo ảnh này. Anh duyệt để em bắt đầu nhé."
+            image_approval_answer(user_wants_vietnamese(latest_user_text)),
+            "I can create this image. Approve it when you're ready."
         );
     }
 

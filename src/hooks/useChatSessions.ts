@@ -34,9 +34,11 @@ export function useChatSessions({
 }: UseChatSessionsOptions) {
   const [chatSessions, setChatSessions] = useState<ChatSessions>({});
   const chatSessionsRef = useRef<ChatSessions>({});
+  const liveMessagesRef = useRef<ChatMessage[]>(messages);
   const loadedChatSessionIdsRef = useRef<Set<string>>(new Set());
   const sessionShadowRef = useRef<Record<string, string>>({});
   const lastSessionMutationAtRef = useRef<Record<string, number>>({});
+  liveMessagesRef.current = messages;
 
   const saveActiveChatSession = (
     personalityId = selectedPersonalityId,
@@ -102,6 +104,10 @@ export function useChatSessions({
         ? prev
         : { ...prev, [selectedPersonalityId]: messages },
     );
+    chatSessionsRef.current = {
+      ...chatSessionsRef.current,
+      [selectedPersonalityId]: messages,
+    };
   }, [messages, selectedPersonalityId]);
 
   useEffect(() => {
@@ -172,6 +178,16 @@ export function useChatSessions({
         if (!active) return;
         const remoteSession = parseStoredChatSession(raw);
         const remoteFingerprint = compactSessionFingerprint(remoteSession);
+        const localSession = liveMessagesRef.current;
+        const localFingerprint = compactSessionFingerprint(localSession);
+        if (localFingerprint !== remoteFingerprint && localSession.length > remoteSession.length) {
+          sessionShadowRef.current[selectedPersonalityId] = localFingerprint;
+          chatSessionsRef.current = {
+            ...chatSessionsRef.current,
+            [selectedPersonalityId]: localSession,
+          };
+          return;
+        }
         const currentFingerprint =
           sessionShadowRef.current[selectedPersonalityId] ??
           compactSessionFingerprint(chatSessionsRef.current[selectedPersonalityId] ?? []);

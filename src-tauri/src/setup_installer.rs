@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 use sysinfo::Disks;
@@ -96,6 +96,7 @@ fn webview2_available() -> bool {
     registry_keys.iter().any(|key| {
         let mut command = Command::new("reg.exe");
         command.arg("query").arg(key).arg("/v").arg("pv");
+        command.stdout(Stdio::null()).stderr(Stdio::null());
         crate::process_util::hide_window(&mut command);
         command
             .status()
@@ -394,16 +395,16 @@ fn sd_runtime_file(has_nvidia_gpu: bool) -> SetupFile {
     if has_nvidia_gpu {
         setup_archive_file(
             "Image engine CUDA",
-            "https://sourceforge.net/projects/stable-diffusion-cpp.mirror/files/master-625-f683c88/sd-master-f683c88-bin-win-cuda12-x64.zip/download",
-            cache.join("sd-master-f683c88-bin-win-cuda12-x64.zip"),
+            "https://sourceforge.net/projects/stable-diffusion-cpp.mirror/files/master-650-1ceb5bd/sd-master-1ceb5bd-bin-win-cuda12-x64.zip/download",
+            cache.join("sd-master-1ceb5bd-bin-win-cuda12-x64.zip"),
             extract_to,
-            "about 362 MB",
+            "about 337 MB",
         )
     } else {
         setup_archive_file(
             "Image engine CPU",
-            "https://sourceforge.net/projects/stable-diffusion-cpp.mirror/files/master-625-f683c88/sd-master-f683c88-bin-win-avx2-x64.zip/download",
-            cache.join("sd-master-f683c88-bin-win-avx2-x64.zip"),
+            "https://sourceforge.net/projects/stable-diffusion-cpp.mirror/files/master-650-1ceb5bd/sd-master-1ceb5bd-bin-win-avx2-x64.zip/download",
+            cache.join("sd-master-1ceb5bd-bin-win-avx2-x64.zip"),
             extract_to,
             "about 14 MB",
         )
@@ -411,68 +412,82 @@ fn sd_runtime_file(has_nvidia_gpu: bool) -> SetupFile {
 }
 
 fn image_files(tier: &str, has_nvidia_gpu: bool) -> Vec<SetupFile> {
-    let (image_file, image_size, encoder_file, encoder_size) = match tier {
-        "light" => (
-            "v23/Qwen-Rapid-NSFW-v23_Q3_K.gguf",
-            "about 9.7 GB",
-            "Qwen2.5-VL-7B-Instruct.Q3_K_M.gguf",
-            "about 3.8 GB",
-        ),
-        "high" => (
-            "v23/Qwen-Rapid-NSFW-v23_Q5_K.gguf",
-            "about 14.5 GB",
-            "Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf",
-            "about 5.2 GB",
-        ),
-        _ => (
-            "v23/Qwen-Rapid-NSFW-v23_Q4_K.gguf",
-            "about 12.2 GB",
-            "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
-            "about 4.4 GB",
-        ),
-    };
+    let mut files = vec![sd_runtime_file(has_nvidia_gpu)];
+    if tier == "high" {
+        let root = app_root_dir()
+            .join("assistant-runtime")
+            .join("sdcpp")
+            .join("models")
+            .join("qwen-edit");
+        files.extend([
+            setup_file(
+                "Qwen Image Edit",
+                "Novice25/Qwen-Image-Edit-Rapid-AIO-GGUF",
+                "v23/Qwen-Rapid-NSFW-v23_Q5_K.gguf",
+                root.join("Qwen-Rapid-NSFW-v23_Q5_K.gguf"),
+                "about 14.5 GB",
+            ),
+            setup_file(
+                "Image text encoder",
+                "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
+                "Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf",
+                root.join("text_encoders")
+                    .join("Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf"),
+                "about 5.2 GB",
+            ),
+            setup_file(
+                "Image projector",
+                "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
+                "Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf",
+                root.join("text_encoders")
+                    .join("Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf"),
+                "about 814 MB",
+            ),
+            setup_file(
+                "Image VAE",
+                "QuantStack/Qwen-Image-Edit-GGUF",
+                "VAE/Qwen_Image-VAE.safetensors",
+                root.join("vae").join("qwen_image_vae.safetensors"),
+                "about 500 MB",
+            ),
+        ]);
+        return files;
+    }
+
     let root = app_root_dir()
         .join("assistant-runtime")
         .join("sdcpp")
         .join("models")
-        .join("qwen-edit");
-    vec![
-        sd_runtime_file(has_nvidia_gpu),
+        .join("z-image-turbo");
+    let (model_file, model_size) = if tier == "light" {
+        ("z_image_turbo-Q4_K.gguf", "about 3.6 GB")
+    } else {
+        ("z_image_turbo-Q6_K.gguf", "about 4.9 GB")
+    };
+    files.extend([
         setup_file(
-            "Qwen Image Edit",
-            "Novice25/Qwen-Image-Edit-Rapid-AIO-GGUF",
-            image_file,
-            root.join(
-                Path::new(image_file)
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("Qwen-Rapid-NSFW-v23_Q4_K.gguf"),
-            ),
-            image_size,
+            "Z-Image Turbo",
+            "leejet/Z-Image-Turbo-GGUF",
+            model_file,
+            root.join(model_file),
+            model_size,
         ),
         setup_file(
             "Image text encoder",
-            "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
-            encoder_file,
-            root.join("text_encoders").join(encoder_file),
-            encoder_size,
-        ),
-        setup_file(
-            "Image projector",
-            "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
-            "Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf",
-            root.join("text_encoders")
-                .join("Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf"),
-            "about 814 MB",
+            "WeReCooking/flux2-klein-4B-uncensored-text-encoder",
+            "qwen3-4b-abl-q4_0.gguf",
+            root.join("qwen3-4b-abl-q4_0.gguf"),
+            "about 2.3 GB",
         ),
         setup_file(
             "Image VAE",
-            "QuantStack/Qwen-Image-Edit-GGUF",
-            "VAE/Qwen_Image-VAE.safetensors",
-            root.join("vae").join("qwen_image_vae.safetensors"),
-            "about 500 MB",
+            "Kijai/flux-fp8",
+            "flux-vae-bf16.safetensors",
+            root.join("ae.safetensors"),
+            "about 320 MB",
         ),
-    ]
+    ]);
+    files
 }
 
 fn absolute_from_display(path: &str) -> PathBuf {
@@ -531,57 +546,7 @@ fn omnivoice_engine_installed() -> bool {
 
 fn image_runtime_installed() -> bool {
     let root = app_root_dir().join("bin").join("stable-diffusion");
-    root.join("sd-cli.exe").exists() && root.join("stable-diffusion.dll").exists()
-}
-
-fn brain_metadata_installed(tier: &str) -> bool {
-    let model_yml = brain_model_folder_for_tier(tier).join("model.yml");
-    model_yml
-        .metadata()
-        .map(|meta| meta.len() > 32)
-        .unwrap_or(false)
-}
-
-fn write_brain_model_yml(tier: &str) -> Result<(), String> {
-    let folder = brain_model_folder_for_tier(tier);
-    let model = folder.join("model.gguf");
-    let mmproj = folder.join("mmproj.gguf");
-    let model_bytes = std::fs::metadata(&model)
-        .map_err(|e| format!("Could not read installed brain model metadata: {}", e))?
-        .len();
-    let mmproj_bytes = std::fs::metadata(&mmproj)
-        .map(|meta| meta.len())
-        .unwrap_or(0);
-    let total_bytes = model_bytes.saturating_add(mmproj_bytes);
-    let name = folder
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("galaxy-brain");
-    let relative_model = model
-        .strip_prefix(app_root_dir())
-        .unwrap_or(&model)
-        .display()
-        .to_string()
-        .replace('\\', "/");
-    let relative_mmproj = mmproj
-        .strip_prefix(app_root_dir())
-        .unwrap_or(&mmproj)
-        .display()
-        .to_string()
-        .replace('\\', "/");
-    let content = if mmproj.exists() {
-        format!(
-            "embedding: false\nmmproj_path: {}\nmodel_path: {}\nname: {}\nsize_bytes: {}\n",
-            relative_mmproj, relative_model, name, total_bytes
-        )
-    } else {
-        format!(
-            "embedding: false\nmodel_path: {}\nname: {}\nsize_bytes: {}\n",
-            relative_model, name, total_bytes
-        )
-    };
-    std::fs::write(folder.join("model.yml"), content)
-        .map_err(|e| format!("Could not write model.yml: {}", e))
+    root.join("sd-server.exe").exists() && root.join("stable-diffusion.dll").exists()
 }
 
 fn part_key_for_file(file: &SetupFile) -> String {
@@ -594,9 +559,16 @@ fn part_key_for_file(file: &SetupFile) -> String {
         .to_lowercase();
     if destination.contains("/brain/") {
         "brain".to_string()
+    } else if extract_to.contains("/voice-tts/bin") {
+        "voice_helper".to_string()
     } else if destination.contains("/voice-tts/") {
         "voice".to_string()
-    } else if destination.contains("/qwen-edit/") || extract_to.contains("/stable-diffusion") {
+    } else if destination.contains("/voice/models/") {
+        "voice_helper".to_string()
+    } else if destination.contains("/qwen-edit/")
+        || destination.contains("/z-image-turbo/")
+        || extract_to.contains("/stable-diffusion")
+    {
         "image".to_string()
     } else {
         String::new()
@@ -703,7 +675,7 @@ fn extract_archive(file: &SetupFile, archive_path: &Path) -> Result<(), String> 
     }
     if extract_to.ends_with(Path::new("bin").join("stable-diffusion")) && !image_runtime_installed()
     {
-        if let Some(runtime_dir) = find_dir_containing(&extract_to, "sd-cli.exe") {
+        if let Some(runtime_dir) = find_dir_containing(&extract_to, "sd-server.exe") {
             copy_runtime_files(&runtime_dir, &extract_to)?;
         }
     }
@@ -729,7 +701,16 @@ fn remove_incomplete_download(temp: &Path) {
 
 fn run_curl_download(file: &SetupFile, temp: &Path, resume: bool) -> Result<(), String> {
     let mut command = Command::new("curl.exe");
-    command.arg("--ssl-no-revoke").arg("-L").arg("--fail");
+    command
+        .arg("--ssl-no-revoke")
+        .arg("-L")
+        .arg("--fail")
+        .arg("--retry")
+        .arg("3")
+        .arg("--retry-delay")
+        .arg("2")
+        .arg("--connect-timeout")
+        .arg("20");
     if resume {
         command.arg("-C").arg("-");
     }
@@ -744,14 +725,26 @@ fn run_curl_download(file: &SetupFile, temp: &Path, resume: bool) -> Result<(), 
     Ok(())
 }
 
+fn minimum_download_bytes(file: &SetupFile) -> u64 {
+    let destination = file.destination.replace('\\', "/").to_ascii_lowercase();
+    if destination.ends_with(".json") || destination.ends_with(".txt") {
+        16
+    } else if destination.ends_with(".download") {
+        1024
+    } else {
+        1024 * 1024
+    }
+}
+
 fn install_downloaded_file(
     file: &SetupFile,
     temp: &Path,
     destination: &Path,
 ) -> Result<(), String> {
+    let min_bytes = minimum_download_bytes(file);
     if temp
         .metadata()
-        .map(|meta| meta.len() <= 1024 * 1024)
+        .map(|meta| meta.len() < min_bytes)
         .unwrap_or(true)
     {
         return Err(format!("Downloaded file looks incomplete: {}", file.label));
@@ -856,9 +849,6 @@ fn setup_files_for_part(
 }
 
 fn write_metadata_for_part(tier: &str, part_key: &str) -> Result<(), String> {
-    if part_key == "brain" {
-        write_brain_model_yml(tier)?;
-    }
     if part_key == "voice_helper" {
         write_voice_helper_marker(tier)?;
     }
@@ -895,7 +885,7 @@ pub fn get_setup_catalog(tier: String, has_nvidia_gpu: Option<bool>) -> SetupCat
             SetupPartCatalog {
                 key: "brain".to_string(),
                 title: "Brain".to_string(),
-                installed: files_installed(&brain) && brain_metadata_installed(&tier),
+                installed: files_installed(&brain),
                 files: brain,
             },
             SetupPartCatalog {
@@ -1072,9 +1062,8 @@ pub async fn install_setup_bundle(
             None,
             file_count,
             file_count,
-            "Writing model metadata...".to_string(),
+            "Finalizing local companion models...".to_string(),
         );
-        write_brain_model_yml(&install_tier)?;
         write_voice_helper_marker(&install_tier)?;
         emit_progress(
             &app,
@@ -1139,4 +1128,55 @@ pub async fn install_setup_part(
     })
     .await
     .map_err(|e| format!("Installer task failed: {}", e))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_progress_maps_every_part_file_to_component_key() {
+        for tier in ["light", "balanced", "high"] {
+            for file in brain_files(tier) {
+                assert_eq!(part_key_for_file(&file), "brain", "{:?}", file);
+            }
+            for file in voice_files(tier) {
+                assert_eq!(part_key_for_file(&file), "voice", "{:?}", file);
+            }
+            for file in voice_helper_files(tier) {
+                assert_eq!(part_key_for_file(&file), "voice_helper", "{:?}", file);
+            }
+            for file in image_files(tier, true) {
+                assert_eq!(part_key_for_file(&file), "image", "{:?}", file);
+            }
+        }
+    }
+
+    #[test]
+    fn setup_allows_small_metadata_downloads_but_not_empty_files() {
+        let json = setup_file(
+            "Whisper config",
+            "example/repo",
+            "config.json",
+            PathBuf::from("assistant-runtime/voice/models/test/config.json"),
+            "about 3 KB",
+        );
+        let text = setup_file(
+            "Whisper vocabulary",
+            "example/repo",
+            "vocabulary.txt",
+            PathBuf::from("assistant-runtime/voice/models/test/vocabulary.txt"),
+            "about 460 KB",
+        );
+        let model = setup_file(
+            "Model",
+            "example/repo",
+            "model.bin",
+            PathBuf::from("assistant-runtime/voice/models/test/model.bin"),
+            "about 145 MB",
+        );
+        assert_eq!(minimum_download_bytes(&json), 16);
+        assert_eq!(minimum_download_bytes(&text), 16);
+        assert_eq!(minimum_download_bytes(&model), 1024 * 1024);
+    }
 }

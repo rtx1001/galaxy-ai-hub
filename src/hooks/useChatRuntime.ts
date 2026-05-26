@@ -314,7 +314,7 @@ ${personalityMemory.trim()}`
           thinking: thinkingEnabled ? generatedThinking || last.thinking : undefined,
         }));
         if (reactResult.file_preview) {
-          enrichPreviewPerception(assistantMessageId, reactResult.file_preview).catch((error: unknown) =>
+          enrichPreviewPerception(finalizedAssistantIds[0] ?? assistantMessageId, reactResult.file_preview).catch((error: unknown) =>
             console.error("Preview perception enrichment error:", error),
           );
         }

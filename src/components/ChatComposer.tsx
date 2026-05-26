@@ -62,6 +62,10 @@ export function ChatComposer({
   onClearChat,
   onToggleQuickModelMenu,
   onSelectModel,
+  longTaskNotice,
+  longTaskLabel,
+  onKeepLongTaskRunning,
+  onStopLongTask,
 }: {
   pendingShellActions: PendingShellAction[];
   executingShellActionId: number | null;
@@ -102,6 +106,10 @@ export function ChatComposer({
   onClearChat: () => void;
   onToggleQuickModelMenu: () => void;
   onSelectModel: (path: string) => void;
+  longTaskNotice: boolean;
+  longTaskLabel: string;
+  onKeepLongTaskRunning: () => void;
+  onStopLongTask: () => void;
 }) {
   const activeSend = isStreaming || sendInFlight;
   const canSend = composerHasText || Boolean(image);
@@ -109,6 +117,39 @@ export function ChatComposer({
   return (
     <footer className="shrink-0 border-t border-[#282a2c] bg-[#131314] px-4 py-4">
       <div className="mx-auto w-full max-w-5xl rounded-[30px] border border-[#282a2c] bg-[#1e1f20] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
+        {longTaskNotice && (
+          <div className="mb-3 overflow-hidden rounded-[22px] border border-[var(--accent-soft-strong)] bg-[#131314] shadow-[0_12px_30px_rgba(0,0,0,0.28)]">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold text-[#e3e3e3]">
+                  <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent-color)] shadow-[0_0_16px_var(--accent-color)]" />
+                  <span>{longTaskLabel} is still running</span>
+                </div>
+                <div className="mt-1 text-xs text-[#c4c7c5]">
+                  It has been running for over 2 minutes. It will keep running if you do nothing.
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onKeepLongTaskRunning}
+                  className="rounded-full border border-[#282a2c] bg-[#1e1f20] px-3.5 py-2 text-xs font-semibold text-[#e3e3e3] transition hover:bg-[#282a2c]"
+                >
+                  Keep running
+                </button>
+                <button
+                  type="button"
+                  onClick={onStopLongTask}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-rose-500/35 bg-rose-500/12 text-rose-200 transition hover:bg-rose-500/20"
+                  title="Stop task"
+                >
+                  <StopIcon className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {pendingShellActions.length > 0 && (
           <div className="mb-3 space-y-2">
             {pendingShellActions.map((action) => (
