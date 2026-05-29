@@ -112,9 +112,15 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     }
 
     sendInFlightRef.current = true;
+    const requestStartedAt = performance.now();
+    const messageCreatedAt = Date.now();
     const requestId = activeChatRequestRef.current + 1;
     activeChatRequestRef.current = requestId;
     const isRequestStale = () => activeChatRequestRef.current !== requestId;
+    const replyTiming = () => ({
+      completed_at: Date.now(),
+      duration_ms: Math.max(0, Math.round(performance.now() - requestStartedAt)),
+    });
 
     let content: string | ChatContentPart[] = promptText;
     if (attachedImage) {
@@ -128,6 +134,7 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
       id: createMessageId(),
       role: "user",
       content,
+      created_at: messageCreatedAt,
     };
 
     if (!sendOptions.silentUser) {
@@ -168,7 +175,10 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     const assistantMessageId = createMessageId();
     setComposerNotice("");
     const newMessages: ChatMessage[] = [...messages, userMessage];
-    setMessages((prev: ChatMessage[]) => [...prev, { id: assistantMessageId, role: "assistant", content: "" }]);
+    setMessages((prev: ChatMessage[]) => [
+      ...prev,
+      { id: assistantMessageId, role: "assistant", content: "", created_at: Date.now() },
+    ]);
     if (attachedImage && !sendOptions.imageDataUrl) {
       clearImage();
     }
@@ -265,6 +275,7 @@ ${personalityMemory.trim()}`
           repeatPenalty,
           maxTokens: replyLength,
           thinkingEnabled,
+          requestElapsedMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
         });
         if (isRequestStale()) {
           return;
@@ -284,6 +295,7 @@ ${personalityMemory.trim()}`
             ...last,
             content: generatedText,
             thinking: thinkingEnabled ? generatedThinking || last.thinking : undefined,
+            ...replyTiming(),
           }));
           const elapsedSeconds = Math.max(0.1, (performance.now() - generationStartedAt) / 1000);
           setLastTokenSpeed(estimateTokens(generatedText) / elapsedSeconds);
@@ -312,6 +324,7 @@ ${personalityMemory.trim()}`
           ...last,
           content: structuredParts.length > 1 ? structuredParts : generatedText,
           thinking: thinkingEnabled ? generatedThinking || last.thinking : undefined,
+          ...replyTiming(),
         }));
         if (reactResult.file_preview) {
           enrichPreviewPerception(finalizedAssistantIds[0] ?? assistantMessageId, reactResult.file_preview).catch((error: unknown) =>
@@ -478,6 +491,7 @@ ${personalityMemory.trim()}`
         ...last,
         content: generatedText,
         thinking: thinkingEnabled ? generatedThinking.trim() || last.thinking : undefined,
+        ...replyTiming(),
       }));
       await updatePersonalityMemoryAfterTurn(promptText, generatedText);
       if (liveConversationRef.current) {
@@ -498,7 +512,7 @@ ${personalityMemory.trim()}`
         .catch(() => {});
       if (error instanceof Error && error.name === "AbortError") {
         updateLastAssistantMessage((last: ChatMessage) =>
-          last.content === "" ? { ...last, content: "[Stopped]" } : last,
+          last.content === "" ? { ...last, content: "[Stopped]", ...replyTiming() } : { ...last, ...replyTiming() },
         );
         setComposerNotice("Stopped.");
         setBrainStatus("Ready");
@@ -509,6 +523,7 @@ ${personalityMemory.trim()}`
         finalizeAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
           ...last,
           content: partialReply,
+          ...replyTiming(),
         }));
         setComposerNotice(
           error instanceof Error
@@ -523,6 +538,7 @@ ${personalityMemory.trim()}`
             error instanceof Error
               ? `[Error: ${error.message}]`
               : "[Error: Connection to the brain failed.]",
+          ...replyTiming(),
         }));
         setBrainStatus("Error");
         failed = true;

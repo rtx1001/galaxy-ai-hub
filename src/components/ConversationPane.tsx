@@ -6,6 +6,17 @@ import { FilePreviewCard, ToolResultCards, ImageProposalCard, ActionProposalCard
 import { FormattedMessageText } from "./ChatBubble";
 import { ChevronDownIcon, ChevronUpIcon, FolderIcon, SpeakerIcon, StopIcon, TrashIcon } from "./Icons";
 
+const formatBubbleTimestamp = (value?: number) => {
+  if (!value) return "";
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+};
+
+const formatReplyDuration = (value?: number) => {
+  if (typeof value !== "number" || value < 0) return "";
+  const seconds = Math.max(1, Math.round(value / 1000));
+  return `${seconds}s`;
+};
+
 export function ConversationPane({
   scrollRef,
   endRef,
@@ -123,6 +134,10 @@ export function ConversationPane({
             const hasImageContent = Array.isArray(message.content) && message.content.some((part) => part.type === "image_url");
             const hasApprovalContent = Array.isArray(message.content) && message.content.some((part) => part.type === "image_proposal" || part.type === "action_proposal");
             const isTypingIndicator = message.role === "assistant" && message.content === "" && index === messages.length - 1 && isStreaming;
+            const messageComplete = !isTypingIndicator && (message.role === "user" || Boolean(message.completed_at || message.duration_ms || messageText.trim() || hasImageContent || hasApprovalContent));
+            const bubbleTimestamp = messageComplete ? formatBubbleTimestamp(message.created_at) : "";
+            const replyDuration = messageComplete && message.role === "assistant" ? formatReplyDuration(message.duration_ms) : "";
+            const hasBubbleFooter = Boolean(bubbleTimestamp || replyDuration || firstImagePath || firstImagePartKey || canSpeak);
 
             return (
               <div key={message.id} data-message-id={message.id} className={`chat-message-row flex items-start gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -195,21 +210,27 @@ export function ConversationPane({
                     <FormattedMessageText text={message.content} compact={message.role === "user"} />
                   )}
 
-                  {(firstImagePath || canSpeak) && (
+                  {hasBubbleFooter && (
                     <div className="mt-2 flex items-center justify-between gap-3">
-                      {firstImagePath ? (
-                        <button
-                          type="button"
-                          title="Open image folder"
-                          onClick={() => onRevealImageLocation(firstImagePath)}
-                          className="flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
-                        >
-                          <FolderIcon className="h-4 w-4" />
-                        </button>
-                      ) : (
-                        <span className="h-8 w-8" />
-                      )}
+                      <div className="flex min-w-0 items-center gap-2">
+                        {(bubbleTimestamp || replyDuration) && (
+                          <span className="chat-bubble-meta min-w-0 text-[10px] font-semibold leading-none text-[#9aa0a6]">
+                            {bubbleTimestamp}
+                            {replyDuration ? ` - ${replyDuration}` : ""}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2">
+                        {firstImagePath && (
+                          <button
+                            type="button"
+                            title="Open image folder"
+                            onClick={() => onRevealImageLocation(firstImagePath)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
+                          >
+                            <FolderIcon className="h-4 w-4" />
+                          </button>
+                        )}
                         {firstImagePartKey && (
                           <button
                             type="button"

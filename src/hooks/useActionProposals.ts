@@ -216,6 +216,7 @@ export function useActionProposals(options: UseActionProposalsOptions) {
 
   const approveActionProposal = async (messageId: string, partIndex: number, proposal: ActionProposal) => {
     options.setIsApproving(true);
+    const startedAt = performance.now();
     try {
       console.log("Approving action:", proposal.action_type, proposal.arguments);
       const rawResult = await executeActionProposal(proposal);
@@ -227,6 +228,9 @@ export function useActionProposals(options: UseActionProposalsOptions) {
           id: createMessageId(),
           role: "assistant",
           content: naturalResultText,
+          created_at: Date.now(),
+          completed_at: Date.now(),
+          duration_ms: Math.max(0, Math.round(performance.now() - startedAt)),
         },
       ]);
       return;

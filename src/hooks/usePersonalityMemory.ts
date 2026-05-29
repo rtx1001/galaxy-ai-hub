@@ -3,8 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ChatMessage } from "../types";
 import {
   MemoryItem,
-  includesAnyPhrase,
-  normalizeIntentText,
+  compactMemoryWithBrain,
+  formatStructuredMemoryForPrompt,
+  mergeTurnIntoMemoryLocally,
 } from "../appCore";
 
 type UsePersonalityMemoryOptions = {
@@ -21,36 +22,6 @@ type UsePersonalityMemoryOptions = {
 
 const personalityMemoryKind = (id: string) => `personality:${id}`;
 
-const compactPersonalityMemory = (memory: string, feedback: string) => {
-  const cleanFeedback = feedback.replace(/\s+/g, " ").trim();
-  if (!cleanFeedback) return memory.trim();
-  const bullet = `- ${cleanFeedback}`;
-  const existing = memory
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => line !== bullet);
-  const next = [...existing, bullet].slice(-14).join("\n");
-  return next.length > 2200 ? next.slice(next.length - 2200).replace(/^[^\n]*\n?/, "") : next;
-};
-
-const isPersonalityTrainingFeedback = (text: string) => {
-  const lower = normalizeIntentText(text);
-  return includesAnyPhrase(lower, [
-    "remember",
-    "learn",
-    "from now on",
-    "answer like",
-    "dont answer",
-    "do not answer",
-    "bad answer",
-    "good answer",
-    "format like",
-    "style like",
-    "sai",
-  ]);
-};
-
 export function usePersonalityMemory({
   settingsLoaded,
   selectedPersonalityId,
@@ -64,24 +35,52 @@ export function usePersonalityMemory({
 }: UsePersonalityMemoryOptions) {
   const [personalityMemory, setPersonalityMemory] = useState("");
   const personalityMemoryShadowRef = useRef<Record<string, string>>({});
+  const rawPersonalityMemoryShadowRef = useRef<Record<string, string>>({});
+  const memoryUpdateSeqRef = useRef(0);
 
-  const updatePersonalityMemoryAfterTurn = async (userText: string, answerText: string) => {
-    if (!selectedPersonalityId || !isPersonalityTrainingFeedback(userText)) return;
-    const feedback = `User feedback: ${userText}${answerText.trim() ? ` | Last answer summary: ${answerText.trim().slice(0, 220)}` : ""}`;
-    const nextMemory = compactPersonalityMemory(personalityMemory, feedback);
-    setPersonalityMemory(nextMemory);
-    personalityMemoryShadowRef.current[selectedPersonalityId] = nextMemory;
-    try {
-      await invoke<MemoryItem>("remember_local_memory", {
-        kind: personalityMemoryKind(selectedPersonalityId),
-        key: "compact_style_memory",
-        value: nextMemory,
-        source: "personality_training",
-        confidence: 0.9,
+  const saveRawMemory = async (
+    personalityId: string,
+    rawMemory: string,
+    source: string,
+  ) => {
+    await invoke<MemoryItem>("remember_local_memory", {
+      kind: personalityMemoryKind(personalityId),
+      key: "compact_style_memory",
+      value: rawMemory,
+      source,
+      confidence: 0.92,
+    });
+  };
+
+  const applyRawMemory = (personalityId: string, rawMemory: string) => {
+    const promptMemory = formatStructuredMemoryForPrompt(rawMemory);
+    rawPersonalityMemoryShadowRef.current[personalityId] = rawMemory;
+    personalityMemoryShadowRef.current[personalityId] = promptMemory;
+    setPersonalityMemory(promptMemory);
+  };
+
+  const updatePersonalityMemoryAfterTurn = (userText: string, answerText: string) => {
+    if (!selectedPersonalityId) return;
+    const personalityId = selectedPersonalityId;
+    const currentRaw = rawPersonalityMemoryShadowRef.current[personalityId] ?? "";
+    const localRaw = mergeTurnIntoMemoryLocally(currentRaw, userText, answerText);
+    if (localRaw === currentRaw) return;
+    const updateSeq = memoryUpdateSeqRef.current + 1;
+    memoryUpdateSeqRef.current = updateSeq;
+    applyRawMemory(personalityId, localRaw);
+    saveRawMemory(personalityId, localRaw, "auto_compact_local").catch((error) =>
+      console.error("Personality memory save error:", error),
+    );
+
+    void compactMemoryWithBrain(localRaw, userText, answerText)
+      .then((brainRaw) => {
+        if (memoryUpdateSeqRef.current !== updateSeq) return;
+        applyRawMemory(personalityId, brainRaw);
+        return saveRawMemory(personalityId, brainRaw, "auto_compact_brain");
+      })
+      .catch((error) => {
+        console.error("Personality memory compaction error:", error);
       });
-    } catch (error) {
-      console.error("Personality memory save error:", error);
-    }
   };
 
   const deletePersonalityMemory = async (personalityId: string) => {
@@ -101,6 +100,8 @@ export function usePersonalityMemory({
     try {
       await deletePersonalityMemory(selectedPersonalityId);
       setPersonalityMemory("");
+      personalityMemoryShadowRef.current[selectedPersonalityId] = "";
+      rawPersonalityMemoryShadowRef.current[selectedPersonalityId] = "";
       if (clearSessionToo) {
         await invoke<boolean>("delete_personality_chat_session", { personalityId: selectedPersonalityId });
         setMessages([]);
@@ -120,14 +121,14 @@ export function usePersonalityMemory({
       limit: 20,
     })
       .then((items) => {
-        const memory = items.find((item) => item.key === "compact_style_memory")?.value || "";
-        setPersonalityMemory(memory);
-        personalityMemoryShadowRef.current[selectedPersonalityId] = memory;
+        const rawMemory = items.find((item) => item.key === "compact_style_memory")?.value || "";
+        applyRawMemory(selectedPersonalityId, rawMemory);
       })
       .catch((error) => {
         console.error("Personality memory load error:", error);
         setPersonalityMemory("");
         personalityMemoryShadowRef.current[selectedPersonalityId] = "";
+        rawPersonalityMemoryShadowRef.current[selectedPersonalityId] = "";
       });
   }, [settingsLoaded, selectedPersonalityId]);
 
@@ -143,12 +144,11 @@ export function usePersonalityMemory({
           limit: 20,
         });
         if (!active) return;
-        const nextMemory = items.find((item) => item.key === "compact_style_memory")?.value || "";
-        if ((personalityMemoryShadowRef.current[selectedPersonalityId] ?? "") === nextMemory) {
+        const nextRawMemory = items.find((item) => item.key === "compact_style_memory")?.value || "";
+        if ((rawPersonalityMemoryShadowRef.current[selectedPersonalityId] ?? "") === nextRawMemory) {
           return;
         }
-        personalityMemoryShadowRef.current[selectedPersonalityId] = nextMemory;
-        setPersonalityMemory(nextMemory);
+        applyRawMemory(selectedPersonalityId, nextRawMemory);
       } catch (error) {
         console.error("Personality memory sync error:", error);
       }

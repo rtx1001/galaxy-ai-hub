@@ -171,10 +171,11 @@ option {
 .chat-message-row {
   content-visibility: auto;
   contain-intrinsic-size: 180px;
+  padding-block: 1px;
 }
 
 .chat-bubble {
-  contain: paint;
+  contain: layout style;
 }
 
 .chat-bubble,

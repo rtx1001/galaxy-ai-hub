@@ -9,6 +9,9 @@ export type ChatMessage = {
       role: "user" | "assistant";
       content: string | ChatContentPart[];
       thinking?: string;
+      created_at?: number;
+      completed_at?: number;
+      duration_ms?: number;
     };
 export type ChatSessions = Record<string, ChatMessage[]>;
 export type EngineInfo = {

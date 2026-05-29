@@ -86,16 +86,17 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
 
     const assistantMessageId = createMessageId();
     options.setIsGeneratingImage(true);
+    const imageTaskStartedAt = performance.now();
     options.setMessages((prev) => [
       ...prev,
       {
         id: assistantMessageId,
         role: "assistant",
         content: "Sending image...",
+        created_at: Date.now(),
       },
     ]);
     options.setComposerText("");
-    const imageTaskStartedAt = performance.now();
     const imageRunInput = {
       mode,
       prompt,
@@ -129,6 +130,8 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
           { type: "text", text: naturalReply || "" },
           { type: "image_url", image_url: { url: imageUrl, local_path: result.file_path } },
         ],
+        completed_at: Date.now(),
+        duration_ms: Math.max(0, Math.round(performance.now() - imageTaskStartedAt)),
       }));
       if (options.liveConversationRef.current && naturalReply.trim()) {
         options.autoSpeechEligibleAssistantIdsRef.current.add(assistantMessageId);
@@ -153,6 +156,8 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
       options.updateLastAssistantMessage((last) => ({
         ...last,
         content: error instanceof Error ? error.message : String(error),
+        completed_at: Date.now(),
+        duration_ms: Math.max(0, Math.round(performance.now() - imageTaskStartedAt)),
       }));
     } finally {
       options.setIsGeneratingImage(false);

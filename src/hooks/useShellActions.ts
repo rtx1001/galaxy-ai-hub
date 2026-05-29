@@ -107,6 +107,7 @@ export function useShellActions({
 
   const approveShellAction = async (action: PendingShellAction) => {
     setExecutingShellActionId(action.id);
+    const startedAt = performance.now();
     try {
       const result = await invoke<ShellExecutionResult>("execute_shell_action", {
         id: action.id,
@@ -132,6 +133,9 @@ export function useShellActions({
           id: createMessageId(),
           role: "assistant",
           content: formatShellResult(result),
+          created_at: Date.now(),
+          completed_at: Date.now(),
+          duration_ms: Math.max(0, Math.round(performance.now() - startedAt)),
         },
       ]);
     } catch (error) {
