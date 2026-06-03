@@ -56,7 +56,9 @@ pub(super) fn omnivoice_engine_installed() -> bool {
 
 pub(super) fn image_runtime_installed() -> bool {
     let root = app_root_dir().join("bin").join("stable-diffusion");
-    root.join("sd-server.exe").exists() && root.join("stable-diffusion.dll").exists()
+    let server_exists =
+        root.join("sd-server.exe").exists() || root.join("sd-server-galaxy.exe").exists();
+    server_exists && root.join("stable-diffusion.dll").exists()
 }
 
 pub(super) fn part_key_for_file(file: &SetupFile) -> String {

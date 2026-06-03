@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ToolResultCard, ImageProposal, ActionProposal, FilePreviewResult, GoogleCalendarEvent } from "../types";
-import { formatBytes, toolCardStyle, fieldValue, compactDetailsForKind, cleanDisplayPath } from "../utils";
+import { formatBytes, toolCardStyle, fieldValue, compactDetailsForKind, cleanDisplayPath, localAssetUrl, pauseOtherMediaElements } from "../utils";
 import { ChevronDownIcon, FolderOpenIcon, TrashIcon } from "./Icons";
 
 type DisplayLanguage = "en" | "vi";
@@ -29,6 +29,8 @@ export function FilePreviewCard({
     const labels = uiText(language);
     const mime = preview.mime_type.toLowerCase();
     const dataUrl = preview.data_url || "";
+    const assetUrl = localAssetUrl(preview.path);
+    const mediaUrl = assetUrl || dataUrl;
     return (
     <div className="overflow-hidden rounded-3xl border border-[#282a2c] bg-[#131314]">
       <div className="border-b border-[#282a2c] px-4 py-3">
@@ -40,17 +42,17 @@ export function FilePreviewCard({
         </div>
       </div>
       <div className="p-3">
-        {mime.startsWith("image/") && dataUrl && (
-          <img src={dataUrl} alt={preview.name} className="max-h-[520px] w-full rounded-2xl object-contain" />
+        {mime.startsWith("image/") && mediaUrl && (
+          <img src={mediaUrl} alt={preview.name} className="max-h-[520px] w-full rounded-2xl object-contain" />
         )}
-        {mime.startsWith("audio/") && dataUrl && (
-          <audio src={dataUrl} controls className="w-full" />
+        {mime.startsWith("audio/") && mediaUrl && (
+          <audio src={mediaUrl} controls onPlay={(event) => pauseOtherMediaElements(event.currentTarget)} className="w-full" />
         )}
-        {mime.startsWith("video/") && dataUrl && (
-          <video src={dataUrl} controls className="max-h-[520px] w-full rounded-2xl bg-black" />
+        {mime.startsWith("video/") && mediaUrl && (
+          <video src={mediaUrl} controls onPlay={(event) => pauseOtherMediaElements(event.currentTarget)} className="max-h-[520px] w-full rounded-2xl bg-black" />
         )}
-        {mime === "application/pdf" && dataUrl && (
-          <iframe title={preview.name} src={dataUrl} className="h-[520px] w-full rounded-2xl bg-[#0f1011]" />
+        {mime === "application/pdf" && mediaUrl && (
+          <iframe title={preview.name} src={mediaUrl} className="h-[520px] w-full rounded-2xl bg-[#0f1011]" />
         )}
         {preview.text !== null && (
           <pre className="max-h-[520px] overflow-auto whitespace-pre-wrap rounded-2xl bg-[#0f1011] p-3 text-xs leading-6 text-[#dfe3ea] ring-1 ring-[#282a2c]">
@@ -63,7 +65,7 @@ export function FilePreviewCard({
             <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap font-sans">{preview.perception}</pre>
           </details>
         )}
-        {!dataUrl && preview.text === null && (
+        {!mediaUrl && preview.text === null && (
           <div className="text-sm text-[#c4c7c5]">This file type cannot be displayed inside chat yet.</div>
         )}
       </div>

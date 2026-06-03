@@ -480,15 +480,42 @@ pub(super) fn build_telegram_user_content(text: &str, files: &[TelegramIncomingF
 }
 
 pub(super) fn load_personality_memory(personality_id: &str) -> String {
-    list_local_memory(Some(personality_memory_kind(personality_id)), Some(20))
-        .ok()
-        .and_then(|items| {
-            items
-                .into_iter()
-                .find(|item| item.key == "compact_style_memory")
-                .map(|item| item.value)
+    let items = list_local_memory(Some(personality_memory_kind(personality_id)), Some(500))
+        .unwrap_or_default();
+    let summary = items
+        .iter()
+        .find(|item| item.key == "compact_style_memory")
+        .map(|item| item.value.clone())
+        .unwrap_or_default();
+    let mut structured = parse_structured_memory(&summary);
+    let mut event_turns = items
+        .iter()
+        .filter(|item| item.key.starts_with("event:"))
+        .filter_map(|item| {
+            let value = serde_json::from_str::<serde_json::Value>(&item.value).ok()?;
+            let user = value.get("user").and_then(serde_json::Value::as_str).unwrap_or_default();
+            let assistant = value
+                .get("assistant")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let turn = [
+                (!user.trim().is_empty()).then(|| format!("User: {}", compact_memory_line(user, 260))),
+                (!assistant.trim().is_empty())
+                    .then(|| format!("Assistant: {}", compact_memory_line(assistant, 260))),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" | ");
+            (!turn.is_empty()).then_some((item.created_at, turn))
         })
-        .unwrap_or_default()
+        .collect::<Vec<_>>();
+    event_turns.sort_by_key(|(created_at, _)| *created_at);
+    for (_, turn) in event_turns.into_iter().rev().take(8).collect::<Vec<_>>().into_iter().rev() {
+        structured.recent_turns.retain(|item| item != &turn);
+        structured.recent_turns.push(turn);
+    }
+    serialize_structured_memory(structured)
 }
 
 pub(super) fn update_personality_memory_after_turn(
@@ -497,18 +524,27 @@ pub(super) fn update_personality_memory_after_turn(
     user_text: &str,
     answer_text: &str,
 ) -> String {
-    let next_memory = compact_personality_memory(current_memory, user_text, answer_text);
-    if next_memory == current_memory.trim() {
+    let clean_user = compact_memory_line(user_text, 1200);
+    let clean_answer = compact_memory_line(answer_text, 1200);
+    if clean_user.is_empty() && clean_answer.is_empty() {
         return current_memory.to_string();
     }
+    let now_ms = chrono::Local::now().timestamp_millis();
+    let event_value = serde_json::json!({
+        "user": clean_user,
+        "assistant": clean_answer,
+        "created_at": now_ms
+    })
+    .to_string();
+    let event_key = format!("event:{}:telegram", now_ms);
     let _ = remember_local_memory(
         personality_memory_kind(personality_id),
-        "compact_style_memory".to_string(),
-        next_memory.clone(),
-        Some("auto_compact_telegram".to_string()),
-        Some(0.92),
+        event_key,
+        event_value,
+        Some("memory_event_telegram".to_string()),
+        Some(0.86),
     );
-    next_memory
+    compact_personality_memory(current_memory, user_text, answer_text)
 }
 
 pub(super) fn build_personality_runtime_prompt(

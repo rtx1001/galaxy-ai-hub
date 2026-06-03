@@ -49,6 +49,36 @@ const proposalJsonPayload = (proposal: ActionProposal, key: string) => {
   return JSON.stringify(value);
 };
 
+const stripReasoningLeak = (text: string) => {
+  let cleaned = text.trim();
+  const finalMarkers = [
+    "Final answer:",
+    "Final reply:",
+    "Response:",
+    "Reply:",
+  ];
+  for (const marker of finalMarkers) {
+    const index = cleaned.toLowerCase().lastIndexOf(marker.toLowerCase());
+    if (index >= 0) {
+      cleaned = cleaned.slice(index + marker.length).trim();
+      break;
+    }
+  }
+  if (/^here'?s a thinking process\b/i.test(cleaned) || /^thinking process\b/i.test(cleaned)) {
+    const lastParagraph = cleaned
+      .split(/\n\s*\n/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .filter((part) => !/^(?:\d+\.|\*|\-)\s/.test(part))
+      .pop();
+    return lastParagraph || "";
+  }
+  return cleaned
+    .replace(/<\/?think>/gi, "")
+    .replace(/^\s*(?:analysis|reasoning|thoughts?)\s*:\s*/i, "")
+    .trim();
+};
+
 export function useActionProposals(options: UseActionProposalsOptions) {
   const dismissImageProposal = (messageId: string, proposalIndex: number) => {
     options.setMessages((prev) =>
@@ -191,11 +221,15 @@ export function useActionProposals(options: UseActionProposalsOptions) {
           min_p: options.minP,
           repeat_last_n: options.repeatLastN,
           repeat_penalty: options.repeatPenalty,
-          max_tokens: Math.min(160, options.replyLength),
+          max_tokens: Math.min(240, options.replyLength),
+          chat_template_kwargs: {
+            enable_thinking: false,
+            thinking: false,
+          },
           messages: [
             {
               role: "system",
-              content: `Turn a verified system/tool result into one short, natural assistant reply. ${languageHint} Do not expose message IDs, raw API wording, JSON, tool names, or backend status unless the user explicitly needs it.`,
+              content: `Turn a verified system/tool result into one short, natural assistant reply. ${languageHint} Final answer only. Do not include thinking, analysis, plans, drafts, labels, message IDs, raw API wording, JSON, tool names, or backend status unless the user explicitly needs it.`,
             },
             {
               role: "user",
@@ -207,7 +241,7 @@ export function useActionProposals(options: UseActionProposalsOptions) {
       if (!response.ok) return trimmed;
       const body = await response.json();
       const reply = extractChoiceText(body?.choices?.[0]);
-      return reply.visible.trim() || reply.fallback.trim() || trimmed;
+      return stripReasoningLeak(reply.visible.trim() || reply.fallback.trim()) || trimmed;
     } catch (error) {
       console.error("Naturalize system result error:", error);
       return trimmed;

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+export const NEW_MESSAGE_BOTTOM_ROOM = 10;
+
 export function useConversationScroll({
   markUiInteraction,
   messagesLength,
@@ -25,7 +27,7 @@ export function useConversationScroll({
   const scrollToBottom = useCallback(() => {
     if (conversationScrollRef.current) {
       conversationScrollRef.current.scrollTo({
-        top: conversationScrollRef.current.scrollHeight,
+        top: Math.max(0, conversationScrollRef.current.scrollHeight - NEW_MESSAGE_BOTTOM_ROOM),
         behavior: "smooth",
       });
     }
@@ -35,7 +37,7 @@ export function useConversationScroll({
     const container = conversationScrollRef.current;
     if (!container) return;
     container.scrollTo({
-      top: container.scrollHeight,
+      top: Math.max(0, container.scrollHeight - NEW_MESSAGE_BOTTOM_ROOM),
       behavior: "auto",
     });
   }, []);
@@ -61,7 +63,7 @@ export function useConversationScroll({
       const container = conversationScrollRef.current;
       if (!container) return;
       container.scrollTo({
-        top: container.scrollHeight,
+        top: Math.max(0, container.scrollHeight - NEW_MESSAGE_BOTTOM_ROOM),
         behavior: "auto",
       });
     });

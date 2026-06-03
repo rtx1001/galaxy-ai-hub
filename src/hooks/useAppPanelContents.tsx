@@ -29,7 +29,6 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
     googleStatus,
     googleClientId,
     googleClientSecret,
-    googleRedirectUri,
     handleAddLinkedFolder,
     handleChooseModelFolder,
     handleChooseVoiceFolder,
@@ -203,7 +202,6 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       googleBusy={googleBusy}
       googleClientId={googleClientId}
       googleClientSecret={googleClientSecret}
-      googleRedirectUri={googleRedirectUri}
       onOpenUserProfile={openUserProfile}
       onToggleUserMenu={() => {
         const next = !userProfileMenuOpen;
@@ -248,7 +246,6 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       onToggleGoogle={setGooglePanelOpen}
       onGoogleClientIdChange={options.setGoogleClientId}
       onGoogleClientSecretChange={options.setGoogleClientSecret}
-      onGoogleRedirectUriChange={options.setGoogleRedirectUri}
       onConnectToggleGoogle={() =>
         (googleStatus.connected ? options.disconnectGoogle() : options.connectGoogle()).catch((error: unknown) =>
           console.error(googleStatus.connected ? "Google disconnect error:" : "Google connect error:", error),

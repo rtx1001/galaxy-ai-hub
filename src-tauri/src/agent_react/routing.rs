@@ -230,6 +230,7 @@ pub(super) fn request_wants_web_search(text: &str) -> bool {
         && (request_has_search_intent(text) || request_has_question_intent(text))
 }
 
+#[cfg(test)]
 pub(super) fn request_is_conversational_turn(text: &str) -> bool {
     if request_is_casual_weather_observation(text) {
         return true;
@@ -353,6 +354,7 @@ pub(super) fn previous_explicit_route(messages: &[ReactChatMessage]) -> Option<T
         .and_then(|(_, message)| route_for_request(&content_text(&message.content)))
 }
 
+#[cfg(test)]
 pub(super) fn request_adds_context_details(text: &str) -> bool {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
@@ -389,6 +391,7 @@ pub(super) fn request_adds_context_details(text: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 pub(super) fn is_contextual_follow_up(text: &str) -> bool {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);

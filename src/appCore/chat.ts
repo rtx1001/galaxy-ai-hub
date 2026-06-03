@@ -106,7 +106,7 @@ export const THEME_SWATCHS: ThemeSwatch[] = [
 export const filePreviewContextText = (preview: FilePreviewResult) => {
   const mime = preview.mime_type.toLowerCase();
   const lines = [
-    "File preview shown in this conversation:",
+    "Previous file preview context. Do not present this as a new result unless a tool runs again:",
     `Title: ${preview.name}`,
     `Type: ${preview.mime_type || preview.extension || "file"}`,
     `Path: ${preview.path}`,
@@ -326,7 +326,13 @@ export const compactContentForStorage = (content: ChatMessage["content"]): ChatM
         return part;
       }
       if (part.type === "file_preview") {
-        return part;
+        return {
+          type: "file_preview",
+          file_preview: {
+            ...part.file_preview,
+            data_url: null,
+          },
+        };
       }
       return null;
     })

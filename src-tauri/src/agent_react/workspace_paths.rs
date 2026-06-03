@@ -8,6 +8,29 @@ pub(super) fn normalize_roots(folders: &[String]) -> Vec<PathBuf> {
         .collect()
 }
 
+fn workspace_folder_error(folders: &[String]) -> String {
+    if folders.iter().all(|folder| folder.trim().is_empty()) {
+        return "No workspace folder is permitted.".to_string();
+    }
+    let missing = folders
+        .iter()
+        .filter_map(|folder| {
+            let trimmed = folder.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            (!PathBuf::from(trimmed).is_dir()).then(|| trimmed.to_string())
+        })
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return format!(
+            "Workspace folder no longer exists or cannot be opened: {}",
+            missing.join("; ")
+        );
+    }
+    "No workspace folder is permitted.".to_string()
+}
+
 pub(super) fn path_is_within(path: &Path, root: &Path) -> bool {
     path == root || path.starts_with(root)
 }
@@ -18,7 +41,7 @@ pub(super) fn resolve_directory(
 ) -> Result<PathBuf, String> {
     let roots = normalize_roots(folders);
     if roots.is_empty() {
-        return Err("No workspace folder is permitted.".to_string());
+        return Err(workspace_folder_error(folders));
     }
 
     let Some(raw) = input.map(str::trim).filter(|value| !value.is_empty()) else {
@@ -26,9 +49,17 @@ pub(super) fn resolve_directory(
     };
 
     let candidate = PathBuf::from(raw.trim_matches('"'));
+    if candidate.is_absolute() && !candidate.exists() {
+        return Err(format!(
+            "Workspace folder no longer exists or cannot be opened: {}",
+            candidate.display()
+        ));
+    }
     let resolved = if candidate.exists() {
         std::fs::canonicalize(candidate)
             .map_err(|e| format!("Could not inspect directory: {}", e))?
+    } else if raw.contains(':') || raw.contains('\\') || raw.contains('/') {
+        return Err(format!("Directory does not exist or cannot be opened: {}", raw));
     } else {
         roots[0].join(raw)
     };

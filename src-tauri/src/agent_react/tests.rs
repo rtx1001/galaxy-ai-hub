@@ -71,13 +71,27 @@ fn tool_schema_and_validator_names_stay_in_sync() {
                 .map(str::to_string)
         })
         .collect::<Vec<_>>();
-    let mut available = AVAILABLE_TOOL_NAMES
-        .iter()
-        .map(|name| name.to_string())
+    let mut available = available_tool_names()
+        .into_iter()
+        .map(str::to_string)
         .collect::<Vec<_>>();
     schema_names.sort_unstable();
     available.sort_unstable();
     assert_eq!(schema_names, available);
+}
+
+#[test]
+fn windows_path_recovery_stops_at_existing_folder_prefix() {
+    let root = temp_test_dir("path_recovery");
+    let music = root.join("Music");
+    std::fs::create_dir_all(&music).expect("create music folder");
+    let text = format!(
+        "open something from {} after this extra conversational text",
+        music.display()
+    );
+    let recovered = executor::explicit_windows_path_from_text(&text).expect("path recovered");
+    assert_eq!(std::path::PathBuf::from(recovered), music);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -100,35 +114,13 @@ fn media_capability_exposes_only_media_preview_tools() {
 }
 
 #[test]
-fn invalid_music_tool_alias_repairs_to_random_audio_preview() {
-    let repaired = repair_tool_call_for_capability(
-        ToolCall {
-            tool: "play_music".to_string(),
-            arguments: json!({ "query": "random song" }),
-        },
-        Some(ToolRoute::MediaPreview),
-        "open a random song",
-    );
-    assert_eq!(repaired.tool, "preview_random_media");
-    assert_eq!(
-        repaired.arguments.get("kind").and_then(Value::as_str),
-        Some("audio")
-    );
-}
-
-#[test]
-fn qwen_reasoning_music_alias_repairs_without_raw_tool_markup() {
-    let repaired = repair_tool_call_from_model_text(
-        "I should call play_music for an audio file.",
-        Some(ToolRoute::MediaPreview),
-        "mở một bài hát ngẫu nhiên",
-    )
-    .expect("repaired tool call");
-    assert_eq!(repaired.tool, "preview_random_media");
-    assert_eq!(
-        repaired.arguments.get("kind").and_then(Value::as_str),
-        Some("audio")
-    );
+fn invalid_tool_alias_is_not_repaired() {
+    let error = validate_tool_call(&ToolCall {
+        tool: "play_music".to_string(),
+        arguments: json!({ "query": "random song" }),
+    })
+    .expect_err("unknown tool names must be rejected instead of repaired");
+    assert!(error.contains("Unknown tool 'play_music'"));
 }
 
 #[test]
@@ -163,12 +155,10 @@ fn reasoning_style_asks_for_brief_uncertainty_handling() {
 fn task_state_centralizes_image_tool_requirement() {
     let latest = "create an image of a tiny glass house under rain";
     let state = derive_conversation_task_state(latest, None, None, false, false);
-    assert!(state.requires_tool());
-    assert!(state.image_required);
-    assert_eq!(state.route_text(), "image generation");
-    assert!(state
-        .allowed_tool_names()
-        .contains("propose_image_generation"));
+    assert!(!state.requires_tool());
+    assert!(!state.image_required);
+    assert_eq!(state.route_text(), "none");
+    assert!(state.allowed_tool_names().contains("weather_forecast"));
 }
 
 #[test]
@@ -182,19 +172,6 @@ fn task_state_leaves_normal_chat_ungated() {
     );
     assert!(!state.requires_tool());
     assert_eq!(state.route_text(), "none");
-}
-
-#[test]
-fn vietnamese_image_generation_intent_uses_unicode_terms() {
-    assert!(request_effectively_wants_image_generation(
-        "em vẽ cho anh hình ảnh một cái lắc tay thật đẹp làm quà xem nào",
-        None,
-        false,
-        false
-    ));
-    assert!(request_wants_avatar_image_generation(
-        "em gửi ảnh của em đang ngồi trong ô tô cho anh xem"
-    ));
 }
 
 #[test]
@@ -336,7 +313,7 @@ fn english_media_request_does_not_invent_language_filter() {
 
 #[test]
 fn generic_song_query_does_not_filter_random_audio() {
-    let terms = media_constraint_terms("mở cho anh một bài hát nào đó nghe đi", Some("bài hát"));
+    let terms = media_constraint_terms("play a random song", Some("song"));
     assert!(
         terms.is_empty(),
         "generic media labels should not become filename constraints: {:?}",
@@ -426,26 +403,21 @@ fn user_avatar_image_requests_select_user_avatar_modes() {
 
 #[test]
 fn image_request_requires_planner_tool_call() {
-    assert!(request_effectively_wants_image_generation(
-        "em vẽ cho anh hình ảnh một cái lắc tay thật đẹp làm quà xem nào",
+    let state = derive_conversation_task_state(
+        "create an image of a bracelet on a gift table",
+        None,
         None,
         false,
         false,
-    ));
-    assert!(!request_effectively_wants_image_generation(
-        "anh cần ảnh đường phố nhà cửa hiện đại đổ nát",
-        None,
-        false,
-        false,
-    ));
+    );
+    assert!(!state.image_required);
+    let instruction = tool_planner_instruction("create an image of a bracelet", &state, 0);
+    assert!(instruction.contains("Use propose_image_generation"));
 }
 
 #[test]
 fn image_generation_request_is_not_misrouted_as_media_preview() {
     let text = "hay bây giờ em tạo ảnh khác ở khu vực hồ gươm, nhìn thấy hồ gươm anh xem";
-    assert!(request_effectively_wants_image_generation(
-        text, None, true, false
-    ));
     assert_eq!(route_for_request(text), None);
 }
 
@@ -685,11 +657,37 @@ fn detects_unexecuted_tool_narration_as_not_verified_answer() {
     assert!(looks_like_unexecuted_tool_narration(
         "*Calling preview_random_media for audio...*\n[Bai hat will be displayed here]"
     ));
-    assert!(looks_like_unexecuted_tool_narration(
+    assert!(!looks_like_unexecuted_tool_narration(
         "Em sẽ gọi hàm preview_random_media rồi hiển thị kết quả tool."
     ));
     assert!(!looks_like_unexecuted_tool_narration(
         "Dạ, em đã mở bài hát này cho anh."
+    ));
+}
+
+#[test]
+fn internal_file_preview_context_is_not_a_verified_new_result() {
+    assert!(looks_like_unexecuted_tool_narration(
+        "File preview shown in this conversation:\nTitle: old-song.mp3\nPath: D:\\Music\\old-song.mp3"
+    ));
+    assert!(looks_like_unexecuted_tool_narration(
+        "Previous file preview context. Do not present this as a new result unless a tool runs again:\nTitle: old-song.mp3"
+    ));
+}
+
+#[test]
+fn file_artifact_claims_need_verified_tool_results() {
+    assert!(answer_claims_verified_workspace_result(
+        "I found these files:\n- love_song_classic.mp3\n- guitar_solo_chill.flac"
+    ));
+    assert!(answer_claims_verified_workspace_result(
+        "File preview shown in this conversation:\nTitle: song.mp3\nPath: E:\\Music\\song.mp3"
+    ));
+    assert!(!answer_claims_verified_workspace_result(
+        "I can help, but I need the exact folder first."
+    ));
+    assert!(!answer_claims_verified_workspace_result(
+        "I'm sorry you're feeling sad. I can stay here and talk with you."
     ));
 }
 
@@ -726,6 +724,50 @@ Path: D:\Music\song.mp3"
         .expect("exclude paths");
     assert_eq!(
         excludes.first().and_then(Value::as_str),
+        Some(r"D:\Music\song.mp3")
+    );
+}
+
+#[test]
+fn media_list_tool_is_promoted_to_preview_after_recent_preview_context() {
+    let messages = vec![
+        ReactChatMessage {
+            role: "user".to_string(),
+            content: json!("play a random song"),
+        },
+        ReactChatMessage {
+            role: "assistant".to_string(),
+            content: json!(
+                r"File preview shown in this conversation:
+Title: song.mp3
+Type: audio/mpeg
+Path: D:\Music\song.mp3"
+            ),
+        },
+        ReactChatMessage {
+            role: "user".to_string(),
+            content: json!("another one"),
+        },
+    ];
+    let call = promote_media_list_to_preview_in_preview_flow(
+        ToolCall {
+            tool: "list_media_files".to_string(),
+            arguments: json!({ "kind": "audio" }),
+        },
+        &messages,
+        "another one",
+    );
+    assert_eq!(call.tool, "preview_random_media");
+    assert_eq!(
+        call.arguments.get("kind").and_then(Value::as_str),
+        Some("audio")
+    );
+    assert_eq!(
+        call.arguments
+            .get("exclude_paths")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(Value::as_str),
         Some(r"D:\Music\song.mp3")
     );
 }
@@ -1436,14 +1478,20 @@ fn gemma_pipe_call_tool_call_with_prompt_wrapper_is_recovered() {
 }
 
 #[test]
-fn gemma_toolcall_without_underscore_and_compact_tool_name_is_recovered() {
+fn gemma_toolcall_without_underscore_and_compact_tool_name_is_not_repaired() {
     let text = r#"<|toolcall>call:proposeimagegeneration{prompt:<|"|>A romantic rainy night scene.<|"|>}<toolcall|>"#;
     let parsed = first_model_tool_call(&json!({}), text).expect("fallback tool call");
-    assert_eq!(parsed.0, "propose_image_generation");
+    assert_eq!(parsed.0, "proposeimagegeneration");
     assert_eq!(
         parsed.1.get("prompt").and_then(Value::as_str),
         Some("A romantic rainy night scene.")
     );
+    let error = validate_tool_call(&ToolCall {
+        tool: parsed.0,
+        arguments: parsed.1,
+    })
+    .expect_err("compact invented names must be rejected");
+    assert!(error.contains("Unknown tool 'proposeimagegeneration'"));
 }
 
 #[test]
@@ -1516,16 +1564,12 @@ fn recent_pending_image_proposal_is_reused_for_confirmation() {
         ];
     let proposal = recent_pending_image_proposal(&messages).expect("recent proposal");
     assert_eq!(proposal.prompt, "Doraemon climbing a mountain");
-    assert!(request_effectively_wants_image_generation(
-        "ok",
-        Some(&proposal),
-        false,
-        false
-    ));
+    let state = derive_conversation_task_state("ok", None, Some(&proposal), false, false);
+    assert!(!state.image_required);
 }
 
 #[test]
-fn short_confirmation_reuses_recent_image_creation_context() {
+fn short_confirmation_does_not_force_recent_image_creation_context() {
     let messages = vec![
             ReactChatMessage {
                 role: "assistant".to_string(),
@@ -1535,14 +1579,16 @@ fn short_confirmation_reuses_recent_image_creation_context() {
                 role: "user".to_string(),
                 content: json!("ok"),
             },
-        ];
-    assert!(recent_unresolved_image_creation_context(&messages));
-    assert!(request_effectively_wants_image_generation(
+    ];
+    assert!(!recent_unresolved_image_creation_context(&messages));
+    let state = derive_conversation_task_state(
         "ok",
         None,
+        None,
         false,
-        recent_unresolved_image_creation_context(&messages)
-    ));
+        recent_unresolved_image_creation_context(&messages),
+    );
+    assert!(!state.image_required);
 }
 
 #[test]
@@ -1618,12 +1664,6 @@ fn image_edit_followup_requires_image_tool_when_recent_image_exists() {
         },
     ];
     assert!(recent_image_context(&messages));
-    assert!(request_effectively_wants_image_generation(
-        "oke em sửa đi",
-        None,
-        recent_image_context(&messages),
-        false
-    ));
     let call = ToolCall {
         tool: "propose_image_generation".to_string(),
         arguments: json!({
@@ -1923,6 +1963,12 @@ fn approval_reply_uses_latest_user_language_only() {
         image_approval_answer(user_wants_vietnamese(latest_user_text)),
         "I can create this image. Approve it when you're ready."
     );
+}
+
+#[test]
+fn non_confirmation_image_followup_does_not_count_as_confirmation() {
+    assert!(!is_confirmation("make a different image idea"));
+    assert!(!is_confirmation("create another completely new concept"));
 }
 
 #[test]

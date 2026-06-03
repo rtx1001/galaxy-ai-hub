@@ -65,6 +65,15 @@ fn empty_react_result(answer: String, thinking: Option<String>) -> ReactChatResu
     }
 }
 
+fn tool_protocol_failure_answer(vietnamese: bool) -> String {
+    if vietnamese {
+        "Em chưa thực hiện được thao tác đó. Anh thử gửi lại yêu cầu một lần nữa giúp em nhé."
+            .to_string()
+    } else {
+        "I could not complete that action. Please try the request once more.".to_string()
+    }
+}
+
 #[tauri::command]
 pub async fn agent_jan_chat(
     runtime_prompt: String,
@@ -180,6 +189,8 @@ pub async fn agent_jan_chat_core(
     let mut last_tool: Option<String> = None;
     let mut last_observation: Option<String> = None;
     let mut last_cards: Vec<ToolResultCard> = Vec::new();
+    let mut planner_task_state = task_state.clone();
+    let mut tool_repair_used = false;
     if is_confirmation(&latest_text) {
         if let Some(proposal) = pending_image_proposal.clone() {
             let outcome = image_proposal_outcome(proposal.clone(), vi);
@@ -202,44 +213,31 @@ pub async fn agent_jan_chat_core(
         }
     }
 
-    let first_step_contract_call: Option<ToolCall> = None;
+    let max_tool_steps = if task_state.image_required {
+        2
+    } else if task_state.requires_tool() {
+        4
+    } else {
+        2
+    };
 
-    for step in 0..8 {
-        let (planned_tool_call, planner_thinking) = if step == 0 {
-            if let Some(call) = first_step_contract_call.clone() {
-                (
-                    Some(call),
-                    "Tool planning: weather request has a clear location/date from the conversation, so the app used the safe read-only weather tool directly.".to_string(),
-                )
-            } else {
-                plan_next_tool_call(
-                    &request_messages,
-                    &tools,
-                    sampling,
-                    &latest_text,
-                    &task_state,
-                    step,
-                )
-                .await?
-            }
-        } else {
-            plan_next_tool_call(
-                &request_messages,
-                &tools,
-                sampling,
-                &latest_text,
-                &task_state,
-                step,
-            )
-            .await?
-        };
+    for step in 0..max_tool_steps {
+        let (planned_tool_call, planner_thinking) = plan_next_tool_call(
+            &request_messages,
+            &tools,
+            sampling,
+            &latest_text,
+            &planner_task_state,
+            step,
+        )
+        .await?;
         append_thinking(&mut accumulated_thinking, &planner_thinking);
 
         let raw_tool_call = match planned_tool_call {
             Some(raw_tool_call) => raw_tool_call,
             None => {
                 let tool_required_this_turn = task_state.requires_tool();
-                if tool_required_this_turn && step < 7 {
+                if tool_required_this_turn && step + 1 < max_tool_steps {
                     request_messages.push(json!({
                         "role": "system",
                         "content": "Planner correction: this user turn needs a tool. Produce exactly one valid structured tool call, or output NO_TOOL only when a required argument is missing. Do not answer the user in this planner step."
@@ -257,19 +255,56 @@ pub async fn agent_jan_chat_core(
                 if let Some((name, arguments, _, _)) =
                     first_model_tool_call(&json!({}), &assistant_text)
                 {
-                    append_thinking(
-                        &mut accumulated_thinking,
-                        "Tool protocol repair: the model produced a tool call in assistant text, so the app will treat it as the intended structured tool call instead of showing it to the user.",
-                    );
-                    ensure_image_tool_call_prompt_english(
-                        ToolCall {
-                            tool: name,
-                            arguments,
-                        },
-                        &latest_text,
-                        sampling,
-                    )
-                    .await?
+                    let candidate = ToolCall {
+                        tool: name.clone(),
+                        arguments: arguments.clone(),
+                    };
+                    if validate_tool_call(&candidate).is_ok() {
+                        append_thinking(
+                            &mut accumulated_thinking,
+                            &format!(
+                                "Tool protocol repair: converted an exact known tool name from hidden model text into a structured candidate for validation. Tool: {}.",
+                                candidate.tool
+                            ),
+                        );
+                        candidate
+                    } else {
+                        let invalid_detail = validate_tool_call(&candidate).err().unwrap_or_else(|| {
+                            format!(
+                                "Tool call '{}' appeared in final answer text instead of the private planner.",
+                                name
+                            )
+                        });
+                        append_thinking(
+                            &mut accumulated_thinking,
+                            &format!(
+                                "Tool protocol violation: final answer contained a tool call. {}",
+                                invalid_detail
+                            ),
+                        );
+                        if !tool_repair_used {
+                            tool_repair_used = true;
+                            planner_task_state = ConversationTaskState::tool_repair(
+                                "the previous draft emitted raw or invalid tool markup instead of using the private planner",
+                            );
+                            request_messages.push(json!({
+                                "role": "system",
+                                "content": format!(
+                                    "Protocol error: final answer text contained a raw or invalid tool call. {} Return to the private planner for one retry. Use exactly one real tool from the fixed tool list when a tool is needed. Otherwise output NO_TOOL.",
+                                    invalid_detail
+                                )
+                            }));
+                            continue;
+                        }
+                        append_thinking(
+                            &mut accumulated_thinking,
+                            "Tool protocol repair was already attempted once; stopping instead of looping.",
+                        );
+                        return Ok(empty_react_result(
+                            tool_protocol_failure_answer(vi),
+                            thinking_result(thinking_enabled, &accumulated_thinking),
+                        ));
+                    }
                 } else if let Some(proposal) = parse_pending_image_proposal_text(&assistant_text) {
                     request_messages.push(json!({
                         "role": "system",
@@ -282,7 +317,18 @@ pub async fn agent_jan_chat_core(
                 } else {
                     let leaked_tool_narration =
                         looks_like_unexecuted_tool_narration(&assistant_text);
+                    let unverified_workspace_claim =
+                        last_observation.is_none()
+                            && answer_claims_verified_workspace_result(&assistant_text);
+                    let failed_tool_claim =
+                        last_observation
+                            .as_deref()
+                            .map(|observation| observation.trim_start().starts_with("ERROR:"))
+                            .unwrap_or(false)
+                            && answer_claims_verified_workspace_result(&assistant_text);
                     if leaked_tool_narration
+                        || unverified_workspace_claim
+                        || failed_tool_claim
                         || (last_observation.is_none()
                             && answer_claims_unverified_tool_result(&assistant_text, &task_state))
                     {
@@ -293,29 +339,25 @@ pub async fn agent_jan_chat_core(
                             }));
                             continue;
                         }
-                        if leaked_tool_narration {
+                        if !tool_repair_used {
+                            tool_repair_used = true;
+                            planner_task_state = ConversationTaskState::tool_repair(
+                                "the previous draft claimed a tool result without a verified observation",
+                            );
                             request_messages.push(json!({
                                 "role": "system",
-                                "content": "Protocol error: the final answer exposed tool markup or claimed a tool action without a verified observation. Do not mention tool calls. Either answer directly without tools, or if the user still needs an action, ask for the missing detail plainly."
+                                "content": "Protocol repair: the previous draft claimed a tool result without a verified tool observation. Return to the private planner for one retry. Use exactly one real tool from the fixed tool list when a tool is needed. If the action is unclear, output NO_TOOL so the final answer can ask one short clarification."
                             }));
                             continue;
                         }
-                        let answer = assistant_text
-                            .strip_prefix("RESPONSE:")
-                            .unwrap_or(&assistant_text)
-                            .trim()
-                            .to_string();
-                        return Ok(ReactChatResult {
-                            answer,
-                            thinking: thinking_result(thinking_enabled, &accumulated_thinking),
-                            tool_used: last_tool,
-                            observation: last_observation,
-                            cards: last_cards,
-                            image_proposal: None,
-                            file_preview: None,
-                            action_proposal: None,
-                            tool_trace,
-                        });
+                        append_thinking(
+                            &mut accumulated_thinking,
+                            "Tool protocol repair was already attempted once; stopping instead of looping.",
+                        );
+                        return Ok(empty_react_result(
+                            tool_protocol_failure_answer(vi),
+                            thinking_result(thinking_enabled, &accumulated_thinking),
+                        ));
                     } else {
                         let answer = assistant_text
                             .strip_prefix("RESPONSE:")
@@ -338,7 +380,11 @@ pub async fn agent_jan_chat_core(
             }
         };
 
-        let tool_call = enrich_contextual_tool_call(raw_tool_call, &messages, &latest_text);
+        let tool_call = promote_media_list_to_preview_in_preview_flow(
+            enrich_contextual_tool_call(raw_tool_call, &messages, &latest_text),
+            &messages,
+            &latest_text,
+        );
         if let Err(error) = validate_tool_call(&tool_call) {
             push_tool_validation_error(&mut request_messages, "planner_tool_call", false, error);
             continue;
@@ -444,7 +490,7 @@ pub async fn agent_jan_chat_core(
             });
         }
 
-        if step == 7 {
+        if step + 1 == max_tool_steps {
             break;
         }
     }
@@ -458,104 +504,49 @@ pub async fn agent_jan_chat_core(
             .await?;
     append_thinking(&mut accumulated_thinking, &final_thinking);
     if let Some((name, arguments, _, _)) = first_model_tool_call(&json!({}), &answer) {
+        let invalid_detail = validate_tool_call(&ToolCall {
+            tool: name.clone(),
+            arguments,
+        })
+        .err()
+        .unwrap_or_else(|| {
+            format!(
+                "Tool call '{}' appeared after the tool loop ended instead of in the private planner.",
+                name
+            )
+        });
         append_thinking(
             &mut accumulated_thinking,
-            "Tool protocol repair: the final answer contained a raw tool call, so the app executed it instead of showing the markup.",
+            &format!(
+                "Tool protocol violation: final answer contained a tool call after the tool loop ended. {}",
+                invalid_detail
+            ),
         );
-        let tool_call = ensure_image_tool_call_prompt_english(
-            ToolCall {
-                tool: name,
-                arguments,
-            },
-            &latest_text,
-            sampling,
-        )
-        .await?;
-        if let Err(error) = validate_tool_call(&tool_call) {
-            return Ok(empty_react_result(
-                format!("The planned tool call was invalid: {}", error),
-                thinking_result(thinking_enabled, &accumulated_thinking),
-            ));
-        }
-        if let Err(error) = tool_allowed_for_context(&tool_call, &messages) {
-            return Ok(empty_react_result(
-                format!(
-                    "The planned tool call did not match this request: {}",
-                    error
-                ),
-                thinking_result(thinking_enabled, &accumulated_thinking),
-            ));
-        }
-        let outcome = execute_tool(
-            &tool_call,
-            &folders,
-            &google_client_id,
-            &google_client_secret,
-            agent_started_at,
-            request_elapsed_ms,
-        )
-        .await;
-        let summary = clean_summary(&outcome.observation);
-        tool_trace.push(ToolTrace {
-            tool: tool_call.tool.clone(),
-            success: outcome.success,
-            summary,
-        });
-        last_tool = Some(tool_call.tool);
-        last_observation = Some(outcome.observation.clone());
-        last_cards = outcome.cards.clone();
-
-        if let Some(proposal) = outcome.image_proposal {
-            return Ok(ReactChatResult {
-                answer: image_approval_answer(vi),
-                thinking: thinking_result(thinking_enabled, &accumulated_thinking),
-                tool_used: last_tool,
-                observation: last_observation,
-                cards: last_cards,
-                image_proposal: Some(proposal),
-                file_preview: None,
-                action_proposal: None,
-                tool_trace,
-            });
-        }
-        if let Some(action) = outcome.action_proposal {
-            return Ok(ReactChatResult {
-                answer: action_approval_answer(vi),
-                thinking: thinking_result(thinking_enabled, &accumulated_thinking),
-                tool_used: last_tool,
-                observation: last_observation,
-                cards: last_cards,
-                image_proposal: None,
-                file_preview: None,
-                action_proposal: Some(action),
-                tool_trace,
-            });
-        }
-        if let Some(preview) = outcome.file_preview {
-            return Ok(ReactChatResult {
-                answer: preview_final_answer(&preview, &latest_text),
-                thinking: thinking_result(thinking_enabled, &accumulated_thinking),
-                tool_used: last_tool,
-                observation: last_observation,
-                cards: last_cards,
-                image_proposal: None,
-                file_preview: Some(preview),
-                action_proposal: None,
-                tool_trace,
-            });
-        }
-
-        return Ok(ReactChatResult {
-            answer: verified_answer_from_cards(&last_cards, &outcome.observation, &latest_text),
-            thinking: thinking_result(thinking_enabled, &accumulated_thinking),
-            tool_used: last_tool,
-            observation: last_observation,
-            cards: last_cards,
-            image_proposal: None,
-            file_preview: None,
-            action_proposal: None,
-            tool_trace,
-        });
+        return Ok(empty_react_result(
+            "I could not complete that action because the model produced an invalid tool call format. Please try again.".to_string(),
+            thinking_result(thinking_enabled, &accumulated_thinking),
+        ));
+    }
+    let unverified_workspace_claim =
+        last_observation.is_none() && answer_claims_verified_workspace_result(&answer);
+    let failed_tool_claim = last_observation
+        .as_deref()
+        .map(|observation| observation.trim_start().starts_with("ERROR:"))
+        .unwrap_or(false)
+        && answer_claims_verified_workspace_result(&answer);
+    if looks_like_unexecuted_tool_narration(&answer)
+        || unverified_workspace_claim
+        || failed_tool_claim
+        || (last_observation.is_none() && answer_claims_unverified_tool_result(&answer, &task_state))
+    {
+        append_thinking(
+            &mut accumulated_thinking,
+            "Tool protocol violation: final answer claimed a tool/media result without a verified observation.",
+        );
+        return Ok(empty_react_result(
+            tool_protocol_failure_answer(vi),
+            thinking_result(thinking_enabled, &accumulated_thinking),
+        ));
     }
     if answer.trim().is_empty() && last_observation.is_none() {
         return Ok(empty_react_result(

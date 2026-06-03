@@ -7,6 +7,28 @@ import {
   normalizeCalendarEventForDisplay,
 } from "../appCore";
 
+const GOOGLE_RECONNECT_NOTICE = "Google needs sign-in again.";
+const GOOGLE_REDIRECT_URI = "http://127.0.0.1:8765/google/callback";
+
+function googleErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    message.includes("invalid_grant") ||
+    message.toLowerCase().includes("expired or revoked") ||
+    message.toLowerCase().includes("needs sign-in again")
+  ) {
+    return GOOGLE_RECONNECT_NOTICE;
+  }
+  if (message.toLowerCase().includes("not connected")) {
+    return "Google is not connected.";
+  }
+  return "Google connection failed. Please try again.";
+}
+
+function googleNeedsReconnect(error: unknown) {
+  return googleErrorMessage(error) === GOOGLE_RECONNECT_NOTICE;
+}
+
 export function useGoogleCalendar({
   automationMonth,
   initialClientId,
@@ -45,7 +67,7 @@ export function useGoogleCalendar({
       return status;
     } catch (error) {
       console.error("Google status error:", error);
-      setGoogleNotice(error instanceof Error ? error.message : String(error));
+      setGoogleNotice(googleErrorMessage(error));
       return null;
     }
   };
@@ -82,16 +104,16 @@ export function useGoogleCalendar({
       );
     } catch (error) {
       console.error("Google Calendar load error:", error);
-      setGoogleNotice(error instanceof Error ? error.message : String(error));
+      if (googleNeedsReconnect(error)) {
+        setGoogleStatus((current) => ({ ...current, connected: false }));
+        setGoogleCalendarEvents([]);
+      }
+      setGoogleNotice(googleErrorMessage(error));
     }
   };
 
   const connectGoogle = async () => {
-    if (
-      !googleClientId.trim() ||
-      !googleClientSecret.trim() ||
-      !googleRedirectUri.trim()
-    ) {
+    if (!googleClientId.trim() || !googleClientSecret.trim()) {
       setGoogleNotice("Add your Google OAuth Client ID and Secret first.");
       return;
     }
@@ -104,7 +126,7 @@ export function useGoogleCalendar({
         {
           clientId: googleClientId,
           clientSecret: googleClientSecret,
-          redirectUri: googleRedirectUri,
+          redirectUri: GOOGLE_REDIRECT_URI,
         },
       );
       setGoogleStatus(status);
@@ -114,7 +136,7 @@ export function useGoogleCalendar({
       await refreshGoogleCalendarEvents(automationMonth, status);
     } catch (error) {
       console.error("Google connect error:", error);
-      setGoogleNotice(error instanceof Error ? error.message : String(error));
+      setGoogleNotice(googleErrorMessage(error));
     } finally {
       setGoogleBusy(false);
     }
@@ -131,7 +153,7 @@ export function useGoogleCalendar({
       setGoogleNotice("Google Calendar disconnected.");
     } catch (error) {
       console.error("Google disconnect error:", error);
-      setGoogleNotice(error instanceof Error ? error.message : String(error));
+      setGoogleNotice(googleErrorMessage(error));
     } finally {
       setGoogleBusy(false);
     }

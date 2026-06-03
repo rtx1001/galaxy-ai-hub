@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn tool_planner_instruction(
-    latest_user_text: &str,
+    _latest_user_text: &str,
     task_state: &ConversationTaskState,
     step: usize,
 ) -> String {
@@ -12,19 +12,7 @@ pub(super) fn tool_planner_instruction(
         "No recent image context was detected."
     };
     let required_hint = if image_required {
-        if request_targets_user_and_character_images(latest_user_text) {
-            "This turn needs the image tool with mode user_character_image."
-        } else if request_wants_user_avatar_image_generation(latest_user_text) {
-            "This turn needs the image tool with mode user_avatar_image."
-        } else if request_wants_avatar_image_generation(latest_user_text) {
-            "This turn needs the image tool with mode avatar_image."
-        } else if task_state.recent_image_context
-            && request_looks_like_image_edit_follow_up(latest_user_text)
-        {
-            "This turn needs the image tool with mode image_to_image."
-        } else {
-            "This turn needs the image tool with mode text_to_image unless an earlier pending proposal should be reused."
-        }
+        "This turn needs the image tool. Choose the mode from the conversation and tool schema."
     } else if let Some(route) = task_state.route {
         match route {
             ToolRoute::MediaPreview => "This turn needs a real workspace media/file preview tool.",
@@ -37,23 +25,27 @@ pub(super) fn tool_planner_instruction(
             ToolRoute::WebSearch => "This turn needs web_search.",
             ToolRoute::GoogleWorkspace => "This turn needs a Google Workspace tool.",
         }
+    } else if task_state.tool_repair_required {
+        "The previous draft claimed a tool result without a verified tool observation. Choose the real app tool that matches the requested action, or output NO_TOOL only if the action is genuinely unclear."
     } else {
         "Decide from the full meaning of the latest user message, not isolated words. Use NO_TOOL for normal conversation, opinion, writing, explanation, or anything that can be answered without external/live/local data. If the intent is unclear, output NO_TOOL so the final answer can ask a short clarification."
     };
 
     let route_text = task_state.route_text();
     let allowed_tools = task_state.allowed_tool_names();
+    let tool_knowledge = tool_knowledge_prompt(task_state.route);
     [
         "PRIVATE TOOL PLANNER. This message is not visible to the user.",
         "Your entire output must be either exactly NO_TOOL or exactly one structured tool call.",
         "Never write a user-facing answer in this planner step.",
+        tool_knowledge.as_str(),
         "Use only the exact tool names shown to you. Never invent friendly action names such as play_music, open_song, create_image, search_music, or open_file.",
         &format!("Allowed tool names for this turn: {allowed_tools}."),
         "Do not overthink. Make the smallest defensible decision from the current turn and recent context.",
         "Do not infer a tool from one keyword. Use a tool only when the full request clearly asks for app data, local files, live/external info, image generation/editing, voice, or a system/account action.",
         "Never say that a tool was called, checked, found, opened, created, or verified. Only the app may execute tools.",
         "If a sufficient verified tool result is already present in the conversation, output NO_TOOL so the final answer can be written.",
-    "Use read-only tools directly for harmless lookup/preview tasks. Use propose_* tools for writes, deletes, sending email, calendar changes, contact changes, image generation, or local system actions.",
+        "Use read-only tools directly for harmless lookup/preview tasks. Use propose_* tools for writes, deletes, sending email, calendar changes, contact changes, image generation, or local system actions.",
         "When the user asks you to create, generate, draw, edit, or send an image, do not answer with a promise, idea, or waiting message. Use propose_image_generation so the app can show an approval card.",
         "For propose_image_generation, the prompt and mask_prompt arguments must be written in English even when the user chats in another language.",
         "For propose_image_generation, write a rich, creative, context-aware English-first prompt. Do not merely translate the user's short request. Expand it into 2-4 concise sentences with subject, action, setting, style, composition/framing, lighting, mood, and must-preserve details. Keep names, places, brands, and quoted visible text exactly when useful.",
@@ -184,7 +176,6 @@ pub(super) async fn plan_next_tool_call(
     step: usize,
 ) -> Result<(Option<ToolCall>, String), String> {
     let mut accumulated_thinking = String::new();
-    let image_required = task_state.image_required;
     let tool_required = task_state.requires_tool();
     if tool_required {
         append_thinking(
@@ -207,27 +198,7 @@ pub(super) async fn plan_next_tool_call(
     }));
 
     for attempt in 0..2 {
-        let scoped_tools = if image_required {
-            let tools = tool_schema();
-            if let Some(array) = tools.as_array() {
-                Value::Array(
-                    array
-                        .iter()
-                        .filter(|tool| {
-                            tool.get("function")
-                                .and_then(|function| function.get("name"))
-                                .and_then(Value::as_str)
-                                == Some("propose_image_generation")
-                        })
-                        .cloned()
-                        .collect(),
-                )
-            } else {
-                tools
-            }
-        } else {
-            filtered_tool_schema(task_state.route)
-        };
+        let scoped_tools = filtered_tool_schema(task_state.route);
         let reply = call_chat(
             planner_messages.clone(),
             Some(scoped_tools),
@@ -240,8 +211,6 @@ pub(super) async fn plan_next_tool_call(
             &mut accumulated_thinking,
             &extract_chat_reasoning_text(&reply),
         );
-        let reasoning_text = extract_chat_reasoning_text(&reply);
-
         let choice = reply
             .get("choices")
             .and_then(Value::as_array)
@@ -267,37 +236,12 @@ pub(super) async fn plan_next_tool_call(
                     task_state.label
                 ),
             );
-            let raw_call = repair_tool_call_for_capability(
-                ToolCall {
-                    tool: name,
-                    arguments,
-                },
-                task_state.route,
-                latest_user_text,
-            );
+            let raw_call = ToolCall {
+                tool: name,
+                arguments,
+            };
             let call =
                 ensure_image_tool_call_prompt_english(raw_call, latest_user_text, sampling).await?;
-            return Ok((Some(call), accumulated_thinking));
-        }
-
-        if let Some(call) = repair_tool_call_from_model_text(
-            &format!("{assistant_text}\n{reasoning_text}"),
-            task_state.route,
-            latest_user_text,
-        ) {
-            crate::assistant_runtime::append_runtime_log(
-                "agent",
-                &format!(
-                    "planner_result step={} repaired_tool={} state={}",
-                    step + 1,
-                    call.tool,
-                    task_state.label
-                ),
-            );
-            append_thinking(
-                &mut accumulated_thinking,
-                "Tool protocol repair: converted the model's invalid action name into a valid app tool call.",
-            );
             return Ok((Some(call), accumulated_thinking));
         }
 

@@ -363,9 +363,8 @@ pub(super) fn media_constraint_query_is_generic(query: &str) -> bool {
         return true;
     }
     let generic = [
-        "a", "an", "any", "audio", "bai", "bài", "ca", "cho", "file", "hat", "hát", "listen",
-        "media", "mot", "một", "music", "nao", "nào", "nghe", "nhac", "nhạc", "open", "play",
-        "random", "song", "track",
+        "a", "an", "any", "audio", "file", "listen", "media", "music", "open", "play", "random",
+        "song", "track",
     ];
     tokens.iter().all(|token| generic.contains(token))
 }

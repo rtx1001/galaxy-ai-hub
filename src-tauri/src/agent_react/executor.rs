@@ -53,6 +53,166 @@ pub(super) fn calendar_day_range(input: Option<&str>) -> Result<(String, String)
     Ok((start.to_rfc3339(), end.to_rfc3339()))
 }
 
+fn workspace_folder_name(folder: &str) -> String {
+    std::path::Path::new(folder)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(folder)
+        .trim()
+        .to_string()
+}
+
+pub(super) fn explicit_windows_path_from_text(text: &str) -> Option<String> {
+    let chars = text.char_indices().collect::<Vec<_>>();
+    for index in 0..chars.len().saturating_sub(2) {
+        let (_, drive) = chars[index];
+        let (_, colon) = chars[index + 1];
+        let (_, slash) = chars[index + 2];
+        if !drive.is_ascii_alphabetic() || colon != ':' || !matches!(slash, '\\' | '/') {
+            continue;
+        }
+        let start = chars[index].0;
+        let mut end = text.len();
+        for (offset, ch) in chars.iter().skip(index + 3) {
+            if ch.is_control() || matches!(ch, '"' | '\'' | '`' | '<' | '>' | '|' | '\n' | '\r') {
+                end = *offset;
+                break;
+            }
+        }
+        let candidate = text[start..end]
+            .trim()
+            .trim_end_matches(|ch: char| matches!(ch, '.' | ',' | ';' | ':' | '?' | '!' | ')' | ']'))
+            .to_string();
+        if candidate.len() >= 3 {
+            if std::path::Path::new(&candidate).exists() {
+                return Some(candidate);
+            }
+            let mut best_existing_prefix = None;
+            for (offset, ch) in candidate.char_indices() {
+                if !ch.is_whitespace() {
+                    continue;
+                }
+                let prefix = candidate[..offset]
+                    .trim()
+                    .trim_end_matches(|ch: char| matches!(ch, '.' | ',' | ';' | ':' | '?' | '!' | ')' | ']'));
+                if prefix.len() >= 3 && std::path::Path::new(prefix).exists() {
+                    best_existing_prefix = Some(prefix.to_string());
+                }
+            }
+            if let Some(prefix) = best_existing_prefix {
+                return Some(prefix);
+            }
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn strip_extended_path_prefix(value: &str) -> String {
+    if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{}", rest);
+    }
+    if let Some(rest) = value.strip_prefix(r"\\?\") {
+        return rest.to_string();
+    }
+    value.to_string()
+}
+
+fn media_scope_folders(call: &ToolCall, folders: &[String], user_text: &str) -> Vec<String> {
+    let explicit_path = explicit_windows_path_from_text(user_text);
+    let requested = call
+        .arguments
+        .get("root_folder")
+        .or_else(|| call.arguments.get("folder"))
+        .and_then(Value::as_str)
+        .or(explicit_path.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if let Some(requested) = requested {
+        let requested_norm = normalize_text(requested);
+        if let Some(folder) = folders.iter().find(|folder| {
+            let folder_norm = normalize_text(folder);
+            let name_norm = normalize_text(&workspace_folder_name(folder));
+            folder_norm == requested_norm
+                || name_norm == requested_norm
+                || std::fs::canonicalize(folder)
+                    .ok()
+                    .map(|path| normalize_text(&path.to_string_lossy()))
+                    .as_deref()
+                    == Some(requested_norm.as_str())
+        }) {
+            return vec![folder.clone()];
+        }
+        if std::path::Path::new(requested).is_absolute() {
+            return vec![requested.to_string()];
+        }
+    }
+
+    let user_norm = normalize_text(user_text);
+    let named_matches = folders
+        .iter()
+        .filter(|folder| {
+            let name_norm = normalize_text(&workspace_folder_name(folder));
+            !name_norm.is_empty()
+                && name_norm.len() >= 3
+                && user_norm
+                    .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+                    .any(|token| token == name_norm)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if !named_matches.is_empty() {
+        return named_matches;
+    }
+
+    folders.to_vec()
+}
+
+fn effective_media_kind(raw_kind: String, user_text: &str) -> String {
+    let trimmed = raw_kind.trim();
+    if matches!(trimmed, "" | "any") {
+        if let Some(kind) = inferred_media_kind(user_text) {
+            return kind.to_string();
+        }
+    }
+    match normalize_text(trimmed).as_str() {
+        "song" | "songs" | "music" | "track" | "tracks" => "audio".to_string(),
+        "photo" | "photos" | "picture" | "pictures" => "image".to_string(),
+        "movie" | "movies" => "video".to_string(),
+        "doc" | "docs" => "document".to_string(),
+        _ => trimmed.to_string(),
+    }
+}
+
+fn random_preview_allows_extension(kind: &str, extension: &str) -> bool {
+    if kind.trim().eq_ignore_ascii_case("any") {
+        !matches!(
+            extension.trim().to_ascii_lowercase().as_str(),
+            "txt"
+                | "md"
+                | "log"
+                | "csv"
+                | "json"
+                | "xml"
+                | "html"
+                | "css"
+                | "js"
+                | "ts"
+                | "tsx"
+                | "jsx"
+                | "rs"
+                | "py"
+                | "toml"
+                | "yaml"
+                | "yml"
+                | "ini"
+        )
+    } else {
+        true
+    }
+}
+
 pub(super) async fn execute_tool_result(
     call: &ToolCall,
     folders: &[String],
@@ -90,7 +250,13 @@ pub(super) async fn execute_tool_result(
             Ok(outcome)
         }
         "list_files_in_directory" => {
-            let path_arg = call.arguments.get("path").and_then(Value::as_str);
+            let user_text = call_user_text(call);
+            let explicit_path = explicit_windows_path_from_text(&user_text);
+            let path_arg = call
+                .arguments
+                .get("path")
+                .and_then(Value::as_str)
+                .or(explicit_path.as_deref());
             let directory = resolve_directory(path_arg, folders)?;
             let mut rows = Vec::new();
             let mut items = Vec::new();
@@ -107,7 +273,7 @@ pub(super) async fn execute_tool_result(
                     .unwrap_or_default();
                 let kind = if path.is_dir() { "folder" } else { "file" };
                 let size = metadata.map(|value| value.len()).unwrap_or(0);
-                let path_text = path.to_string_lossy().to_string();
+                let path_text = strip_extended_path_prefix(&path.to_string_lossy());
                 rows.push(format!(
                     "{} | {} | {} bytes | {}",
                     kind, name, size, path_text
@@ -133,25 +299,27 @@ pub(super) async fn execute_tool_result(
                 });
             }
             if rows.is_empty() {
-                let observation = format!("Directory: {}\nNo items found.", directory.display());
+                let directory_text = strip_extended_path_prefix(&directory.display().to_string());
+                let observation = format!("Directory: {}\nNo items found.", directory_text);
                 let mut outcome = text_outcome(observation);
                 outcome.cards.push(simple_card(
                     "folder",
-                    directory.display().to_string(),
+                    directory_text,
                     Some("No items found.".to_string()),
                 ));
                 Ok(outcome)
             } else {
+                let directory_text = strip_extended_path_prefix(&directory.display().to_string());
                 let observation =
-                    format!("Directory: {}\n{}", directory.display(), rows.join("\n"));
+                    format!("Directory: {}\n{}", directory_text, rows.join("\n"));
                 let mut outcome = text_outcome(observation);
                 outcome.cards.push(ToolResultCard {
                     kind: "folder".to_string(),
-                    title: directory.display().to_string(),
+                    title: directory_text.clone(),
                     summary: Some(format!("{} items shown", rows.len())),
                     fields: vec![ToolResultField {
                         label: "Folder".to_string(),
-                        value: directory.display().to_string(),
+                        value: directory_text,
                     }],
                     items,
                     text: None,
@@ -160,7 +328,6 @@ pub(super) async fn execute_tool_result(
             }
         }
         "search_directory" => {
-            let user_text = call_user_text(call);
             let query = call
                 .arguments
                 .get("query")
@@ -196,52 +363,6 @@ pub(super) async fn execute_tool_result(
                     })
                     .collect::<Vec<_>>()
                     .join("\n\n");
-                let has_previewable_media = matches.iter().any(|file| {
-                    matches!(
-                        file.extension.as_str(),
-                        "mp3"
-                            | "wav"
-                            | "ogg"
-                            | "flac"
-                            | "m4a"
-                            | "aac"
-                            | "mp4"
-                            | "webm"
-                            | "mov"
-                            | "mkv"
-                            | "jpg"
-                            | "jpeg"
-                            | "png"
-                            | "gif"
-                            | "webp"
-                            | "bmp"
-                    )
-                });
-                if (should_continue_after_observation("search_directory", &user_text)
-                    || has_previewable_media)
-                    && !request_is_conversational_turn(&user_text)
-                {
-                    if let Some(preview) =
-                        first_previewable_search_result(&matches, folders, &user_text)
-                    {
-                        let preview_observation = format!(
-                            "{}\n\nPreview ready.\nTitle: {}\nType: {}\nPath: {}\nSize: {} bytes",
-                            observation,
-                            preview.name,
-                            preview.mime_type,
-                            preview.path,
-                            preview.size_bytes
-                        );
-                        return Ok(ToolOutcome {
-                            observation: preview_observation,
-                            cards: Vec::new(),
-                            file_preview: Some(preview),
-                            image_proposal: None,
-                            action_proposal: None,
-                            success: true,
-                        });
-                    }
-                }
                 let mut outcome = text_outcome(observation);
                 outcome.cards.push(files_card(
                     "file_search",
@@ -287,16 +408,20 @@ pub(super) async fn execute_tool_result(
         }
         "list_media_files" => {
             let user_text = call_user_text(call);
-            let kind = call
+            let raw_kind = call
                 .arguments
                 .get("kind")
                 .and_then(Value::as_str)
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
-                .or_else(|| inferred_media_kind(&user_text).map(str::to_string))
                 .unwrap_or_else(|| "any".to_string());
-            let matches =
-                file_tools::list_linked_media_files(kind.clone(), folders.to_vec(), Some(30))?;
+            let kind = effective_media_kind(raw_kind, &user_text);
+            let scoped_folders = media_scope_folders(call, folders, &user_text);
+            let matches = file_tools::list_linked_media_files(
+                kind.clone(),
+                scoped_folders.clone(),
+                Some(30),
+            )?;
             if matches.is_empty() {
                 let mut outcome = text_outcome(format!("No previewable {} files found.", kind));
                 outcome
@@ -331,19 +456,21 @@ pub(super) async fn execute_tool_result(
         }
         "preview_random_media" => {
             let user_text = call_user_text(call);
-            let kind = call
+            let raw_kind = call
                 .arguments
                 .get("kind")
                 .and_then(Value::as_str)
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
-                .or_else(|| inferred_media_kind(&user_text).map(str::to_string))
                 .unwrap_or_else(|| "any".to_string());
+            let kind = effective_media_kind(raw_kind, &user_text);
+            let scoped_folders = media_scope_folders(call, folders, &user_text);
             let mut matches = file_tools::list_linked_media_files(
                 kind.clone(),
-                folders.to_vec(),
+                scoped_folders.clone(),
                 Some(random_media_scan_limit()),
             )?;
+            matches.retain(|file| random_preview_allows_extension(&kind, &file.extension));
             let explicit_query = call.arguments.get("query").and_then(Value::as_str);
             let constraint_terms = media_constraint_terms(&user_text, explicit_query);
             if !constraint_terms.is_empty() {
@@ -402,7 +529,7 @@ pub(super) async fn execute_tool_result(
             let selected = &matches[random_index(total_matches)];
             let preview = file_tools::preview_linked_file(
                 selected.path.clone(),
-                folders.to_vec(),
+                scoped_folders,
                 Some(80_000_000),
             )?;
             if !preview_kind_matches_request(&preview, &user_text) {
@@ -428,6 +555,7 @@ pub(super) async fn execute_tool_result(
                 .arguments
                 .get("path")
                 .or_else(|| call.arguments.get("file"))
+                .or_else(|| call.arguments.get("file_path"))
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .trim();
@@ -1184,9 +1312,37 @@ pub(super) async fn execute_tool(
     agent_started_at: Instant,
     request_elapsed_ms: i64,
 ) -> ToolOutcome {
+    if matches!(
+        call.tool.as_str(),
+        "list_media_files" | "preview_random_media" | "preview_file" | "search_directory" | "list_files_in_directory"
+    ) {
+        crate::assistant_runtime::append_runtime_log(
+            "agent",
+            &format!(
+                "execute_tool workspace tool={} folders={} args={}",
+                call.tool,
+                folders.len(),
+                crate::assistant_runtime::compact_trace_text(&call.arguments.to_string(), 240)
+            ),
+        );
+    }
     let outcome = execute_tool_result(call, folders, google_client_id, google_client_secret)
         .await
         .unwrap_or_else(error_outcome);
+    if matches!(
+        call.tool.as_str(),
+        "list_media_files" | "preview_random_media" | "preview_file" | "search_directory" | "list_files_in_directory"
+    ) {
+        crate::assistant_runtime::append_runtime_log(
+            "agent",
+            &format!(
+                "execute_tool workspace result tool={} success={} observation={}",
+                call.tool,
+                outcome.success,
+                crate::assistant_runtime::compact_trace_text(&outcome.observation, 240)
+            ),
+        );
+    }
     let agent_elapsed_ms = agent_started_at.elapsed().as_millis().min(i64::MAX as u128) as i64;
     log_tool_run(
         call,

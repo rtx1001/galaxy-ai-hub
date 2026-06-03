@@ -4,8 +4,11 @@ import type { ChatMessage } from "../types";
 import {
   MemoryItem,
   compactMemoryWithBrain,
-  formatStructuredMemoryForPrompt,
-  mergeTurnIntoMemoryLocally,
+  formatLongTermMemoryForPrompt,
+  memoryEventKey,
+  mergeMemoryEventsIntoSummary,
+  parseMemoryEvent,
+  serializeMemoryEvent,
 } from "../appCore";
 
 type UsePersonalityMemoryOptions = {
@@ -36,7 +39,14 @@ export function usePersonalityMemory({
   const [personalityMemory, setPersonalityMemory] = useState("");
   const personalityMemoryShadowRef = useRef<Record<string, string>>({});
   const rawPersonalityMemoryShadowRef = useRef<Record<string, string>>({});
+  const pendingMemoryEventsRef = useRef<Record<string, MemoryItem[]>>({});
   const memoryUpdateSeqRef = useRef(0);
+  const memoryCompactTimerRef = useRef<number | null>(null);
+
+  const eventItemsForPrompt = (items: MemoryItem[]) =>
+    items
+      .map((item) => parseMemoryEvent(item.value))
+      .filter((event): event is NonNullable<typeof event> => Boolean(event));
 
   const saveRawMemory = async (
     personalityId: string,
@@ -52,35 +62,97 @@ export function usePersonalityMemory({
     });
   };
 
-  const applyRawMemory = (personalityId: string, rawMemory: string) => {
-    const promptMemory = formatStructuredMemoryForPrompt(rawMemory);
+  const applyRawMemory = (personalityId: string, rawMemory: string, eventItems = pendingMemoryEventsRef.current[personalityId] ?? []) => {
+    const promptMemory = formatLongTermMemoryForPrompt(rawMemory, eventItemsForPrompt(eventItems));
     rawPersonalityMemoryShadowRef.current[personalityId] = rawMemory;
     personalityMemoryShadowRef.current[personalityId] = promptMemory;
+    pendingMemoryEventsRef.current[personalityId] = eventItems;
     setPersonalityMemory(promptMemory);
+  };
+
+  const loadMemoryItems = async (personalityId: string) => {
+    const items = await invoke<MemoryItem[]>("list_local_memory", {
+      kind: personalityMemoryKind(personalityId),
+      limit: 500,
+    });
+    const rawMemory = items.find((item) => item.key === "compact_style_memory")?.value || "";
+    const events = items
+      .filter((item) => item.key.startsWith("event:"))
+      .sort((a, b) => a.created_at - b.created_at);
+    return { rawMemory, events };
+  };
+
+  const compactPendingMemoryEvents = async (personalityId: string, reason: string) => {
+    const events = pendingMemoryEventsRef.current[personalityId] ?? [];
+    if (events.length < 1) return;
+    const updateSeq = memoryUpdateSeqRef.current + 1;
+    memoryUpdateSeqRef.current = updateSeq;
+    const rawMemory = rawPersonalityMemoryShadowRef.current[personalityId] ?? "";
+    const parsedEvents = eventItemsForPrompt(events);
+    let nextRaw = mergeMemoryEventsIntoSummary(rawMemory, parsedEvents);
+    try {
+      nextRaw = await compactMemoryWithBrain(nextRaw, "", "", parsedEvents);
+    } catch (error) {
+      console.error("Personality memory compaction error:", error);
+    }
+    if (memoryUpdateSeqRef.current !== updateSeq) return;
+    await saveRawMemory(personalityId, nextRaw, reason);
+    await Promise.all(events.map((item) => invoke<boolean>("forget_local_memory", { id: item.id })));
+    applyRawMemory(personalityId, nextRaw, []);
+  };
+
+  const scheduleMemoryCompaction = (personalityId: string) => {
+    if (memoryCompactTimerRef.current) {
+      window.clearTimeout(memoryCompactTimerRef.current);
+    }
+    const events = pendingMemoryEventsRef.current[personalityId] ?? [];
+    const oldest = events[0]?.created_at ? events[0].created_at * 1000 : Date.now();
+    const shouldCompactSoon = events.length >= 8 || Date.now() - oldest > 15 * 60 * 1000;
+    const delay = shouldCompactSoon ? 4000 : 45_000;
+    memoryCompactTimerRef.current = window.setTimeout(() => {
+      compactPendingMemoryEvents(personalityId, shouldCompactSoon ? "auto_compact_threshold" : "auto_compact_idle").catch((error) =>
+        console.error("Personality memory compaction error:", error),
+      );
+    }, delay);
   };
 
   const updatePersonalityMemoryAfterTurn = (userText: string, answerText: string) => {
     if (!selectedPersonalityId) return;
     const personalityId = selectedPersonalityId;
+    const cleanUser = userText.trim();
+    const cleanAnswer = answerText.trim();
+    if (!cleanUser && !cleanAnswer) return;
+    const createdAt = Date.now();
+    const value = serializeMemoryEvent(cleanUser, cleanAnswer, createdAt);
+    const tempItem: MemoryItem = {
+      id: -createdAt,
+      kind: personalityMemoryKind(personalityId),
+      key: memoryEventKey(createdAt),
+      value,
+      source: "memory_event",
+      confidence: 0.86,
+      created_at: Math.floor(createdAt / 1000),
+      updated_at: Math.floor(createdAt / 1000),
+    };
     const currentRaw = rawPersonalityMemoryShadowRef.current[personalityId] ?? "";
-    const localRaw = mergeTurnIntoMemoryLocally(currentRaw, userText, answerText);
-    if (localRaw === currentRaw) return;
-    const updateSeq = memoryUpdateSeqRef.current + 1;
-    memoryUpdateSeqRef.current = updateSeq;
-    applyRawMemory(personalityId, localRaw);
-    saveRawMemory(personalityId, localRaw, "auto_compact_local").catch((error) =>
+    const nextEvents = [...(pendingMemoryEventsRef.current[personalityId] ?? []), tempItem].slice(-80);
+    applyRawMemory(personalityId, currentRaw, nextEvents);
+    invoke<MemoryItem>("remember_local_memory", {
+      kind: personalityMemoryKind(personalityId),
+      key: tempItem.key,
+      value,
+      source: "memory_event",
+      confidence: 0.86,
+    })
+      .then((saved) => {
+        const events = pendingMemoryEventsRef.current[personalityId] ?? [];
+        pendingMemoryEventsRef.current[personalityId] = events.map((item) => (item.key === tempItem.key ? saved : item));
+        scheduleMemoryCompaction(personalityId);
+      })
+      .catch((error) =>
       console.error("Personality memory save error:", error),
     );
-
-    void compactMemoryWithBrain(localRaw, userText, answerText)
-      .then((brainRaw) => {
-        if (memoryUpdateSeqRef.current !== updateSeq) return;
-        applyRawMemory(personalityId, brainRaw);
-        return saveRawMemory(personalityId, brainRaw, "auto_compact_brain");
-      })
-      .catch((error) => {
-        console.error("Personality memory compaction error:", error);
-      });
+    scheduleMemoryCompaction(personalityId);
   };
 
   const deletePersonalityMemory = async (personalityId: string) => {
@@ -102,6 +174,7 @@ export function usePersonalityMemory({
       setPersonalityMemory("");
       personalityMemoryShadowRef.current[selectedPersonalityId] = "";
       rawPersonalityMemoryShadowRef.current[selectedPersonalityId] = "";
+      pendingMemoryEventsRef.current[selectedPersonalityId] = [];
       if (clearSessionToo) {
         await invoke<boolean>("delete_personality_chat_session", { personalityId: selectedPersonalityId });
         setMessages([]);
@@ -116,13 +189,10 @@ export function usePersonalityMemory({
 
   useEffect(() => {
     if (!settingsLoaded || !selectedPersonalityId) return;
-    invoke<MemoryItem[]>("list_local_memory", {
-      kind: personalityMemoryKind(selectedPersonalityId),
-      limit: 20,
-    })
-      .then((items) => {
-        const rawMemory = items.find((item) => item.key === "compact_style_memory")?.value || "";
-        applyRawMemory(selectedPersonalityId, rawMemory);
+    loadMemoryItems(selectedPersonalityId)
+      .then(({ rawMemory, events }) => {
+        applyRawMemory(selectedPersonalityId, rawMemory, events);
+        if (events.length >= 8) scheduleMemoryCompaction(selectedPersonalityId);
       })
       .catch((error) => {
         console.error("Personality memory load error:", error);
@@ -139,16 +209,19 @@ export function usePersonalityMemory({
     const syncMemory = async () => {
       if (Date.now() - lastComposerInputAtRef.current < 1200) return;
       try {
-        const items = await invoke<MemoryItem[]>("list_local_memory", {
-          kind: personalityMemoryKind(selectedPersonalityId),
-          limit: 20,
-        });
+        const { rawMemory: nextRawMemory, events } = await loadMemoryItems(selectedPersonalityId);
         if (!active) return;
-        const nextRawMemory = items.find((item) => item.key === "compact_style_memory")?.value || "";
-        if ((rawPersonalityMemoryShadowRef.current[selectedPersonalityId] ?? "") === nextRawMemory) {
+        const eventFingerprint = events.map((item) => `${item.id}:${item.updated_at}`).join("|");
+        const currentEventFingerprint = (pendingMemoryEventsRef.current[selectedPersonalityId] ?? [])
+          .map((item) => `${item.id}:${item.updated_at}`)
+          .join("|");
+        if (
+          (rawPersonalityMemoryShadowRef.current[selectedPersonalityId] ?? "") === nextRawMemory &&
+          eventFingerprint === currentEventFingerprint
+        ) {
           return;
         }
-        applyRawMemory(selectedPersonalityId, nextRawMemory);
+        applyRawMemory(selectedPersonalityId, nextRawMemory, events);
       } catch (error) {
         console.error("Personality memory sync error:", error);
       }
@@ -164,6 +237,14 @@ export function usePersonalityMemory({
       window.clearInterval(handle);
     };
   }, [settingsLoaded, selectedPersonalityId, telegramRunning, isStreaming]);
+
+  useEffect(() => {
+    return () => {
+      if (memoryCompactTimerRef.current) {
+        window.clearTimeout(memoryCompactTimerRef.current);
+      }
+    };
+  }, []);
 
   return {
     personalityMemory,

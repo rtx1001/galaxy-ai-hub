@@ -65,7 +65,6 @@ export function LeftPanelContent({
   googleBusy,
   googleClientId,
   googleClientSecret,
-  googleRedirectUri,
   onOpenUserProfile,
   onToggleUserMenu,
   onSelectUserProfile,
@@ -99,7 +98,6 @@ export function LeftPanelContent({
   onToggleGoogle,
   onGoogleClientIdChange,
   onGoogleClientSecretChange,
-  onGoogleRedirectUriChange,
   onConnectToggleGoogle,
   onRefreshGoogleCalendar,
 }: {
@@ -142,7 +140,6 @@ export function LeftPanelContent({
   googleBusy: boolean;
   googleClientId: string;
   googleClientSecret: string;
-  googleRedirectUri: string;
   onOpenUserProfile: () => void;
   onToggleUserMenu: () => void;
   onSelectUserProfile: (id: string) => void;
@@ -176,7 +173,6 @@ export function LeftPanelContent({
   onToggleGoogle: (open: boolean) => void;
   onGoogleClientIdChange: (value: string) => void;
   onGoogleClientSecretChange: (value: string) => void;
-  onGoogleRedirectUriChange: (value: string) => void;
   onConnectToggleGoogle: () => void;
   onRefreshGoogleCalendar: () => void;
 }) {
@@ -269,11 +265,9 @@ export function LeftPanelContent({
         busy={googleBusy}
         clientId={googleClientId}
         clientSecret={googleClientSecret}
-        redirectUri={googleRedirectUri}
         onToggle={onToggleGoogle}
         onClientIdChange={onGoogleClientIdChange}
         onClientSecretChange={onGoogleClientSecretChange}
-        onRedirectUriChange={onGoogleRedirectUriChange}
         onConnectToggle={onConnectToggleGoogle}
         onRefreshCalendar={onRefreshGoogleCalendar}
       />

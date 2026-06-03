@@ -249,22 +249,6 @@ pub(super) fn request_looks_like_image_edit_follow_up(text: &str) -> bool {
     )
 }
 
-pub(super) fn request_effectively_wants_image_generation(
-    latest_user_text: &str,
-    pending_image_proposal: Option<&ImageProposal>,
-    has_recent_image_context: bool,
-    has_recent_image_creation_context: bool,
-) -> bool {
-    request_wants_image_generation(latest_user_text)
-        || broad_image_generation_signal(latest_user_text)
-        || request_wants_user_avatar_image_generation(latest_user_text)
-        || request_targets_user_and_character_images(latest_user_text)
-        || request_wants_avatar_image_generation(latest_user_text)
-        || (pending_image_proposal.is_some() && is_contextual_follow_up(latest_user_text))
-        || (has_recent_image_creation_context && is_contextual_follow_up(latest_user_text))
-        || (has_recent_image_context && request_looks_like_image_edit_follow_up(latest_user_text))
-}
-
 pub(super) fn answer_claims_unverified_tool_result(
     answer: &str,
     task_state: &ConversationTaskState,
@@ -313,6 +297,25 @@ pub(super) fn answer_claims_unverified_tool_result(
             "dự báo",
         ],
     )
+}
+
+pub(super) fn answer_contains_file_or_media_artifact(answer: &str) -> bool {
+    let normalized = normalize_text(answer);
+    contains_any(
+        &normalized,
+        &[
+            ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".mp4", ".mkv", ".avi", ".mov",
+            ".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf", ".txt", ".md", ".docx", ".xlsx",
+            ":\\", "file preview", "path:", "title:", "type:", "size:",
+        ],
+    )
+}
+
+pub(super) fn answer_claims_verified_workspace_result(answer: &str) -> bool {
+    if answer_is_clarification_or_refusal(answer) {
+        return false;
+    }
+    answer_contains_file_or_media_artifact(answer)
 }
 
 pub(super) fn answer_is_clarification_or_refusal(answer: &str) -> bool {

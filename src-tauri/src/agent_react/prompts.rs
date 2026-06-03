@@ -12,11 +12,17 @@ pub(super) fn read_master_system_prompt() -> String {
 }
 
 pub(super) fn tool_protocol_prompt() -> String {
+    let tool_knowledge = tool_knowledge_prompt(None);
+    let exact_names = format!("Exact tool-name set: {}.", available_tool_names_csv());
     [
         "Tool protocol:",
+        tool_knowledge.as_str(),
+        exact_names.as_str(),
         "- Use tools when the user asks for current data, files, media, Google/Gmail/Calendar/Contacts, web lookup, image generation, file changes, or local actions.",
         "- If a tool is needed, emit exactly one structured tool call and stop. Do not describe or narrate the call.",
         "- Preferred format is native OpenAI-compatible tool_calls. If native tool_calls are unavailable, output exactly: <tool_call>{\"name\":\"tool_name\",\"arguments\":{...}}</tool_call>",
+        "- Tool names are strict identifiers. Do not translate, rename, abbreviate, or invent similar names.",
+        "- If you almost chose a different name, pick the exact matching name from the available app tools instead. Example: use weather_forecast, not weather_lookup.",
         "- Never invent tool results. Final answers must be based only on the returned tool observation.",
         "- Destructive or write actions must use propose_* tools and wait for approval.",
         "- If no tool is needed, answer normally without mentioning tools.",

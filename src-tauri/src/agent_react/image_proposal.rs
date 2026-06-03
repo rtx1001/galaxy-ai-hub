@@ -242,10 +242,5 @@ pub(super) fn recent_unresolved_image_creation_context(messages: &[ReactChatMess
                 return false;
             }
             parse_pending_image_proposal_text(&text).is_some()
-                || request_wants_image_generation(&text)
-                || broad_image_generation_signal(&text)
-                || request_wants_avatar_image_generation(&text)
-                || request_wants_user_avatar_image_generation(&text)
-                || request_targets_user_and_character_images(&text)
         })
 }

@@ -1,4 +1,13 @@
+import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { ChevronDownIcon, CloseIcon, PlusIcon } from "./Icons";
+import { cleanDisplayPath } from "../utils";
+
+type WorkspaceFolderStatus = {
+  path: string;
+  exists: boolean;
+  message: string;
+};
 
 export function WorkspaceSection({
   open,
@@ -13,6 +22,51 @@ export function WorkspaceSection({
   onAdd: () => void;
   onRemove: (folder: string) => void;
 }) {
+  const [folderStatuses, setFolderStatuses] = useState<Record<string, WorkspaceFolderStatus>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!linkedFolders.length) {
+      setFolderStatuses({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    invoke<WorkspaceFolderStatus[]>("validate_workspace_folders", { folders: linkedFolders })
+      .then((statuses) => {
+        if (cancelled) {
+          return;
+        }
+        setFolderStatuses(
+          Object.fromEntries(statuses.map((status) => [status.path, status])),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFolderStatuses({});
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [linkedFolders]);
+
+  const folderRows = useMemo(
+    () =>
+      linkedFolders.map((folder) => {
+        const status = folderStatuses[folder];
+        return {
+          folder,
+          displayPath: cleanDisplayPath(folder),
+          exists: status?.exists ?? true,
+          message: status?.message,
+        };
+      }),
+    [folderStatuses, linkedFolders],
+  );
+
   return (
     <details
       className="overflow-hidden rounded-[20px] border border-[#282a2c] bg-[#1e1f20] shadow-sm"
@@ -46,9 +100,25 @@ export function WorkspaceSection({
             No workspace folder selected.
           </div>
         ) : (
-          linkedFolders.map((folder) => (
-            <div key={folder} className="flex items-center gap-2 rounded-2xl border border-[#282a2c] bg-[#131314] px-3 py-2">
-              <div className="min-w-0 flex-1 truncate text-sm text-[#e3e3e3]" title={folder}>{folder}</div>
+          folderRows.map(({ folder, displayPath, exists, message }) => (
+            <div
+              key={folder}
+              className={[
+                "flex items-center gap-2 rounded-2xl border px-3 py-2 transition",
+                exists
+                  ? "border-[#282a2c] bg-[#131314]"
+                  : "border-rose-500/25 bg-rose-950/20",
+              ].join(" ")}
+              title={message || displayPath}
+            >
+              <div className={["min-w-0 flex-1 truncate text-sm", exists ? "text-[#e3e3e3]" : "text-rose-100/90"].join(" ")}>
+                {displayPath}
+              </div>
+              {!exists ? (
+                <span className="shrink-0 rounded-full border border-rose-400/20 bg-rose-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-rose-200">
+                  Missing
+                </span>
+              ) : null}
               <button
                 type="button"
                 title="Remove workspace folder"

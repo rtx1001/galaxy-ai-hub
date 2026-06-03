@@ -1,4 +1,4 @@
-import { MutableRefObject, useEffect } from "react";
+import { MutableRefObject, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAutoSpeechQueue } from "./useAutoSpeechQueue";
 import { useStoredImageHydration } from "./useStoredImageHydration";
@@ -8,6 +8,7 @@ import { useAppSettingsLoad } from "./useAppSettingsLoad";
 import { useDropdownDismiss } from "./useDropdownDismiss";
 import { useMissingTooltips } from "./useMissingTooltips";
 import { useTrayControls } from "./useTrayControls";
+import { NEW_MESSAGE_BOTTOM_ROOM } from "./useConversationScroll";
 
 type UseAppLifecycleWiringOptions = Record<string, any> & {
   autoSpeechEligibleAssistantIdsRef: MutableRefObject<Set<string>>;
@@ -16,6 +17,8 @@ type UseAppLifecycleWiringOptions = Record<string, any> & {
 };
 
 export function useAppLifecycleWiring(options: UseAppLifecycleWiringOptions) {
+  const lastAutoScrollKeyRef = useRef("");
+
   useAppSettingsLoad({
     compressAvatarDataUrl: options.compressAvatarDataUrl,
     setAutomationOpen: options.setAutomationOpen,
@@ -189,6 +192,7 @@ export function useAppLifecycleWiring(options: UseAppLifecycleWiringOptions) {
     googleClientId: options.googleClientId,
     googleClientSecret: options.googleClientSecret,
     googleConnected: options.googleStatus.connected,
+    linkedFolders: options.linkedFolders,
     refreshAutomationJobs: options.refreshAutomationJobs,
     refreshGoogleCalendarEvents: options.refreshGoogleCalendarEvents,
     refreshGoogleStatus: options.refreshGoogleStatus,
@@ -202,28 +206,31 @@ export function useAppLifecycleWiring(options: UseAppLifecycleWiringOptions) {
   });
 
   useEffect(() => {
-    if (options.messages.length === options.lastMessageCountRef.current) {
+    const lastMessage = options.messages[options.messages.length - 1];
+    const lastMessageHasVisibleContent =
+      typeof lastMessage?.content === "string"
+        ? lastMessage.content.trim().length > 0
+        : Array.isArray(lastMessage?.content) && lastMessage.content.length > 0;
+    if (lastMessage?.role === "assistant" && !lastMessageHasVisibleContent) {
       return;
     }
-
+    const contentSize =
+      typeof lastMessage?.content === "string"
+        ? lastMessage.content.length
+        : Array.isArray(lastMessage?.content)
+          ? JSON.stringify(lastMessage.content).length
+          : 0;
+    const scrollKey = `${options.messages.length}:${lastMessage?.id ?? ""}:${contentSize}`;
+    if (scrollKey === lastAutoScrollKeyRef.current) {
+      return;
+    }
+    lastAutoScrollKeyRef.current = scrollKey;
     options.lastMessageCountRef.current = options.messages.length;
-    const lastMessage = options.messages[options.messages.length - 1];
     window.requestAnimationFrame(() => {
       const container = options.conversationScrollRef.current;
       if (!container) return;
 
-      if (lastMessage?.role === "assistant") {
-        const element = document.querySelector(`[data-message-id="${lastMessage.id}"]`) as HTMLElement | null;
-        if (element) {
-          container.scrollTo({
-            top: Math.max(0, element.offsetTop - container.offsetTop - 16),
-            behavior: "smooth",
-          });
-        }
-        return;
-      }
-
-      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+      container.scrollTo({ top: Math.max(0, container.scrollHeight - NEW_MESSAGE_BOTTOM_ROOM), behavior: "smooth" });
     });
   }, [options.messages]);
 

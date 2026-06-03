@@ -1,4 +1,5 @@
 import { ToolResultItem, ToolResultField } from "./types";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 export const INLINE_PATTERN = /(\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>()]+|www\.[^\s<>()]+|`[^`]+`|\*\*[^*]+\*\*|#[0-9a-f]{6}\b)/gi;
 
@@ -10,7 +11,19 @@ export const formatBytes = (bytes: number) => {
       return `${value >= 10 || exponent === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[exponent]}`;
     };
 export const cleanDisplayPath = (value: string) =>
-      value.replace(/\\\\\?\\UNC\\/g, "\\\\").replace(/\\\\\?\\/g, "");
+      value
+        .split("\\\\?\\UNC\\").join("\\\\")
+        .split("\\\\?\\").join("");
+
+export const localAssetUrl = (path?: string | null) => {
+  const value = path?.trim();
+  if (!value) return "";
+  try {
+    return convertFileSrc(value);
+  } catch {
+    return "";
+  }
+};
 export const renderInlineText = (text: string, keyPrefix: string) => {
       const displayText = cleanDisplayPath(text);
       const parts = displayText.split(INLINE_PATTERN);
@@ -118,4 +131,12 @@ export const getVietnameseLunarDate = (date: Date) => {
   } catch (e) {
     return "";
   }
+};
+
+export const pauseOtherMediaElements = (current: HTMLMediaElement) => {
+  document.querySelectorAll<HTMLMediaElement>("audio, video").forEach((media) => {
+    if (media !== current && !media.paused) {
+      media.pause();
+    }
+  });
 };

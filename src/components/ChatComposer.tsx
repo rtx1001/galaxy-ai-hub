@@ -115,7 +115,7 @@ export function ChatComposer({
   const canSend = composerHasText || Boolean(image);
 
   return (
-    <footer className="shrink-0 border-t border-[#282a2c] bg-[#131314] px-4 py-4">
+    <footer className="shrink-0 border-t border-[#282a2c] bg-[#131314] px-4 pb-4 pt-2">
       <div className="mx-auto w-full max-w-5xl rounded-[30px] border border-[#282a2c] bg-[#1e1f20] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
         {longTaskNotice && (
           <div className="mb-3 overflow-hidden rounded-[22px] border border-[var(--accent-soft-strong)] bg-[#131314] shadow-[0_12px_30px_rgba(0,0,0,0.28)]">

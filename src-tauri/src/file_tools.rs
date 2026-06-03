@@ -60,6 +60,34 @@ pub struct LocalImageDataUrl {
     pub path: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct WorkspaceFolderStatus {
+    pub path: String,
+    pub exists: bool,
+    pub message: String,
+}
+
+#[tauri::command]
+pub fn validate_workspace_folders(folders: Vec<String>) -> Vec<WorkspaceFolderStatus> {
+    folders
+        .into_iter()
+        .filter(|folder| !folder.trim().is_empty())
+        .map(|folder| {
+            let path = PathBuf::from(folder.trim());
+            let exists = path.is_dir();
+            WorkspaceFolderStatus {
+                path: folder,
+                exists,
+                message: if exists {
+                    "Ready".to_string()
+                } else {
+                    "Folder no longer exists or cannot be opened.".to_string()
+                },
+            }
+        })
+        .collect()
+}
+
 #[tauri::command]
 pub fn search_linked_files(
     query: String,
@@ -92,7 +120,7 @@ pub fn list_linked_folder(
 ) -> Result<Vec<FolderEntry>, String> {
     let roots = normalize_roots(&folders);
     if roots.is_empty() {
-        return Err("Add a workspace folder first.".to_string());
+        return Err(workspace_folder_error(&folders));
     }
 
     let target = if folder.trim().is_empty() {
@@ -113,7 +141,7 @@ pub fn list_linked_folder(
         let path = entry.path();
         let metadata = entry.metadata().ok();
         entries.push(FolderEntry {
-            path: path.to_string_lossy().to_string(),
+            path: display_path(&path),
             name: path
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -150,7 +178,7 @@ pub fn read_linked_text_file(
     let content = String::from_utf8_lossy(&bytes[..bytes.len().min(max)]).to_string();
 
     Ok(TextFileResult {
-        path: path.to_string_lossy().to_string(),
+        path: display_path(&path),
         name: path
             .file_name()
             .and_then(|value| value.to_str())
@@ -205,7 +233,7 @@ pub fn preview_linked_file(
         return Err(format!(
             "I can find this file, but I cannot preview .{} inside chat yet. Use the file path to open it with Windows: {}",
             extension,
-            path.to_string_lossy()
+            display_path(&path)
         ));
     }
 
@@ -221,7 +249,7 @@ pub fn preview_linked_file(
     if file_kind == "text" {
         let text = String::from_utf8_lossy(&bytes[..bytes.len().min(max)]).to_string();
         return Ok(FilePreviewResult {
-            path: path.to_string_lossy().to_string(),
+            path: display_path(&path),
             name,
             extension,
             mime_type,
@@ -236,13 +264,13 @@ pub fn preview_linked_file(
         return Err(format!(
             "That file is too large to embed in chat safely ({} MB). Path: {}",
             metadata.len() / 1024 / 1024,
-            path.to_string_lossy()
+            display_path(&path)
         ));
     }
 
     let encoded = general_purpose::STANDARD.encode(bytes);
     Ok(FilePreviewResult {
-        path: path.to_string_lossy().to_string(),
+        path: display_path(&path),
         name,
         extension,
         mime_type: mime_type.clone(),

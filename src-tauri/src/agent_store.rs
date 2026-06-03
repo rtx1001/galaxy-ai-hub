@@ -588,7 +588,8 @@ pub fn save_personality_chat_session(
 ) -> Result<bool, String> {
     let conn = open_db()?;
     let personality_id = sanitize_required(personality_id, "Personality ID", 160)?;
-    if messages_json.len() > 1_000_000 {
+    const MAX_CHAT_SESSION_JSON_BYTES: usize = 32 * 1024 * 1024;
+    if messages_json.len() > MAX_CHAT_SESSION_JSON_BYTES {
         return Err("This chat session is too large to save safely.".to_string());
     }
     conn.execute(

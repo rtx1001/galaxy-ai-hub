@@ -37,6 +37,34 @@ pub(super) fn normalize_roots(folders: &[String]) -> Vec<PathBuf> {
         .collect()
 }
 
+pub(super) fn missing_workspace_folders(folders: &[String]) -> Vec<String> {
+    folders
+        .iter()
+        .filter_map(|folder| {
+            let trimmed = folder.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let path = PathBuf::from(trimmed);
+            (!path.is_dir()).then(|| trimmed.to_string())
+        })
+        .collect()
+}
+
+pub(super) fn workspace_folder_error(folders: &[String]) -> String {
+    if folders.iter().all(|folder| folder.trim().is_empty()) {
+        return "Add a workspace folder first.".to_string();
+    }
+    let missing = missing_workspace_folders(folders);
+    if !missing.is_empty() {
+        return format!(
+            "Workspace folder no longer exists or cannot be opened: {}",
+            missing.join("; ")
+        );
+    }
+    "Add a workspace folder first.".to_string()
+}
+
 pub(super) fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -46,6 +74,17 @@ pub(super) fn now_unix() -> u64 {
 
 pub(crate) fn normalize_text(value: &str) -> String {
     value.to_lowercase()
+}
+
+pub(super) fn display_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{}", rest);
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        return rest.to_string();
+    }
+    text.to_string()
 }
 
 pub(super) fn path_is_within(path: &Path, root: &Path) -> bool {
@@ -196,7 +235,7 @@ pub(super) fn resolve_existing_permitted_path(
 ) -> Result<PathBuf, String> {
     let roots = normalize_roots(folders);
     if roots.is_empty() {
-        return Err("Add a workspace folder first.".to_string());
+        return Err(workspace_folder_error(folders));
     }
 
     if let Some(candidate) = resolve_direct_candidate(input, &roots)? {
@@ -224,7 +263,7 @@ pub(super) fn resolve_existing_permitted_path(
             matches
                 .iter()
                 .take(5)
-                .map(|(_, file)| file.path.to_string_lossy().to_string())
+                .map(|(_, file)| display_path(&file.path))
                 .collect::<Vec<_>>()
                 .join("; ")
         )),
@@ -237,7 +276,7 @@ pub(super) fn resolve_existing_permitted_folder_path(
 ) -> Result<PathBuf, String> {
     let roots = normalize_roots(folders);
     if roots.is_empty() {
-        return Err("Add a workspace folder first.".to_string());
+        return Err(workspace_folder_error(folders));
     }
 
     if let Some(candidate) = resolve_direct_candidate(input, &roots)? {
@@ -302,7 +341,7 @@ pub(super) fn resolve_existing_permitted_folder_path(
     let mut ranked = matches.into_values().collect::<Vec<_>>();
     ranked.sort_by(|left, right| {
         compare_match_scores(left.0, right.0)
-            .then_with(|| left.1.to_string_lossy().cmp(&right.1.to_string_lossy()))
+        .then_with(|| display_path(&left.1).cmp(&display_path(&right.1)))
     });
 
     match ranked.len() {
@@ -317,7 +356,7 @@ pub(super) fn resolve_existing_permitted_folder_path(
             ranked
                 .iter()
                 .take(5)
-                .map(|(_, path)| path.to_string_lossy().to_string())
+                .map(|(_, path)| display_path(path))
                 .collect::<Vec<_>>()
                 .join("; ")
         )),
@@ -352,8 +391,8 @@ pub(super) fn indexed_file_from_path(path: PathBuf, root: &Path) -> Option<Index
         return None;
     }
     let name = path.file_name()?.to_str()?.to_string();
-    let path_text = path.to_string_lossy().to_string();
-    let folder = path.parent().unwrap_or(root).to_string_lossy().to_string();
+    let path_text = display_path(&path);
+    let folder = display_path(path.parent().unwrap_or(root));
     let extension = extension_for(&path);
     let modified_unix = metadata
         .modified()
@@ -431,7 +470,7 @@ pub(super) fn build_workspace_index(roots: Vec<PathBuf>) -> WorkspaceIndex {
 pub(super) fn workspace_index(folders: &[String]) -> Result<WorkspaceIndex, String> {
     let roots = normalize_roots(folders);
     if roots.is_empty() {
-        return Err("Add a workspace folder first.".to_string());
+        return Err(workspace_folder_error(folders));
     }
     let fingerprint = index_fingerprint(&roots);
     let mut cache = workspace_index_cache()
@@ -524,7 +563,7 @@ pub(super) fn resolve_new_permitted_path(
 ) -> Result<PathBuf, String> {
     let roots = normalize_roots(folders);
     if roots.is_empty() {
-        return Err("Add a workspace folder first.".to_string());
+        return Err(workspace_folder_error(folders));
     }
 
     let root = if let Some(folder) = root_folder.filter(|value| !value.trim().is_empty()) {

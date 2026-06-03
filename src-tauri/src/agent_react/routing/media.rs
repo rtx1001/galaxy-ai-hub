@@ -136,6 +136,40 @@ pub(in crate::agent_react) fn enrich_contextual_tool_call(
     call
 }
 
+pub(in crate::agent_react) fn promote_media_list_to_preview_in_preview_flow(
+    mut call: ToolCall,
+    messages: &[ReactChatMessage],
+    latest_text: &str,
+) -> ToolCall {
+    if call.tool != "list_media_files" || recent_preview_paths(messages).is_empty() {
+        return call;
+    }
+
+    call.tool = "preview_random_media".to_string();
+    call = with_user_text(call, latest_text);
+    let mut object = call.arguments.as_object().cloned().unwrap_or_default();
+    object.insert("_preview_context".to_string(), json!("follow_up"));
+    let current_kind = object
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(current_kind.as_str(), "" | "any") {
+        if let Some(kind) = recent_media_kind(messages) {
+            object.insert("kind".to_string(), json!(kind));
+        }
+    }
+    if !object.contains_key("exclude_paths") {
+        let paths = recent_preview_paths(messages);
+        if !paths.is_empty() {
+            object.insert("exclude_paths".to_string(), json!(paths));
+        }
+    }
+    call.arguments = Value::Object(object);
+    call
+}
+
+#[cfg(test)]
 pub(in crate::agent_react) fn should_continue_after_observation(
     tool: &str,
     user_text: &str,
@@ -143,6 +177,7 @@ pub(in crate::agent_react) fn should_continue_after_observation(
     matches!(tool, "search_directory" | "list_media_files") && request_wants_preview(user_text)
 }
 
+#[cfg(test)]
 pub(in crate::agent_react) fn first_previewable_search_result(
     matches: &[file_tools::FileSearchResult],
     folders: &[String],

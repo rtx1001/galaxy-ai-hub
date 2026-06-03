@@ -221,6 +221,7 @@ pub fn run() {
             config_store::list_telegram_guests,
             update_tray_menu_state,
             file_tools::search_linked_files,
+            file_tools::validate_workspace_folders,
             file_tools::list_linked_folder,
             file_tools::read_linked_text_file,
             file_tools::list_linked_media_files,

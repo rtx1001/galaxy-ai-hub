@@ -57,8 +57,8 @@ pub(super) fn sanitize_thinking_for_display(next: &str) -> String {
         let is_raw_tool_line = lowered.contains("tool_call")
             || lowered.contains("tool_code")
             || lowered.trim_start().starts_with("call:")
-            || AVAILABLE_TOOL_NAMES
-                .iter()
+            || available_tool_names()
+                .into_iter()
                 .any(|tool| compact.contains(&format!("{}(", tool.to_lowercase())));
         if !is_raw_tool_line {
             kept.push(line);

@@ -7,18 +7,21 @@ pub(super) struct ConversationTaskState {
     pub recent_image_context: bool,
     pub recent_image_creation_context: bool,
     pub image_required: bool,
+    pub tool_repair_required: bool,
     pub label: &'static str,
     pub reason: &'static str,
 }
 
 impl ConversationTaskState {
     pub(super) fn requires_tool(&self) -> bool {
-        self.route.is_some() || self.image_required
+        self.route.is_some() || self.image_required || self.tool_repair_required
     }
 
     pub(super) fn allowed_tool_names(&self) -> String {
         if self.image_required {
             "propose_image_generation".to_string()
+        } else if self.tool_repair_required && self.route.is_none() {
+            available_tool_names_csv()
         } else {
             tool_names_for_capability(self.route).join(", ")
         }
@@ -29,6 +32,8 @@ impl ConversationTaskState {
             .map(route_label)
             .unwrap_or(if self.image_required {
                 "image generation"
+            } else if self.tool_repair_required {
+                "tool repair"
             } else {
                 "none"
             })
@@ -45,6 +50,19 @@ impl ConversationTaskState {
             self.reason
         )
     }
+
+    pub(super) fn tool_repair(reason: &'static str) -> Self {
+        Self {
+            route: None,
+            pending_image_proposal: false,
+            recent_image_context: false,
+            recent_image_creation_context: false,
+            image_required: false,
+            tool_repair_required: true,
+            label: "tool_protocol_repair",
+            reason,
+        }
+    }
 }
 
 pub(super) fn derive_conversation_task_state(
@@ -54,12 +72,8 @@ pub(super) fn derive_conversation_task_state(
     recent_image_context: bool,
     recent_image_creation_context: bool,
 ) -> ConversationTaskState {
-    let image_required = request_effectively_wants_image_generation(
-        latest_user_text,
-        pending_image_proposal,
-        recent_image_context,
-        recent_image_creation_context,
-    );
+    let _ = latest_user_text;
+    let image_required = false;
 
     let (label, reason) = if pending_image_proposal.is_some() && image_required {
         (
@@ -79,10 +93,13 @@ pub(super) fn derive_conversation_task_state(
     } else if recent_image_context {
         (
             "recent_image_context",
-            "an image is nearby in the conversation but this turn is not forced to use a tool",
+            "an image is nearby in the conversation; the model must decide whether an image tool is needed",
         )
     } else {
-        ("conversation", "no tool is required before answering")
+        (
+            "conversation",
+            "no deterministic tool route was selected; the model must decide whether a tool is needed",
+        )
     };
 
     ConversationTaskState {
@@ -91,6 +108,7 @@ pub(super) fn derive_conversation_task_state(
         recent_image_context,
         recent_image_creation_context,
         image_required,
+        tool_repair_required: false,
         label,
         reason,
     }

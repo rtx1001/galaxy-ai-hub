@@ -45,6 +45,7 @@ pub(in crate::agent_react) fn request_wants_weather(text: &str) -> bool {
         || contains_any_folded(&lowered, &normalized, &["dự báo", "thời tiết thế nào"])
 }
 
+#[cfg(test)]
 pub(in crate::agent_react) fn request_is_casual_weather_observation(text: &str) -> bool {
     request_mentions_weather(text) && !request_wants_weather(text)
 }

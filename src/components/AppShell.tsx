@@ -227,6 +227,9 @@ export function AppShell(props: AppShellProps) {
                   .catch(() => null)
                   .finally(() => props.speakMessageText(messageId, text, role));
               }}
+              onEditLatestUserMessage={(messageId, text) => {
+                props.handleSend({ editMessageId: messageId, text }).catch((error: unknown) => console.error("Edit resend error:", error));
+              }}
               onScrollToBottom={() => props.scrollToBottom()}
             />
 

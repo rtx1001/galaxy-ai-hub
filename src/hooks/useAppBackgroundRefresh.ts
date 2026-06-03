@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { VoiceSample } from "../appCore";
 
 type UseAppBackgroundRefreshOptions = {
@@ -6,6 +7,7 @@ type UseAppBackgroundRefreshOptions = {
   googleClientId: string;
   googleClientSecret: string;
   googleConnected: boolean;
+  linkedFolders: string[];
   refreshAutomationJobs: () => void | Promise<void>;
   refreshGoogleCalendarEvents: (month?: Date) => Promise<void>;
   refreshGoogleStatus: () => Promise<unknown>;
@@ -23,6 +25,7 @@ export function useAppBackgroundRefresh({
   googleClientId,
   googleClientSecret,
   googleConnected,
+  linkedFolders,
   refreshAutomationJobs,
   refreshGoogleCalendarEvents,
   refreshGoogleStatus,
@@ -40,6 +43,25 @@ export function useAppBackgroundRefresh({
     refreshToolRuns();
     refreshGoogleStatus().catch((error) => console.error("Google startup status error:", error));
   }, []);
+
+  useEffect(() => {
+    if (!settingsLoaded || !linkedFolders.length) {
+      return;
+    }
+    invoke<Array<{ path: string; exists: boolean; message: string }>>("validate_workspace_folders", {
+      folders: linkedFolders,
+    })
+      .then((statuses) => {
+        const missing = statuses.filter((status) => !status.exists);
+        if (missing.length) {
+          console.warn(
+            "Workspace startup check found missing folders:",
+            missing.map((status) => `${status.path}: ${status.message}`).join("; "),
+          );
+        }
+      })
+      .catch((error) => console.error("Workspace startup check error:", error));
+  }, [settingsLoaded, linkedFolders]);
 
   useEffect(() => {
     if (!settingsLoaded || !googleConnected) {

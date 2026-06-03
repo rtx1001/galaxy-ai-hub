@@ -1,7 +1,6 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import type { ChatMessage } from "../types";
-import type { LocalImageDataUrl } from "../appCore";
+import { localAssetUrl } from "../utils";
 
 export function useStoredImageHydration({
   settingsLoaded,
@@ -29,27 +28,32 @@ export function useStoredImageHydration({
     Promise.all(
       missingImages.map(async (item) => {
         try {
-          const result = await invoke<LocalImageDataUrl>("read_local_image_data_url", { path: item.path });
-          return { ...item, url: result.data_url };
+          const url = localAssetUrl(item.path);
+          return { ...item, url };
         } catch (error) {
           console.error("Stored image reload error:", error);
           return { ...item, url: "" };
         }
       }),
-    ).then((loaded) => {
+    ).then((loadedImages) => {
       if (cancelled) return;
-      const loadedByPart = new Map(loaded.filter((item) => item.url).map((item) => [`${item.messageId}:${item.partIndex}`, item.url]));
-      if (!loadedByPart.size) return;
+      const loadedImageByPart = new Map(
+        loadedImages.filter((item) => item.url).map((item) => [`${item.messageId}:${item.partIndex}`, item.url]),
+      );
+      if (!loadedImageByPart.size) return;
       setMessages((prev) =>
         prev.map((message) => {
           if (!Array.isArray(message.content)) return message;
           let changed = false;
           const content = message.content.map((part, partIndex) => {
-            if (part.type !== "image_url") return part;
-            const url = loadedByPart.get(`${message.id}:${partIndex}`);
-            if (!url) return part;
-            changed = true;
-            return { ...part, image_url: { ...part.image_url, url } };
+            const key = `${message.id}:${partIndex}`;
+            if (part.type === "image_url") {
+              const url = loadedImageByPart.get(key);
+              if (!url) return part;
+              changed = true;
+              return { ...part, image_url: { ...part.image_url, url } };
+            }
+            return part;
           });
           return changed ? { ...message, content } : message;
         }),

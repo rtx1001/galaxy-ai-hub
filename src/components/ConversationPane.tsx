@@ -4,7 +4,7 @@ import { GoogleCalendarEvent, SystemInfo, extractMessageText } from "../appCore"
 import { AvatarImage } from "./UI";
 import { FilePreviewCard, ToolResultCards, ImageProposalCard, ActionProposalCard } from "./ToolCards";
 import { FormattedMessageText } from "./ChatBubble";
-import { ChevronDownIcon, ChevronUpIcon, FolderIcon, SpeakerIcon, StopIcon, TrashIcon } from "./Icons";
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, EditIcon, FolderIcon, SendIcon, SpeakerIcon, StopIcon, TrashIcon } from "./Icons";
 
 const formatBubbleTimestamp = (value?: number) => {
   if (!value) return "";
@@ -49,6 +49,7 @@ export function ConversationPane({
   onApproveActionProposal,
   onDeleteCalendarEvent,
   onSpeakToggle,
+  onEditLatestUserMessage,
   onScrollToBottom,
 }: {
   scrollRef: React.RefObject<HTMLElement | null>;
@@ -82,10 +83,49 @@ export function ConversationPane({
   onApproveActionProposal: (messageId: string, partIndex: number, proposal: ActionProposal) => void;
   onDeleteCalendarEvent: (event: GoogleCalendarEvent) => void;
   onSpeakToggle: (messageId: string, text: string, role: ChatMessage["role"]) => void;
+  onEditLatestUserMessage: (messageId: string, text: string) => void;
   onScrollToBottom: () => void;
 }) {
+  const [editingMessageId, setEditingMessageId] = React.useState<string | null>(null);
+  const [editingText, setEditingText] = React.useState("");
+  const editInputRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const latestUserMessageId = React.useMemo(
+    () => [...messages].reverse().find((message) => message.role === "user")?.id ?? null,
+    [messages],
+  );
+
+  React.useEffect(() => {
+    if (!editingMessageId) return;
+    const input = editInputRef.current;
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }, [editingMessageId]);
+
+  React.useEffect(() => {
+    if (editingMessageId && latestUserMessageId !== editingMessageId) {
+      setEditingMessageId(null);
+      setEditingText("");
+    }
+  }, [editingMessageId, latestUserMessageId]);
+
+  const cancelEdit = () => {
+    setEditingMessageId(null);
+    setEditingText("");
+  };
+
+  const submitEdit = (messageId: string) => {
+    const nextText = editingText.trim();
+    if (!nextText) return;
+    setEditingMessageId(null);
+    setEditingText("");
+    onEditLatestUserMessage(messageId, nextText);
+  };
+  const bubbleActionClass = "inline-flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-[#d8dadc] transition hover:bg-white/5 hover:text-[var(--accent-color)]";
+  const bubbleDangerActionClass = "inline-flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-[#d8dadc] transition hover:bg-rose-500/10 hover:text-rose-300";
+
   return (
-    <section ref={scrollRef} onScroll={onScroll} className="conversation-scroll relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5">
+    <section ref={scrollRef} onScroll={onScroll} className="conversation-scroll relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-0 pt-5">
       {messages.length === 0 ? (
         <div className="relative z-10 mx-auto flex h-full max-w-3xl flex-col items-center justify-center text-center">
           <img src={brandLogo} alt="Galaxy AI Hub" className="mx-auto h-auto w-full max-w-[260px] object-contain" />
@@ -134,10 +174,12 @@ export function ConversationPane({
             const hasImageContent = Array.isArray(message.content) && message.content.some((part) => part.type === "image_url");
             const hasApprovalContent = Array.isArray(message.content) && message.content.some((part) => part.type === "image_proposal" || part.type === "action_proposal");
             const isTypingIndicator = message.role === "assistant" && message.content === "" && index === messages.length - 1 && isStreaming;
+            const isEditingUserMessage = message.role === "user" && editingMessageId === message.id;
+            const canEditUserMessage = message.role === "user" && message.id === latestUserMessageId && !isStreaming;
             const messageComplete = !isTypingIndicator && (message.role === "user" || Boolean(message.completed_at || message.duration_ms || messageText.trim() || hasImageContent || hasApprovalContent));
             const bubbleTimestamp = messageComplete ? formatBubbleTimestamp(message.created_at) : "";
             const replyDuration = messageComplete && message.role === "assistant" ? formatReplyDuration(message.duration_ms) : "";
-            const hasBubbleFooter = Boolean(bubbleTimestamp || replyDuration || firstImagePath || firstImagePartKey || canSpeak);
+            const hasBubbleFooter = !isEditingUserMessage && Boolean(bubbleTimestamp || replyDuration || firstImagePath || firstImagePartKey || canSpeak || canEditUserMessage);
 
             return (
               <div key={message.id} data-message-id={message.id} className={`chat-message-row flex items-start gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -158,7 +200,46 @@ export function ConversationPane({
                       <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans leading-6">{message.thinking}</pre>
                     </details>
                   )}
-                  {Array.isArray(message.content) ? (
+                  {isEditingUserMessage ? (
+                    <div className="space-y-3">
+                      <textarea
+                        ref={editInputRef}
+                        value={editingText}
+                        onChange={(event) => setEditingText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelEdit();
+                          }
+                          if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                            event.preventDefault();
+                            submitEdit(message.id);
+                          }
+                        }}
+                        className="min-h-[92px] w-full resize-none rounded-2xl border border-[var(--accent-soft-strong)] bg-[#0f1011]/80 px-3 py-2.5 text-sm leading-6 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          title="Cancel edit"
+                          onClick={cancelEdit}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] transition hover:bg-[#282a2c]"
+                        >
+                          <CloseIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Send edited message"
+                          onClick={() => submitEdit(message.id)}
+                          disabled={!editingText.trim()}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[#131314] transition disabled:cursor-not-allowed disabled:opacity-45"
+                          style={{ backgroundColor: "var(--accent-color)" }}
+                        >
+                          <SendIcon className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : Array.isArray(message.content) ? (
                     <div className="space-y-3">
                       {message.content.map((part, partIndex) =>
                         part.type === "text" ? (
@@ -221,12 +302,25 @@ export function ConversationPane({
                         )}
                       </div>
                       <div className="flex items-center gap-2">
+                        {canEditUserMessage && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingMessageId(message.id);
+                              setEditingText(messageText);
+                            }}
+                            className={bubbleActionClass}
+                            title="Edit latest message"
+                          >
+                            <EditIcon className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         {firstImagePath && (
                           <button
                             type="button"
                             title="Open image folder"
                             onClick={() => onRevealImageLocation(firstImagePath)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
+                            className={bubbleActionClass}
                           >
                             <FolderIcon className="h-4 w-4" />
                           </button>
@@ -236,7 +330,7 @@ export function ConversationPane({
                             type="button"
                             title="Delete image message"
                             onClick={() => onDeleteImageMessage(message.id)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] transition hover:bg-rose-500/10 hover:text-rose-300"
+                            className={bubbleDangerActionClass}
                           >
                             <TrashIcon className="h-3.5 w-3.5" />
                           </button>
@@ -246,7 +340,7 @@ export function ConversationPane({
                             type="button"
                             title={firstImageCollapsed ? "Expand image" : "Collapse image"}
                             onClick={() => onToggleImageCollapsed(firstImagePartKey)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
+                            className={bubbleActionClass}
                           >
                             {firstImageCollapsed ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronUpIcon className="h-3.5 w-3.5" />}
                           </button>
@@ -255,7 +349,7 @@ export function ConversationPane({
                           <button
                             type="button"
                             onClick={() => onSpeakToggle(message.id, messageText, message.role)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] transition hover:bg-[#282a2c]"
+                            className={bubbleActionClass}
                             title={speakingMessageId === message.id ? "Stop speech" : "Speak"}
                           >
                             {speakingMessageId === message.id ? <StopIcon className="h-3.5 w-3.5" /> : <SpeakerIcon className="h-4 w-4" />}
@@ -279,7 +373,7 @@ export function ConversationPane({
               </div>
             );
           })}
-          <div ref={endRef} className="h-6 shrink-0" />
+          <div ref={endRef} className="h-[10px] shrink-0" />
         </div>
       )}
       {showScrollBottom && (

@@ -14,6 +14,7 @@ import {
   formatReactThinking,
   isExplicitApprovalText,
 } from "../appCore";
+import { localAssetUrl } from "../utils";
 
 type UseChatRuntimeOptions = Record<string, any>;
 
@@ -95,10 +96,23 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
   } = options;
 
   const handleSend = async (sendOptions: SendOptions = {}) => {
+    const editTarget = sendOptions.editMessageId
+      ? messages.find((message: ChatMessage) => message.id === sendOptions.editMessageId && message.role === "user")
+      : null;
+    const editTargetIndex = editTarget
+      ? messages.findIndex((message: ChatMessage) => message.id === editTarget.id)
+      : -1;
     const promptText = sendOptions.text ?? composerInputRef.current?.value ?? input;
-    const attachedImage = sendOptions.imageDataUrl ?? (sendOptions.text ? null : image);
+    const editImageParts = editTarget && Array.isArray(editTarget.content)
+      ? editTarget.content.filter((part: ChatContentPart): part is Extract<ChatContentPart, { type: "image_url" }> => part.type === "image_url")
+      : [];
+    const attachedImage = sendOptions.imageDataUrl ?? (sendOptions.text || sendOptions.editMessageId ? null : image);
     const attachedImagePath = sendOptions.imagePath ?? imagePath;
     if ((!promptText.trim() && !attachedImage) || isStreaming) {
+      return;
+    }
+    if (sendOptions.editMessageId && (!editTarget || editTargetIndex < 0)) {
+      appLog(`Edit request ignored because message was not found: ${sendOptions.editMessageId}`);
       return;
     }
 
@@ -123,21 +137,34 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     });
 
     let content: string | ChatContentPart[] = promptText;
-    if (attachedImage) {
+    if (editImageParts.length) {
       content = [
         { type: "text", text: promptText || "Describe this image." },
-        { type: "image_url", image_url: { url: attachedImage, local_path: attachedImagePath ?? undefined } },
+        ...editImageParts,
+      ];
+    } else if (attachedImage) {
+      const displayImageUrl = attachedImagePath ? localAssetUrl(attachedImagePath) || attachedImage : attachedImage;
+      content = [
+        { type: "text", text: promptText || "Describe this image." },
+        { type: "image_url", image_url: { url: displayImageUrl, local_path: attachedImagePath ?? undefined } },
       ];
     }
 
     const userMessage: ChatMessage = {
-      id: createMessageId(),
+      id: editTarget?.id ?? createMessageId(),
       role: "user",
       content,
       created_at: messageCreatedAt,
     };
+    const assistantMessageId = createMessageId();
 
-    if (!sendOptions.silentUser) {
+    if (sendOptions.editMessageId && editTargetIndex >= 0) {
+      setMessages((prev: ChatMessage[]) => [
+        ...prev.slice(0, editTargetIndex),
+        userMessage,
+        { id: assistantMessageId, role: "assistant", content: "", created_at: Date.now() },
+      ]);
+    } else if (!sendOptions.silentUser) {
       setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
     }
     if (!sendOptions.text) {
@@ -149,7 +176,7 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
       });
     }
 
-    if (!attachedImage && typeof content === "string" && isExplicitApprovalText(content)) {
+    if (!sendOptions.editMessageId && !attachedImage && typeof content === "string" && isExplicitApprovalText(content)) {
       const pendingImageProposal = findPendingImageProposal(messages);
       if (pendingImageProposal) {
         void handleGenerateImage(
@@ -172,13 +199,16 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
       }
     }
 
-    const assistantMessageId = createMessageId();
     setComposerNotice("");
-    const newMessages: ChatMessage[] = [...messages, userMessage];
-    setMessages((prev: ChatMessage[]) => [
-      ...prev,
-      { id: assistantMessageId, role: "assistant", content: "", created_at: Date.now() },
-    ]);
+    const newMessages: ChatMessage[] = sendOptions.editMessageId && editTargetIndex >= 0
+      ? [...messages.slice(0, editTargetIndex), userMessage]
+      : [...messages, userMessage];
+    if (!sendOptions.editMessageId) {
+      setMessages((prev: ChatMessage[]) => [
+        ...prev,
+        { id: assistantMessageId, role: "assistant", content: "", created_at: Date.now() },
+      ]);
+    }
     if (attachedImage && !sendOptions.imageDataUrl) {
       clearImage();
     }
@@ -191,6 +221,37 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     let generatedThinking = "";
     let failed = false;
     let lastUiFlush = 0;
+    const naturalizeFailureReply = async (technicalMessage: string) => {
+      const result = [
+        "The app could not complete the user's request.",
+        `Technical reason: ${technicalMessage}`,
+        "Explain this naturally as the current character, in the current conversation language.",
+        "Final answer only. Do not include thinking, analysis, drafts, plans, or labels.",
+        "Do not claim the action succeeded. Do not expose raw backend wording unless the user needs it.",
+      ].join("\n");
+      const natural = await naturalizeSystemResult(promptText, result);
+      return natural.trim() || "I could not complete that yet.";
+    };
+    const looksLikeBoringSystemFailure = (text: string) =>
+      /^\s*(?:\[?Error:|I could not complete that action because|The chat brain returned|Model error:|Connection to the brain failed)/i.test(text);
+    const resolveRuntimeLinkedFolders = async () => {
+      if (Array.isArray(linkedFolders) && linkedFolders.length) {
+        return linkedFolders;
+      }
+      try {
+        const stored = await invoke<{ linked_folders?: string[] }>("load_app_settings");
+        const savedFolders = Array.isArray(stored.linked_folders)
+          ? stored.linked_folders.filter((folder) => typeof folder === "string" && folder.trim())
+          : [];
+        if (savedFolders.length) {
+          appLog(`chat workspace fallback loaded ${savedFolders.length} saved folder(s) for this request.`);
+          return savedFolders;
+        }
+      } catch (error) {
+        appLog(`chat workspace fallback failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return [];
+    };
     const flushStreamedText = (force = false) => {
       if (isRequestStale()) return;
       const now = Date.now();
@@ -216,6 +277,7 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
       }
 
       setBrainStatus("Thinking");
+      const runtimeLinkedFolders = await resolveRuntimeLinkedFolders();
       const activePersonality =
         personalityPresets.find((preset: { id: string }) => preset.id === selectedPersonalityId) ?? personalityPresets[0];
       const profilePrompt = [
@@ -231,6 +293,9 @@ ${personalityMemory.trim()}`
         userName.trim() || userDescription.trim()
           ? `\nUser profile:\nName: ${userName.trim() || "User"}\nAbout user: ${userDescription.trim() || ""}`
           : "",
+        runtimeLinkedFolders.length
+          ? `\nPermitted workspace folders:\n${runtimeLinkedFolders.join("\n")}`
+          : "\nPermitted workspace folders: none selected.",
         `\nCurrent date: ${new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}`,
       ].join("");
       const olderConversationMemory = buildOlderConversationMemory(newMessages);
@@ -255,16 +320,19 @@ ${personalityMemory.trim()}`
       if (!attachedImage) {
         setComposerNotice("Thinking with tools...");
         appLog(
-          `chat-trace request model=${selectedModelPath || "none"} thinking=${thinkingEnabled} messages=${toolAgentMessages.length}/${newMessages.length} user=${JSON.stringify(promptText).slice(0, 600)}`,
+          `chat-trace request model=${selectedModelPath || "none"} thinking=${thinkingEnabled} folders=${runtimeLinkedFolders.length} messages=${toolAgentMessages.length}/${newMessages.length} user=${JSON.stringify(promptText).slice(0, 600)}`,
         );
         collectBrainDiagnostics()
           .then((diagnostics: string) => appLog(`chat-diagnostics before_agent ${diagnostics}`))
           .catch(() => {});
         const reactResult = await invoke<AgentReactResult>("agent_jan_chat", {
           runtimePrompt: effectiveProfilePrompt,
-          contextBlock: buildSystemContextBlock(),
+          contextBlock: [
+            buildSystemContextBlock(),
+            `Workspace folders for this request: ${runtimeLinkedFolders.length ? runtimeLinkedFolders.join("; ") : "none"}`,
+          ].join(" | "),
           messages: toolAgentMessages,
-          folders: linkedFolders,
+          folders: runtimeLinkedFolders,
           googleClientId,
           googleClientSecret,
           temperature,
@@ -284,6 +352,9 @@ ${personalityMemory.trim()}`
           refreshToolRuns().catch((error: unknown) => console.error("Tool activity refresh error:", error));
         }
         generatedText = reactResult.answer;
+        if (looksLikeBoringSystemFailure(generatedText)) {
+          generatedText = await naturalizeFailureReply(generatedText);
+        }
         generatedThinking = thinkingEnabled ? formatReactThinking(reactResult) : "";
         appLog(
           `chat-trace response tool=${reactResult.tool_used || "none"} answer=${JSON.stringify(reactResult.answer || "").slice(0, 800)} thinking=${generatedThinking ? "yes" : "no"}`,
@@ -312,7 +383,13 @@ ${personalityMemory.trim()}`
           structuredParts.push({ type: "tool_result_cards", cards: reactResult.cards });
         }
         if (reactResult.file_preview) {
-          structuredParts.push({ type: "file_preview", file_preview: reactResult.file_preview });
+          structuredParts.push({
+            type: "file_preview",
+            file_preview: {
+              ...reactResult.file_preview,
+              data_url: null,
+            },
+          });
         }
         if (reactResult.image_proposal) {
           structuredParts.push({ type: "image_proposal", image_proposal: reactResult.image_proposal });
@@ -532,12 +609,11 @@ ${personalityMemory.trim()}`
         );
         setBrainStatus("Ready");
       } else {
+        const technicalMessage = error instanceof Error ? error.message : String(error || "Connection to the brain failed.");
+        const naturalError = await naturalizeFailureReply(technicalMessage);
         updateLastAssistantMessage((last: ChatMessage) => ({
           ...last,
-          content:
-            error instanceof Error
-              ? `[Error: ${error.message}]`
-              : "[Error: Connection to the brain failed.]",
+          content: naturalError,
           ...replyTiming(),
         }));
         setBrainStatus("Error");

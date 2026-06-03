@@ -2,6 +2,7 @@ import { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ChatMessage } from "../types";
 import { createMessageId } from "../appCore";
+import { localAssetUrl } from "../utils";
 
 type GeneratedImageResult = {
   image_base64: string;
@@ -56,13 +57,16 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
     const latestChatImageUrl = Array.isArray(latestChatImage)
       ? latestChatImage.find((part) => part.type === "image_url")?.image_url.url
       : null;
+    const latestChatImagePath = Array.isArray(latestChatImage)
+      ? latestChatImage.find((part) => part.type === "image_url")?.image_url.local_path
+      : null;
     const initImageDataUrls = (() => {
       if (mode === "avatar_image") return options.assistantAvatar ? [options.assistantAvatar] : [];
       if (mode === "user_avatar_image" || mode === "avatar_user_image") return options.userAvatar ? [options.userAvatar] : [];
       if (mode === "user_character_image" || mode === "user_and_character_image" || mode === "both_avatars_image") {
         return [options.userAvatar, options.assistantAvatar].filter((value): value is string => Boolean(value));
       }
-      const source = options.image || (mode === "image_to_image" && latestChatImageUrl?.startsWith("data:image/") ? latestChatImageUrl : null);
+      const source = options.image || (mode === "image_to_image" ? latestChatImagePath || (latestChatImageUrl?.startsWith("data:image/") ? latestChatImageUrl : null) : null);
       return source ? [source] : [];
     })();
     const needsReferenceImage =
@@ -121,6 +125,7 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
         height: options.imageHeight,
       });
       const imageUrl = `data:${result.mime_type};base64,${result.image_base64}`;
+      const displayImageUrl = localAssetUrl(result.file_path) || imageUrl;
       options.appLog(`image-trace response mime=${result.mime_type} bytes_b64=${result.image_base64.length} file=${result.file_path || "<unknown>"}`);
       options.setIsGeneratingImage(false);
       const naturalReply = await options.generateNaturalImageCompletionReply(prompt, mode, imageUrl);
@@ -128,7 +133,7 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
         ...last,
         content: [
           { type: "text", text: naturalReply || "" },
-          { type: "image_url", image_url: { url: imageUrl, local_path: result.file_path } },
+          { type: "image_url", image_url: { url: displayImageUrl, local_path: result.file_path } },
         ],
         completed_at: Date.now(),
         duration_ms: Math.max(0, Math.round(performance.now() - imageTaskStartedAt)),

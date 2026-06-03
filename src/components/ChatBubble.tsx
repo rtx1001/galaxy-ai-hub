@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import { renderInlineText } from "../utils";
+import { pauseOtherMediaElements, renderInlineText } from "../utils";
 
 export function FormattedMessageText({ text, compact = false }: { text: string; compact?: boolean }) {
     const codeFencePattern = /```(\w+)?\n?([\s\S]*?)```/g;
@@ -140,11 +140,11 @@ export function FormattedMessageText({ text, compact = false }: { text: string; 
                 const extension = directMedia[2].toLowerCase();
                 if (["mp4", "webm", "ogg"].includes(extension)) {
                   elements.push(
-                    <video key={`video-${blockIndex}-${elements.length}`} src={mediaUrl} controls className="my-3 max-h-[420px] w-full rounded-3xl bg-[#131314] ring-1 ring-[#282a2c]" />,
+                    <video key={`video-${blockIndex}-${elements.length}`} src={mediaUrl} controls onPlay={(event) => pauseOtherMediaElements(event.currentTarget)} className="my-3 max-h-[420px] w-full rounded-3xl bg-[#131314] ring-1 ring-[#282a2c]" />,
                   );
                 } else if (["mp3", "wav"].includes(extension)) {
                   elements.push(
-                    <audio key={`audio-${blockIndex}-${elements.length}`} src={mediaUrl} controls className="my-3 w-full" />,
+                    <audio key={`audio-${blockIndex}-${elements.length}`} src={mediaUrl} controls onPlay={(event) => pauseOtherMediaElements(event.currentTarget)} className="my-3 w-full" />,
                   );
                 } else {
                   elements.push(

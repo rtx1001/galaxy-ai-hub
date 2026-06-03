@@ -12,7 +12,13 @@ pub(super) fn parse_inline_tool_markup(text: &str) -> Option<(String, Value)> {
         if let Some(parsed) = parse_json_tool_payload(payload) {
             return Some(parsed);
         }
+        if let Some(parsed) = parse_gemma_call_payload(payload) {
+            return Some(parsed);
+        }
         if let Some(parsed) = parse_function_style_tool_call(payload) {
+            return Some(parsed);
+        }
+        if let Some(parsed) = parse_tool_name_directive(payload) {
             return Some(parsed);
         }
         if let Some(parsed) = parse_loose_named_tool_call(payload) {
@@ -23,26 +29,7 @@ pub(super) fn parse_inline_tool_markup(text: &str) -> Option<(String, Value)> {
 }
 
 pub(super) fn canonical_tool_name(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if known_tool(trimmed) {
-        return trimmed.to_string();
-    }
-    let compact = trimmed
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .collect::<String>()
-        .to_ascii_lowercase();
-    AVAILABLE_TOOL_NAMES
-        .iter()
-        .find(|tool| {
-            tool.chars()
-                .filter(|ch| ch.is_ascii_alphanumeric())
-                .collect::<String>()
-                .eq_ignore_ascii_case(&compact)
-        })
-        .copied()
-        .unwrap_or(trimmed)
-        .to_string()
+    raw.trim().to_string()
 }
 
 fn extract_tagged_tool_payload(text: &str) -> Option<&str> {
@@ -89,10 +76,26 @@ fn parse_json_tool_payload(payload: &str) -> Option<(String, Value)> {
     Some((canonical_tool_name(&name), arguments))
 }
 
+fn parse_gemma_call_payload(payload: &str) -> Option<(String, Value)> {
+    let trimmed = payload.trim();
+    let after_call = trimmed.strip_prefix("call:")?;
+    let open = after_call.find('{')?;
+    let close = after_call.rfind('}')?;
+    if close <= open {
+        return None;
+    }
+    let name = after_call[..open].trim();
+    if name.is_empty() {
+        return None;
+    }
+    let args = &after_call[open + 1..close];
+    Some((canonical_tool_name(name), parse_function_arguments(args)))
+}
+
 fn parse_function_style_tool_call(text: &str) -> Option<(String, Value)> {
-    let mut candidates = AVAILABLE_TOOL_NAMES
-        .iter()
-        .filter_map(|tool| find_function_call_span(text, tool).map(|span| (*tool, span)))
+    let mut candidates = available_tool_names()
+        .into_iter()
+        .filter_map(|tool| find_function_call_span(text, tool).map(|span| (tool, span)))
         .collect::<Vec<_>>();
     candidates.sort_by_key(|(_, (start, _))| *start);
     let (name, (open_index, close_index)) = candidates.first().cloned()?;
@@ -100,24 +103,81 @@ fn parse_function_style_tool_call(text: &str) -> Option<(String, Value)> {
     Some((canonical_tool_name(name), parse_function_arguments(args)))
 }
 
+fn parse_tool_name_directive(text: &str) -> Option<(String, Value)> {
+    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let lowered = line.to_ascii_lowercase();
+        let is_tool_directive = lowered.contains("tool call")
+            || lowered.contains("call tool")
+            || lowered.contains("call:")
+            || lowered.contains("use tool")
+            || lowered.contains("using tool")
+            || lowered.contains("i will use")
+            || lowered.contains("i should use")
+            || lowered.contains("i'll use");
+        if !is_tool_directive {
+            continue;
+        }
+        let mentions = exact_tool_mentions(line);
+        if mentions.len() == 1 {
+            let name = mentions[0].to_string();
+            crate::assistant_runtime::append_runtime_log(
+                "agent",
+                &format!("normalized_planner_tool_call tool={} source=directive", name),
+            );
+            return Some((name.clone(), default_tool_arguments(&name)));
+        }
+    }
+
+    let compact = text
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '`' | '\'' | '"' | ':' | ';' | '<' | '>'));
+    let mentions = exact_tool_mentions(compact);
+    if mentions.len() == 1 && compact == mentions[0] {
+        let name = mentions[0].to_string();
+        crate::assistant_runtime::append_runtime_log(
+            "agent",
+            &format!("normalized_planner_tool_call tool={} source=bare_name", name),
+        );
+        return Some((name.clone(), default_tool_arguments(&name)));
+    }
+
+    None
+}
+
+fn exact_tool_mentions(text: &str) -> Vec<&'static str> {
+    available_tool_names()
+        .into_iter()
+        .filter(|tool| contains_exact_tool_name(text, tool))
+        .collect()
+}
+
+fn contains_exact_tool_name(text: &str, tool: &str) -> bool {
+    let mut search_from = 0;
+    while let Some(relative) = text[search_from..].find(tool) {
+        let start = search_from + relative;
+        let before = text[..start].chars().next_back();
+        let after_tool = start + tool.len();
+        let after = text[after_tool..].chars().next();
+        let boundary_before = before
+            .map(|ch| !(ch.is_alphanumeric() || ch == '_'))
+            .unwrap_or(true);
+        let boundary_after = after
+            .map(|ch| !(ch.is_alphanumeric() || ch == '_'))
+            .unwrap_or(true);
+        if boundary_before && boundary_after {
+            return true;
+        }
+        search_from = after_tool;
+    }
+    false
+}
+
 fn parse_loose_named_tool_call(text: &str) -> Option<(String, Value)> {
-    let compact_text = text
-        .chars()
-        .filter(|ch| !ch.is_whitespace() && *ch != '_')
-        .collect::<String>()
-        .to_ascii_lowercase();
-    let mut candidates = AVAILABLE_TOOL_NAMES
-        .iter()
+    let mut candidates = available_tool_names()
+        .into_iter()
         .filter_map(|tool| {
             text.find(tool)
-                .map(|start| (*tool, start, tool.len()))
-                .or_else(|| {
-                    let compact_tool = tool.replace('_', "").to_ascii_lowercase();
-                    compact_text
-                        .find(&compact_tool)
-                        .and_then(|_| text.to_ascii_lowercase().find(&compact_tool))
-                        .map(|start| (*tool, start, compact_tool.len()))
-                })
+                .map(|start| (tool, start, tool.len()))
         })
         .collect::<Vec<_>>();
     candidates.sort_by_key(|(_, start, _)| *start);
@@ -150,7 +210,7 @@ fn parse_loose_named_tool_call(text: &str) -> Option<(String, Value)> {
     }
 }
 
-fn parse_json_object_prefix(input: &str) -> Option<Value> {
+pub(super) fn parse_json_object_prefix(input: &str) -> Option<Value> {
     let trimmed = input.trim();
     if !trimmed.starts_with('{') {
         return None;
@@ -517,8 +577,19 @@ pub(super) fn first_model_tool_call(
 
 pub(super) fn looks_like_unexecuted_tool_narration(text: &str) -> bool {
     let lowered = text.to_lowercase();
-    let mentions_tool = AVAILABLE_TOOL_NAMES
-        .iter()
+    if contains_any(
+        &lowered,
+        &[
+            "file preview shown in this conversation",
+            "previous file preview context",
+            "audio transcript/perception",
+            "video transcript/perception",
+        ],
+    ) {
+        return true;
+    }
+    let mentions_tool = available_tool_names()
+        .into_iter()
         .any(|tool| lowered.contains(&tool.to_lowercase()));
     let mentions_markup = lowered.contains("<tool_call")
         || lowered.contains("<toolcall")
@@ -529,8 +600,8 @@ pub(super) fn looks_like_unexecuted_tool_narration(text: &str) -> bool {
         || lowered.contains("<tool_code")
         || lowered.contains("tool_code");
     let compact = lowered.replace(char::is_whitespace, "");
-    let function_style_call = AVAILABLE_TOOL_NAMES
-        .iter()
+    let function_style_call = available_tool_names()
+        .into_iter()
         .any(|tool| compact.contains(&format!("{}(", tool.to_lowercase())));
     if !mentions_tool && !mentions_markup {
         return false;
@@ -554,13 +625,6 @@ pub(super) fn looks_like_unexecuted_tool_narration(text: &str) -> bool {
             "will be displayed",
             "queued for approval",
             "review the prompt",
-            "gọi tool",
-            "gọi hàm",
-            "đã gọi",
-            "sẽ gọi",
-            "kết quả tool",
-            "được hiển thị tại đây",
-            "sẽ được hiển thị",
         ],
     )
 }

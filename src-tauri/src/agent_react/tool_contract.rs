@@ -1,37 +1,161 @@
 use super::*;
 
-pub(super) const AVAILABLE_TOOL_NAMES: &[&str] = &[
-    "get_current_time",
-    "list_files_in_directory",
-    "search_directory",
-    "read_file",
-    "list_media_files",
-    "preview_random_media",
-    "preview_file",
-    "weather_forecast",
-    "web_search",
-    "gmail_recent",
-    "google_calendar_check",
-    "propose_image_generation",
-    "propose_write_file",
-    "propose_move_file",
-    "propose_delete_file",
-    "run_powershell",
-    "google_drive_search",
-    "google_docs_read",
-    "google_sheets_read",
-    "google_contacts_search",
-    "google_api_read",
-    "propose_gmail_send",
-    "propose_gmail_trash",
-    "propose_calendar_create",
-    "propose_calendar_delete",
-    "propose_google_contact_delete",
-    "propose_google_action",
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct ToolDescriptor {
+    pub name: &'static str,
+    pub purpose: &'static str,
+}
+
+pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
+    ToolDescriptor {
+        name: "get_current_time",
+        purpose: "Read the local date and time.",
+    },
+    ToolDescriptor {
+        name: "list_files_in_directory",
+        purpose: "List folders and files inside a permitted workspace folder.",
+    },
+    ToolDescriptor {
+        name: "search_directory",
+        purpose: "Search permitted workspace folders by file name or keyword.",
+    },
+    ToolDescriptor {
+        name: "read_file",
+        purpose: "Read text content from a permitted workspace file.",
+    },
+    ToolDescriptor {
+        name: "list_media_files",
+        purpose: "List previewable workspace media files by type.",
+    },
+    ToolDescriptor {
+        name: "preview_random_media",
+        purpose: "Show one real random workspace media/file card. Use kind for media type, query for filename/style clues, and root_folder when the user names one of the permitted workspace folders.",
+    },
+    ToolDescriptor {
+        name: "preview_file",
+        purpose: "Show a preview card for a specific workspace file.",
+    },
+    ToolDescriptor {
+        name: "weather_forecast",
+        purpose: "Get real weather forecast for a known city or area.",
+    },
+    ToolDescriptor {
+        name: "web_search",
+        purpose: "Search the web for fresh/current public information.",
+    },
+    ToolDescriptor {
+        name: "gmail_recent",
+        purpose: "Read recent Gmail messages or search Gmail.",
+    },
+    ToolDescriptor {
+        name: "google_calendar_check",
+        purpose: "Read Google Calendar events for a day or month.",
+    },
+    ToolDescriptor {
+        name: "propose_image_generation",
+        purpose: "Create an approval card for text-to-image, image edit, character avatar image, user avatar image, or user+character image generation.",
+    },
+    ToolDescriptor {
+        name: "propose_write_file",
+        purpose: "Create an approval card to write a file inside a workspace.",
+    },
+    ToolDescriptor {
+        name: "propose_move_file",
+        purpose: "Create an approval card to move or rename a workspace file.",
+    },
+    ToolDescriptor {
+        name: "propose_delete_file",
+        purpose: "Create an approval card to move a workspace file to app trash.",
+    },
+    ToolDescriptor {
+        name: "run_powershell",
+        purpose: "Create an approval card for a local PowerShell/system action.",
+    },
+    ToolDescriptor {
+        name: "google_drive_search",
+        purpose: "Search Google Drive files and return verified Drive IDs, MIME types, and links.",
+    },
+    ToolDescriptor {
+        name: "google_docs_read",
+        purpose: "Read a Google Docs document by document ID.",
+    },
+    ToolDescriptor {
+        name: "google_sheets_read",
+        purpose: "Read a Google Sheets spreadsheet or range by spreadsheet ID.",
+    },
+    ToolDescriptor {
+        name: "google_contacts_search",
+        purpose: "Read or search Google Contacts by name, email, or phone.",
+    },
+    ToolDescriptor {
+        name: "google_api_read",
+        purpose: "Call an official Google REST API GET URL when no more specific read tool fits.",
+    },
+    ToolDescriptor {
+        name: "propose_gmail_send",
+        purpose: "Create an approval card to send an email through Gmail.",
+    },
+    ToolDescriptor {
+        name: "propose_gmail_trash",
+        purpose: "Create an approval card to move a Gmail message to Trash.",
+    },
+    ToolDescriptor {
+        name: "propose_calendar_create",
+        purpose: "Create an approval card for a new Google Calendar event.",
+    },
+    ToolDescriptor {
+        name: "propose_calendar_delete",
+        purpose: "Create an approval card to delete a Google Calendar event.",
+    },
+    ToolDescriptor {
+        name: "propose_google_contact_delete",
+        purpose: "Create an approval card to delete a Google contact by verified People API resource name.",
+    },
+    ToolDescriptor {
+        name: "propose_google_action",
+        purpose: "Create an approval card for Google Workspace write/modify actions not covered by a more specific propose_* tool.",
+    },
 ];
 
+pub(super) fn available_tool_names() -> Vec<&'static str> {
+    TOOL_REGISTRY.iter().map(|tool| tool.name).collect()
+}
+
+pub(super) fn available_tool_names_csv() -> String {
+    available_tool_names().join(", ")
+}
+
+fn tool_descriptor(name: &str) -> Option<&'static ToolDescriptor> {
+    TOOL_REGISTRY.iter().find(|tool| tool.name == name)
+}
+
 pub(super) fn known_tool(tool: &str) -> bool {
-    AVAILABLE_TOOL_NAMES.contains(&tool)
+    tool_descriptor(tool).is_some()
+}
+
+pub(super) fn default_tool_arguments(tool: &str) -> Value {
+    match tool {
+        "preview_random_media" | "list_media_files" => json!({ "kind": "any" }),
+        "get_current_time" | "gmail_recent" | "google_contacts_search" | "google_drive_search" => {
+            json!({})
+        }
+        _ => json!({}),
+    }
+}
+
+pub(super) fn tool_knowledge_prompt(route: Option<ToolRoute>) -> String {
+    let mut lines = vec![
+        "Available app tools are fixed knowledge. When deciding whether to use a tool, choose only from this list and use the exact name.".to_string(),
+        "If none of these tools match the user's actual request, do not call a tool; answer normally or ask one short clarification.".to_string(),
+        "Never invent, translate, rename, abbreviate, or repair tool names.".to_string(),
+    ];
+    for descriptor in TOOL_REGISTRY
+        .iter()
+        .filter(|tool| tool_allowed_for_capability(tool.name, route))
+    {
+        lines.push(format!("- {}: {}", descriptor.name, descriptor.purpose));
+    }
+    lines.join("\n")
 }
 
 pub(super) fn image_prompt_argument(call: &ToolCall) -> String {
@@ -63,26 +187,7 @@ pub(super) fn image_prompt_needs_english_rewrite(prompt: &str) -> bool {
         }
         return true;
     }
-    let normalized = format!(" {} ", normalize_text(prompt));
-    contains_any(
-        &normalized,
-        &[
-            " tao anh ",
-            " ve anh ",
-            " tao hinh ",
-            " dang ",
-            " khong ",
-            " mac ",
-            " ngoi ",
-            " dung ",
-            " phong cach ",
-            " anh sang ",
-            " tu nhien ",
-            " dep ",
-            " toan than ",
-            " ban than ",
-        ],
-    )
+    false
 }
 
 pub(super) fn prompt_language_word_counts(prompt: &str) -> (usize, usize) {
@@ -298,130 +403,6 @@ pub(super) fn validate_tool_call(call: &ToolCall) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn string_arg<'a>(arguments: &'a Value, names: &[&str]) -> Option<&'a str> {
-    names
-        .iter()
-        .find_map(|name| arguments.get(*name).and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
-
-pub(super) fn repaired_unknown_tool_call(
-    call: &ToolCall,
-    route: Option<ToolRoute>,
-    latest_user_text: &str,
-) -> Option<ToolCall> {
-    if known_tool(&call.tool) {
-        return Some(call.clone());
-    }
-    let compact = call
-        .tool
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .collect::<String>()
-        .to_ascii_lowercase();
-    let text = normalize_text(&format!(
-        "{} {}",
-        call.tool,
-        extract_value_text(&call.arguments)
-    ));
-
-    let wants_audio_alias = compact.contains("music")
-        || compact.contains("song")
-        || compact.contains("audio")
-        || contains_any(&text, &["music", "song", "audio", "bai hat", "nhac"]);
-    let wants_image_alias = compact.contains("image")
-        || compact.contains("photo")
-        || compact.contains("picture")
-        || contains_any(&text, &["image", "photo", "picture"]);
-
-    if route == Some(ToolRoute::MediaPreview) || wants_audio_alias || wants_image_alias {
-        if let Some(path) = string_arg(&call.arguments, &["path", "file", "filename"]) {
-            return Some(ToolCall {
-                tool: "preview_file".to_string(),
-                arguments: json!({ "path": path }),
-            });
-        }
-        let query = string_arg(&call.arguments, &["query", "song", "title", "name"])
-            .filter(|value| !media_constraint_query_is_generic(value));
-        let kind = if wants_image_alias {
-            "image"
-        } else if wants_audio_alias || route == Some(ToolRoute::MediaPreview) {
-            "audio"
-        } else {
-            "any"
-        };
-        let mut arguments = json!({ "kind": kind, "_user_text": latest_user_text });
-        if let Some(query) = query {
-            arguments["query"] = Value::String(query.to_string());
-        }
-        return Some(ToolCall {
-            tool: "preview_random_media".to_string(),
-            arguments,
-        });
-    }
-
-    if compact.contains("weather") || route == Some(ToolRoute::Weather) {
-        if let Some(location) = string_arg(&call.arguments, &["location", "city", "place"]) {
-            return Some(ToolCall {
-                tool: "weather_forecast".to_string(),
-                arguments: json!({ "location": location }),
-            });
-        }
-    }
-
-    if compact.contains("searchweb") || compact.contains("websearch") {
-        if let Some(query) = string_arg(&call.arguments, &["query", "q"]) {
-            return Some(ToolCall {
-                tool: "web_search".to_string(),
-                arguments: json!({ "query": query }),
-            });
-        }
-    }
-
-    None
-}
-
-pub(super) fn repair_tool_call_for_capability(
-    call: ToolCall,
-    route: Option<ToolRoute>,
-    latest_user_text: &str,
-) -> ToolCall {
-    repaired_unknown_tool_call(&call, route, latest_user_text).unwrap_or(call)
-}
-
-pub(super) fn repair_tool_call_from_model_text(
-    text: &str,
-    route: Option<ToolRoute>,
-    latest_user_text: &str,
-) -> Option<ToolCall> {
-    let normalized = normalize_text(text);
-    if route == Some(ToolRoute::MediaPreview)
-        && contains_any(
-            &normalized,
-            &[
-                "play_music",
-                "play music",
-                "search_music",
-                "search music",
-                "open_song",
-                "open song",
-                "play_song",
-                "play song",
-                "music",
-                "song",
-                "audio",
-            ],
-        )
-    {
-        return Some(ToolCall {
-            tool: "preview_random_media".to_string(),
-            arguments: json!({ "kind": "audio", "_user_text": latest_user_text }),
-        });
-    }
-    None
-}
-
 pub(super) fn with_user_text(mut call: ToolCall, user_text: &str) -> ToolCall {
     let mut object = call.arguments.as_object().cloned().unwrap_or_default();
     object.insert(
@@ -461,8 +442,8 @@ pub(super) fn tool_schema() -> Value {
         { "type": "function", "function": { "name": "list_files_in_directory", "description": "Lists folders/files in a permitted workspace folder", "parameters": { "type": "object", "properties": { "path": { "type": "string", "description": "optional permitted folder path" } }, "required": [] } } },
         { "type": "function", "function": { "name": "search_directory", "description": "Search for matching files in permitted workspace folders", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "file name or keyword" } }, "required": ["query"] } } },
         { "type": "function", "function": { "name": "read_file", "description": "Returns text content from a permitted workspace file", "parameters": { "type": "object", "properties": { "path": { "type": "string", "description": "file path or file name" } }, "required": ["path"] } } },
-        { "type": "function", "function": { "name": "list_media_files", "description": "Lists previewable media files in workspace", "parameters": { "type": "object", "properties": { "kind": { "type": "string", "description": "audio, video, image, document, text, or any" } }, "required": ["kind"] } } },
-        { "type": "function", "function": { "name": "preview_random_media", "description": "Returns one real random previewable workspace file as a chat card. Include query when the user asks for a specific language, topic, artist, filename clue, or media style.", "parameters": { "type": "object", "properties": { "kind": { "type": "string", "description": "audio, video, image, document, text, or any" }, "query": { "type": "string", "description": "optional filename/path keyword constraint, e.g. Thai, jazz, beach, invoice" } }, "required": ["kind"] } } },
+        { "type": "function", "function": { "name": "list_media_files", "description": "Lists previewable media files in workspace. Use root_folder when the user names one of the permitted workspace folders.", "parameters": { "type": "object", "properties": { "kind": { "type": "string", "description": "audio, video, image, document, text, or any" }, "root_folder": { "type": "string", "description": "optional exact permitted workspace folder path or folder name" } }, "required": ["kind"] } } },
+        { "type": "function", "function": { "name": "preview_random_media", "description": "Returns one real random previewable workspace media file as a chat card. Use kind=audio for songs/music. Include query for artist/topic/filename clues. Use root_folder when the user names one of the permitted workspace folders, such as Music.", "parameters": { "type": "object", "properties": { "kind": { "type": "string", "description": "audio, video, image, document, text, or any" }, "query": { "type": "string", "description": "optional filename/path keyword constraint, e.g. jazz, beach, invoice" }, "root_folder": { "type": "string", "description": "optional exact permitted workspace folder path or folder name" } }, "required": ["kind"] } } },
         { "type": "function", "function": { "name": "preview_file", "description": "Returns a file preview card inside chat when possible", "parameters": { "type": "object", "properties": { "path": { "type": "string", "description": "file path or file name" } }, "required": ["path"] } } },
         { "type": "function", "function": { "name": "weather_forecast", "description": "Returns a structured weather forecast for a real city using Open-Meteo. Use this for weather, rain, temperature, humidity, wind, and weekend forecast questions instead of generic web search whenever a city is known.", "parameters": { "type": "object", "properties": { "location": { "type": "string", "description": "city or area name, e.g. Ha Noi or Tokyo" }, "days": { "type": "integer", "description": "optional number of forecast days, usually 1 to 10" } }, "required": ["location"] } } },
         { "type": "function", "function": { "name": "web_search", "description": "Returns fresh web search results from DuckDuckGo", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "search query" } }, "required": ["query"] } } },
@@ -551,9 +532,9 @@ pub(super) fn filtered_tool_schema(route: Option<ToolRoute>) -> Value {
 }
 
 pub(super) fn tool_names_for_capability(route: Option<ToolRoute>) -> Vec<&'static str> {
-    AVAILABLE_TOOL_NAMES
+    TOOL_REGISTRY
         .iter()
-        .copied()
+        .map(|tool| tool.name)
         .filter(|tool| tool_allowed_for_capability(tool, route))
         .collect()
 }

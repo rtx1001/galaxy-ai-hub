@@ -65,6 +65,7 @@ const QWEN_IMAGE_LLMS: &[&str] = &[
 ];
 const QWEN_IMAGE_VISION: &str = "Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf";
 const QWEN_IMAGE_VAE: &str = "qwen_image_vae.safetensors";
+const NEUTRAL_REFERENCE_CANVAS: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY2hoaPgPAAWEAoCjCMBmAAAAAElFTkSuQmCC";
 
 fn app_root_dir() -> PathBuf {
     app_paths::app_root_dir()
@@ -87,14 +88,16 @@ fn sdcpp_input_dir() -> PathBuf {
 }
 
 fn sd_server_path() -> PathBuf {
-    app_root_dir()
-        .join("bin")
-        .join("stable-diffusion")
-        .join(if cfg!(windows) {
-            "sd-server.exe"
-        } else {
-            "sd-server"
-        })
+    let root = app_root_dir().join("bin").join("stable-diffusion");
+    if cfg!(windows) {
+        let standard = root.join("sd-server.exe");
+        if standard.exists() {
+            return standard;
+        }
+        root.join("sd-server-galaxy.exe")
+    } else {
+        root.join("sd-server")
+    }
 }
 
 fn qwen_edit_dir() -> PathBuf {
@@ -107,6 +110,16 @@ fn z_image_dir() -> PathBuf {
 
 fn append_image_log(message: &str) {
     crate::assistant_runtime::append_runtime_log("image-trace", message);
+}
+
+fn sd_server_log_file() -> Option<std::fs::File> {
+    let log_dir = app_root_dir().join("logs");
+    std::fs::create_dir_all(&log_dir).ok()?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_dir.join("sd-server.log"))
+        .ok()
 }
 
 fn selected_tier_hint() -> String {
@@ -191,21 +204,26 @@ fn qwen_profile() -> Option<ImageModelProfile> {
     }
 }
 
-fn resolve_image_profile() -> Result<ImageModelProfile, String> {
+fn resolve_image_profile(needs_reference_editing: bool) -> Result<ImageModelProfile, String> {
+    if needs_reference_editing {
+        return qwen_profile().ok_or_else(|| {
+            "Reference image generation needs the Qwen image-edit model. Install or repair the High image tier first."
+                .to_string()
+        });
+    }
+
     let tier = selected_tier_hint();
-    let preferred = if tier == "high" {
+    let profile = if tier == "high" {
         qwen_profile()
     } else {
         z_image_profile_for_tier(&tier)
     };
-    preferred
-        .or_else(|| z_image_profile_for_tier("balanced"))
-        .or_else(|| z_image_profile_for_tier("light"))
-        .or_else(qwen_profile)
-        .ok_or_else(|| {
-            "Image Studio is not fully installed. Install or repair the selected setup tier first."
-                .to_string()
-        })
+    profile.ok_or_else(|| {
+        format!(
+            "Image Studio is not fully installed for the selected {} tier. Install or repair this tier from setup first.",
+            tier
+        )
+    })
 }
 
 fn reserve_local_port() -> Result<u16, String> {
@@ -263,7 +281,17 @@ fn spawn_server(profile: &ImageModelProfile, port: u16) -> Result<Child, String>
             .arg("3")
             .arg("--qwen-image-zero-cond-t");
     }
-    command.stdout(Stdio::null()).stderr(Stdio::null());
+    if let Some(log_file) = sd_server_log_file() {
+        let stderr = log_file.try_clone().ok();
+        command.stdout(Stdio::from(log_file));
+        if let Some(stderr) = stderr {
+            command.stderr(Stdio::from(stderr));
+        } else {
+            command.stderr(Stdio::null());
+        }
+    } else {
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+    }
     crate::process_util::hide_window(&mut command);
     command
         .spawn()
@@ -458,9 +486,17 @@ fn generation_payload(
         payload["sample_params"]["flow_shift"] = json!(3.0);
     }
     if !init_images.is_empty() {
-        payload["init_image"] = json!(init_images[0]);
-        payload["ref_images"] = json!(init_images);
-        if profile.backend == ImageBackend::ZImage {
+        if profile.backend == ImageBackend::QwenEdit {
+            // Qwen Image Edit treats references best as visual guidance. Passing the
+            // first avatar as init_image locks composition to the source portrait.
+            // The server API still requires an init image for reference-guided
+            // edits, so use a neutral canvas and keep real images as references.
+            payload["init_image"] = json!(NEUTRAL_REFERENCE_CANVAS);
+            payload["ref_images"] = json!(init_images);
+            payload["strength"] = json!(0.95);
+        } else {
+            payload["init_image"] = json!(init_images[0]);
+            payload["ref_images"] = json!(init_images);
             payload["strength"] = json!(0.35);
         }
     }
@@ -490,7 +526,7 @@ async fn submit_generation(client: &Client, port: u16, payload: &Value) -> Resul
     if !status.is_success() {
         return Err(format!("Image Studio returned {}. {}", status, text));
     }
-    serde_json::from_str::<JobSubmitResponse>(&text)
+    let job_id = serde_json::from_str::<JobSubmitResponse>(&text)
         .map(|job| job.id)
         .or_else(|_| {
             serde_json::from_str::<Value>(&text)
@@ -499,7 +535,9 @@ async fn submit_generation(client: &Client, port: u16, payload: &Value) -> Resul
                 .ok_or_else(|| {
                     format!("Image Studio returned an unreadable job response: {}", text)
                 })
-        })
+        })?;
+    append_image_log(&format!("sd-server submitted job={}", job_id));
+    Ok(job_id)
 }
 
 async fn poll_job(client: &Client, port: u16, job_id: &str) -> Result<Value, String> {
@@ -538,6 +576,7 @@ async fn poll_job(client: &Client, port: u16, job_id: &str) -> Result<Value, Str
             _ => {}
         }
         if started.elapsed() > Duration::from_secs(240) {
+            append_image_log(&format!("sd-server job timeout job={}", job_id));
             return Err("Image Studio did not finish in time.".to_string());
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -577,9 +616,15 @@ pub async fn generate_image(
     width: Option<u32>,
     height: Option<u32>,
 ) -> Result<ImageGenerationOutput, String> {
-    let profile = resolve_image_profile()?;
+    let needs_reference_editing = init_image_data_urls
+        .as_ref()
+        .is_some_and(|values| values.iter().any(|value| !value.trim().is_empty()))
+        || init_image_data_url
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty());
+    let profile = resolve_image_profile(needs_reference_editing)?;
     let client = Client::builder()
-        .timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(300))
         .build()
         .map_err(|e| format!("Could not create Image Studio client: {}", e))?;
     let mut init_images = Vec::new();
@@ -614,8 +659,22 @@ pub async fn generate_image(
         port,
         crate::assistant_runtime::compact_trace_text(&prompt, 600)
     ));
-    let job_id = submit_generation(&client, port, &payload).await?;
-    let job = poll_job(&client, port, &job_id).await?;
+    let job_id = submit_generation(&client, port, &payload)
+        .await
+        .map_err(|error| {
+            append_image_log(&format!(
+                "sd-server submit failed key={} error={}",
+                profile.key, error
+            ));
+            error
+        })?;
+    let job = poll_job(&client, port, &job_id).await.map_err(|error| {
+        append_image_log(&format!(
+            "sd-server poll failed key={} job={} error={}",
+            profile.key, job_id, error
+        ));
+        error
+    })?;
     let (image_base64, mime_type) = image_b64_from_job(&job)?;
     let bytes = BASE64
         .decode(&image_base64)
