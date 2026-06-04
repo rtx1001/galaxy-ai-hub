@@ -8,6 +8,7 @@ import {
   conversationWantsVietnamese,
   createMessageId,
   extractChoiceText,
+  extractMessageText,
   formatFileActionResult,
   textLooksVietnamese,
 } from "../appCore";
@@ -47,6 +48,26 @@ const proposalJsonPayload = (proposal: ActionProposal, key: string) => {
     return value;
   }
   return JSON.stringify(value);
+};
+
+const conversationStyleHint = (messages: ChatMessage[]) => {
+  const recentLines = messages
+    .slice(-8)
+    .map((message) => {
+      const text = extractMessageText(message.content).replace(/\s+/g, " ").trim();
+      if (!text) return "";
+      return `${message.role === "user" ? "User" : "Assistant"}: ${text.slice(0, 180)}`;
+    })
+    .filter(Boolean);
+  if (!recentLines.length) {
+    return "Preserve the current conversation's tone, relationship, and address style.";
+  }
+  return [
+    "Preserve the established conversation style exactly: tone, relationship, names, honorifics, pronouns, and address terms.",
+    "Do not switch to a generic or more distant address style when recent messages show a more specific one.",
+    "Recent style examples:",
+    recentLines.join("\n"),
+  ].join("\n");
 };
 
 const stripReasoningLeak = (text: string) => {
@@ -210,6 +231,7 @@ export function useActionProposals(options: UseActionProposalsOptions) {
       const languageHint = conversationWantsVietnamese(options.messages) || textLooksVietnamese(userRequest)
         ? "Reply in natural Vietnamese matching the current conversation."
         : "Reply in the current conversation language.";
+      const styleHint = conversationStyleHint(options.messages);
       const response = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -229,7 +251,7 @@ export function useActionProposals(options: UseActionProposalsOptions) {
           messages: [
             {
               role: "system",
-              content: `Turn a verified system/tool result into one short, natural assistant reply. ${languageHint} Final answer only. Do not include thinking, analysis, plans, drafts, labels, message IDs, raw API wording, JSON, tool names, or backend status unless the user explicitly needs it.`,
+              content: `Turn a verified system/tool result into one short, natural assistant reply. ${languageHint}\n${styleHint}\nFinal answer only. Do not include thinking, analysis, plans, drafts, labels, message IDs, raw API wording, JSON, tool names, or backend status unless the user explicitly needs it.`,
             },
             {
               role: "user",

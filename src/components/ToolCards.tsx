@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ToolResultCard, ImageProposal, ActionProposal, FilePreviewResult, GoogleCalendarEvent } from "../types";
 import { formatBytes, toolCardStyle, fieldValue, compactDetailsForKind, cleanDisplayPath, localAssetUrl, pauseOtherMediaElements } from "../utils";
-import { ChevronDownIcon, FolderOpenIcon, TrashIcon } from "./Icons";
+import { CheckIcon, ChevronDownIcon, CloseIcon, FolderOpenIcon, PlusIcon, TrashIcon } from "./Icons";
+import { ImageModeDropdown, imageModeLabel, normalizeImageMode } from "./ImageModeDropdown";
+import { RegisteredAudio } from "./RegisteredAudio";
 
 type DisplayLanguage = "en" | "vi";
 
@@ -16,6 +19,112 @@ const uiText = (_language: DisplayLanguage) => ({
   generate: "Generate",
   approve: "Approve",
 });
+
+type ImageReferencePreview = {
+  id: string;
+  src: string;
+  label: string;
+};
+
+type LocalImageDataUrl = {
+  data_url: string;
+  path: string;
+};
+
+const isBotImageMode = (mode: string) => normalizeImageMode(mode) === "bot_image";
+const isUserImageMode = (mode: string) => normalizeImageMode(mode) === "user_image";
+const isUserBotImageMode = (mode: string) => normalizeImageMode(mode) === "user_bot_image";
+const normalizedReferenceSources = (sources?: string[] | null) =>
+  Array.isArray(sources)
+    ? sources
+        .map((source) => source.trim().toLowerCase().replace(/[-\s]+/g, "_"))
+        .filter((source, index, items) =>
+          ["chat_image", "user_avatar", "bot_avatar"].includes(source) && items.indexOf(source) === index,
+        )
+    : [];
+
+const displayImageSource = (value?: string | null) => {
+  if (!value) return "";
+  if (value.startsWith("data:image/") || value.startsWith("http://") || value.startsWith("https://")) return value;
+  return localAssetUrl(value) || value;
+};
+
+const imagePromptMentionsUserProfile = (prompt: string, userName?: string) => {
+  const lowered = prompt.toLocaleLowerCase();
+  const name = userName?.trim().toLocaleLowerCase() || "";
+  return Boolean(name && lowered.includes(name)) || /\b(the\s+user|selected\s+user|user\s+profile)\b/i.test(prompt);
+};
+
+function ImageReferenceDots({
+  mode,
+  prompt,
+  assistantAvatar,
+  userAvatar,
+  userName,
+  chatImageRef,
+  extraImageRefs,
+  referenceSources,
+  onAddImages,
+}: {
+  mode: string;
+  prompt: string;
+  assistantAvatar?: string;
+  userAvatar?: string;
+  userName?: string;
+  chatImageRef?: string | null;
+  extraImageRefs: ImageReferencePreview[];
+  referenceSources?: string[];
+  onAddImages: () => void;
+}) {
+  const refs: ImageReferencePreview[] = [];
+  const normalizedMode = normalizeImageMode(mode);
+  const selectedSources = normalizedReferenceSources(referenceSources);
+  const wantsUserReference =
+    selectedSources.includes("user_avatar") ||
+    (!selectedSources.length && imagePromptMentionsUserProfile(prompt, userName));
+  const wantsBotReference = selectedSources.includes("bot_avatar");
+  const wantsChatReference = !selectedSources.length || selectedSources.includes("chat_image");
+  if (isBotImageMode(normalizedMode) && assistantAvatar) {
+    refs.push({ id: "bot", src: assistantAvatar, label: "Bot avatar" });
+  } else if (isUserImageMode(normalizedMode) && userAvatar) {
+    refs.push({ id: "user", src: userAvatar, label: "User avatar" });
+  } else if (isUserBotImageMode(normalizedMode)) {
+    if (userAvatar) refs.push({ id: "user", src: userAvatar, label: "User avatar" });
+    if (assistantAvatar) refs.push({ id: "bot", src: assistantAvatar, label: "Bot avatar" });
+  } else if (normalizedMode === "image_image") {
+    const displayChatImage = displayImageSource(chatImageRef);
+    if (displayChatImage && wantsChatReference) refs.push({ id: "chat-image", src: displayChatImage, label: "Chat image" });
+    if (userAvatar && wantsUserReference) {
+      refs.push({ id: "user", src: userAvatar, label: "User avatar" });
+    }
+    if (assistantAvatar && wantsBotReference) refs.push({ id: "bot", src: assistantAvatar, label: "Bot avatar" });
+    refs.push(...extraImageRefs);
+  }
+  if (!refs.length && normalizedMode !== "image_image") return null;
+  return (
+    <div className="flex min-w-0 items-center gap-1.5">
+      {refs.map((ref) => (
+        <span
+          key={ref.id}
+          className="inline-flex h-8 w-8 shrink-0 overflow-hidden rounded-full border border-[var(--accent-soft-strong)] bg-[#0f1011] p-0.5 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+          title={ref.label}
+        >
+          <img src={ref.src} alt="" className="h-full w-full rounded-full object-cover" />
+        </span>
+      ))}
+      {normalizedMode === "image_image" && (
+        <button
+          type="button"
+          onClick={onAddImages}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#282a2c] bg-[#0f1011] text-[#c4c7c5] transition hover:border-[var(--accent-soft-strong)] hover:text-[var(--accent-color)]"
+          title="Add another reference image"
+        >
+          <PlusIcon className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function FilePreviewCard({
     preview,
@@ -31,22 +140,39 @@ export function FilePreviewCard({
     const dataUrl = preview.data_url || "";
     const assetUrl = localAssetUrl(preview.path);
     const mediaUrl = assetUrl || dataUrl;
+    const isAudio = mime.startsWith("audio/");
+    const isImage = mime.startsWith("image/");
     return (
-    <div className="overflow-hidden rounded-3xl border border-[#282a2c] bg-[#131314]">
+    <div className={`${isAudio ? "overflow-visible" : "overflow-hidden"} rounded-3xl border border-[#282a2c] bg-[#131314]`}>
       <div className="border-b border-[#282a2c] px-4 py-3">
-        <div className="truncate text-sm font-semibold text-[#f1f3f4]">{preview.name}</div>
-        <div className="mt-1 flex flex-wrap gap-2 text-xs text-[#c4c7c5]">
-          <span>{preview.extension || "file"}</span>
-          <span>{formatBytes(preview.size_bytes)}</span>
-          {preview.truncated && <span>preview truncated</span>}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-[#f1f3f4]">{preview.name}</div>
+            <div className="mt-1 flex flex-wrap gap-2 text-xs text-[#c4c7c5]">
+              <span>{preview.extension || "file"}</span>
+              <span>{formatBytes(preview.size_bytes)}</span>
+              {preview.truncated && <span>preview truncated</span>}
+            </div>
+          </div>
+          <button
+            type="button"
+            title={labels.openInExplorer}
+            onClick={() => invoke("open_in_explorer", { path: preview.path, folders: linkedFolders }).catch(console.error)}
+            className="shrink-0 flex h-9 w-9 items-center justify-center rounded-xl border border-[#282a2c] bg-[#1e1f20] text-[var(--accent-color)] transition hover:bg-[#282a2c]"
+            style={{ boxShadow: "inset 0 0 0 9999px transparent" }}
+          >
+            <FolderOpenIcon className="h-4 w-4" />
+          </button>
         </div>
       </div>
-      <div className="p-3">
-        {mime.startsWith("image/") && mediaUrl && (
-          <img src={mediaUrl} alt={preview.name} className="max-h-[520px] w-full rounded-2xl object-contain" />
+      <div className={`${isAudio ? "overflow-visible" : ""} ${isImage ? "p-2.5" : "p-3"}`}>
+        {isImage && mediaUrl && (
+          <div className="overflow-hidden rounded-[18px] bg-[#131314] ring-1 ring-[#282a2c]">
+            <img src={mediaUrl} alt={preview.name} className="max-h-[520px] w-full object-contain" />
+          </div>
         )}
-        {mime.startsWith("audio/") && mediaUrl && (
-          <audio src={mediaUrl} controls onPlay={(event) => pauseOtherMediaElements(event.currentTarget)} className="w-full" />
+        {isAudio && mediaUrl && (
+          <RegisteredAudio id={`file-preview:${preview.path}`} title={preview.name} src={mediaUrl} className="w-full" />
         )}
         {mime.startsWith("video/") && mediaUrl && (
           <video src={mediaUrl} controls onPlay={(event) => pauseOtherMediaElements(event.currentTarget)} className="max-h-[520px] w-full rounded-2xl bg-black" />
@@ -68,19 +194,6 @@ export function FilePreviewCard({
         {!mediaUrl && preview.text === null && (
           <div className="text-sm text-[#c4c7c5]">This file type cannot be displayed inside chat yet.</div>
         )}
-      </div>
-      <div className="border-t border-[#282a2c] px-4 py-2 flex items-center justify-between gap-2">
-        <span className="break-all text-xs text-[#9aa0a6] min-w-0 truncate" title={cleanDisplayPath(preview.path)}>{cleanDisplayPath(preview.path)}</span>
-        <button
-          type="button"
-          title={labels.openInExplorer}
-          onClick={() => invoke("open_in_explorer", { path: preview.path, folders: linkedFolders }).catch(console.error)}
-          className="shrink-0 flex items-center gap-1.5 rounded-full border border-[#282a2c] bg-[#1e1f20] px-3 py-1 text-[11px] font-semibold text-[var(--accent-color)] transition hover:bg-[#282a2c]"
-          style={{ boxShadow: "inset 0 0 0 9999px transparent" }}
-        >
-          <FolderOpenIcon className="h-3.5 w-3.5" />
-          Show
-        </button>
       </div>
     </div>
     );
@@ -261,6 +374,10 @@ export function ImageProposalCard({
       proposal,
       disabled,
       forceCollapsed = false,
+      assistantAvatar,
+      userAvatar,
+      userName,
+      chatImageRef,
       onGenerate,
       onCancel,
       language = "en",
@@ -268,26 +385,64 @@ export function ImageProposalCard({
           proposal: ImageProposal;
           disabled: boolean;
           forceCollapsed?: boolean;
-          onGenerate: (prompt: string) => void;
+          assistantAvatar?: string;
+          userAvatar?: string;
+          userName?: string;
+          chatImageRef?: string | null;
+          onGenerate: (prompt: string, mode: string, extraReferenceImages?: string[], referenceSources?: string[]) => void;
           onCancel: () => void;
           language?: DisplayLanguage;
         }) {
     const labels = uiText(language);
     const [draftPrompt, setDraftPrompt] = useState(proposal.prompt);
+    const [selectedMode, setSelectedMode] = useState(normalizeImageMode(proposal.mode || "text_image"));
+    const [extraImageRefs, setExtraImageRefs] = useState<ImageReferencePreview[]>([]);
     const [open, setOpen] = useState(true);
+    useEffect(() => {
+      setDraftPrompt(proposal.prompt);
+      setSelectedMode(normalizeImageMode(proposal.mode || "text_image"));
+      setExtraImageRefs([]);
+    }, [proposal.prompt, proposal.mode]);
     useEffect(() => {
       if (forceCollapsed) {
         setOpen(false);
       }
     }, [forceCollapsed]);
-    const modeLabel = proposal.mode.replace(/_/g, " ");
-    const modeText = "Mode";
+    const selectedModeLabel = imageModeLabel(selectedMode);
     const maskText = "Mask";
+    const addReferenceImages = async () => {
+      const selected = await openDialog({
+        directory: false,
+        multiple: true,
+        title: "Choose reference image",
+        filters: [
+          { name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
+        ],
+      });
+      const paths = Array.isArray(selected) ? selected : typeof selected === "string" ? [selected] : [];
+      if (!paths.length) return;
+      const loaded: ImageReferencePreview[] = [];
+      for (const path of paths) {
+        try {
+          const result = await invoke<LocalImageDataUrl>("read_local_image_data_url", { path });
+          loaded.push({
+            id: `${result.path}-${loaded.length}-${Date.now()}`,
+            src: result.data_url,
+            label: result.path.split(/[\\/]/).pop() || "Reference image",
+          });
+        } catch (error) {
+          console.error("Reference image load error:", error);
+        }
+      }
+      if (loaded.length) {
+        setExtraImageRefs((prev) => [...prev, ...loaded].slice(0, 4));
+      }
+    };
     return (
     <details
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
-      className="w-full overflow-hidden rounded-[22px] border border-[#3b3420] bg-[#131314] shadow-sm"
+      className="w-full overflow-visible rounded-[22px] border border-[var(--accent-soft-strong)] bg-[#131314] shadow-sm"
     >
       <summary className="cursor-pointer select-none list-none px-3.5 py-3 [&::-webkit-details-marker]:hidden">
         <div className="flex items-center justify-between gap-3">
@@ -298,7 +453,7 @@ export function ImageProposalCard({
               <div className="truncate text-sm font-semibold text-[#f1f3f4]">{labels.imageTitle}</div>
               {!open && (
                 <div className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9aa0a6]">
-                  {modeLabel}
+                  {selectedModeLabel}
                 </div>
               )}
             </div>
@@ -316,11 +471,19 @@ export function ImageProposalCard({
           placeholder="Describe the image..."
         />
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 flex-wrap gap-1.5 text-[11px] leading-5">
-            <span className="rounded-full border border-[#282a2c] bg-[#0f1011] px-2.5 py-1 font-semibold text-[#c4c7c5]">
-              <span className="mr-1.5 uppercase tracking-[0.12em] text-[#9aa0a6]">{modeText}</span>
-              <span className="text-[#e3e3e3]">{modeLabel}</span>
-            </span>
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-[11px] leading-5">
+            <ImageModeDropdown value={selectedMode} onChange={setSelectedMode} />
+            <ImageReferenceDots
+              mode={selectedMode}
+              prompt={draftPrompt}
+              assistantAvatar={assistantAvatar}
+              userAvatar={userAvatar}
+              userName={userName}
+              chatImageRef={chatImageRef}
+              extraImageRefs={extraImageRefs}
+              referenceSources={proposal.reference_sources}
+              onAddImages={addReferenceImages}
+            />
             {proposal.mask_prompt && (
               <span className="max-w-full rounded-full border border-[#282a2c] bg-[#0f1011] px-2.5 py-1 font-semibold text-[#c4c7c5]">
                 <span className="mr-1.5 uppercase tracking-[0.12em] text-[#9aa0a6]">{maskText}</span>
@@ -331,22 +494,37 @@ export function ImageProposalCard({
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <button
               type="button"
+              title={labels.cancel}
               onClick={onCancel}
-              className="rounded-full border border-[#282a2c] bg-[#131314] px-4 py-2 text-xs font-semibold text-[#e3e3e3] transition hover:bg-[#282a2c]"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#282a2c] bg-[#131314] text-[#e3e3e3] transition hover:bg-[#282a2c]"
             >
-              {labels.cancel}
+              <CloseIcon className="h-3.5 w-3.5" />
             </button>
             <button
               type="button"
+              title={labels.generate}
               disabled={disabled || !draftPrompt.trim()}
               onClick={() => {
                 setOpen(false);
-                onGenerate(draftPrompt.trim());
+                const referenceSources = normalizedReferenceSources(proposal.reference_sources);
+                const sourceRefs =
+                  normalizeImageMode(selectedMode) === "image_image"
+                    ? [
+                        referenceSources.includes("user_avatar") ? userAvatar : null,
+                        referenceSources.includes("bot_avatar") ? assistantAvatar : null,
+                      ].filter((value): value is string => Boolean(value))
+                    : [];
+                onGenerate(
+                  draftPrompt.trim(),
+                  selectedMode,
+                  [...sourceRefs, ...extraImageRefs.map((ref) => ref.src)],
+                  referenceSources,
+                );
               }}
-              className="rounded-full px-4 py-2 text-xs font-semibold text-[#0b0d10] transition disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#0b0d10] transition disabled:cursor-not-allowed disabled:opacity-50"
               style={{ backgroundColor: "var(--accent-color)" }}
             >
-              {labels.generate}
+              <CheckIcon className="h-4 w-4" />
             </button>
           </div>
         </div>

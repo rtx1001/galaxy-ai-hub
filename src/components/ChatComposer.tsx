@@ -133,14 +133,14 @@ export function ChatComposer({
                 <button
                   type="button"
                   onClick={onKeepLongTaskRunning}
-                  className="rounded-full border border-[#282a2c] bg-[#1e1f20] px-3.5 py-2 text-xs font-semibold text-[#e3e3e3] transition hover:bg-[#282a2c]"
+                  className="h-9 rounded-full border border-[#282a2c] bg-[#1e1f20] px-3.5 text-xs font-semibold text-[#e3e3e3] transition hover:bg-[#282a2c]"
                 >
                   Keep running
                 </button>
                 <button
                   type="button"
                   onClick={onStopLongTask}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-rose-500/35 bg-rose-500/12 text-rose-200 transition hover:bg-rose-500/20"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#282a2c] bg-[#1e1f20] text-rose-200 transition hover:border-rose-500/35 hover:bg-rose-500/15"
                   title="Stop task"
                 >
                   <StopIcon className="h-4 w-4" />

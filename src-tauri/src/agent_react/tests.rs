@@ -129,7 +129,7 @@ fn planner_instruction_for_avatar_requests_exposes_image_modes_without_forcing_r
     let state = derive_conversation_task_state(latest, None, None, false, false);
     let instruction = tool_planner_instruction(latest, &state, 0);
     assert!(instruction.contains("PRIVATE TOOL PLANNER"));
-    assert!(instruction.contains("avatar_image"));
+    assert!(instruction.contains("bot_image"));
     assert!(instruction.contains("one structured tool call"));
 }
 
@@ -773,6 +773,32 @@ Path: D:\Music\song.mp3"
 }
 
 #[test]
+fn media_list_tool_is_promoted_to_preview_for_fresh_open_request() {
+    let messages = vec![ReactChatMessage {
+        role: "user".to_string(),
+        content: json!("play something from my workspace"),
+    }];
+    let call = promote_media_list_to_preview_in_preview_flow(
+        ToolCall {
+            tool: "list_media_files".to_string(),
+            arguments: json!({ "kind": "audio" }),
+        },
+        &messages,
+        "play something from my workspace",
+    );
+
+    assert_eq!(call.tool, "preview_random_media");
+    assert_eq!(
+        call.arguments.get("kind").and_then(Value::as_str),
+        Some("audio")
+    );
+    assert_eq!(
+        call.arguments.get("_user_text").and_then(Value::as_str),
+        Some("play something from my workspace")
+    );
+}
+
+#[test]
 fn model_chosen_media_followup_is_enriched_from_preview_context() {
     let messages = vec![
         ReactChatMessage {
@@ -885,7 +911,66 @@ fn assistant_self_image_request_keeps_model_selected_avatar_mode() {
         "send me your picture in a bathtub",
     );
     let proposal = parse_image_proposal(&call).expect("image proposal");
-    assert_eq!(proposal.mode, "avatar_image");
+    assert_eq!(proposal.mode, "bot_image");
+}
+
+#[test]
+fn image_generation_execution_mode_aliases_are_normalized() {
+    let cases = [
+        ("avatar_to_image", "bot_image"),
+        ("character_to_image", "bot_image"),
+        ("user_avatar_to_image", "user_image"),
+        ("avatar_user_to_image", "user_image"),
+        ("user_character_to_image", "user_bot_image"),
+        ("both_avatars_to_image", "user_bot_image"),
+    ];
+
+    for (raw, expected) in cases {
+        let arguments = json!({
+            "mode": raw,
+            "prompt": "A cinematic portrait using the selected profile reference."
+        });
+        let proposal = parse_image_proposal(&ToolCall {
+            tool: "propose_image_generation".to_string(),
+            arguments: arguments.clone(),
+        })
+        .expect("image proposal");
+        assert_eq!(proposal.mode, expected);
+        assert!(validate_tool_call(&ToolCall {
+            tool: "propose_image_generation".to_string(),
+            arguments,
+        })
+        .is_ok());
+    }
+}
+
+#[test]
+fn image_proposal_parses_structured_reference_sources() {
+    let proposal = parse_image_proposal(&ToolCall {
+        tool: "propose_image_generation".to_string(),
+        arguments: json!({
+            "mode": "image_image",
+            "prompt": "A cinematic scene with the selected user and the person from the prior chat image.",
+            "reference_sources": ["chat_image", "user_avatar", "chat_image"]
+        }),
+    })
+    .expect("image proposal");
+
+    assert_eq!(proposal.mode, "image_image");
+    assert_eq!(proposal.reference_sources, vec!["chat_image", "user_avatar"]);
+}
+
+#[test]
+fn image_generation_rejects_unknown_modes() {
+    let error = validate_tool_call(&ToolCall {
+        tool: "propose_image_generation".to_string(),
+        arguments: json!({
+            "mode": "send_bot_photo",
+            "prompt": "A cinematic portrait using the selected profile reference."
+        }),
+    })
+    .expect_err("unknown image mode must be rejected");
+    assert!(error.contains("Image generation mode must be one of"));
 }
 
 #[test]
@@ -1414,7 +1499,7 @@ fn tagged_json_tool_call_with_description_is_recovered() {
         proposal.prompt,
         "A neon supercar racing through rain at night."
     );
-    assert_eq!(proposal.mode, "text_to_image");
+    assert_eq!(proposal.mode, "text_image");
 }
 
 #[test]
@@ -1438,23 +1523,22 @@ fn malformed_reasoning_tool_call_is_recovered() {
 
 #[test]
 fn malformed_angle_pipe_tool_call_is_recovered() {
-    let text = r#"<|tool_call>call:propose_image_generation{"visual_prompt":"A portrait of Jasmine on a beach. Mode: avatar_image"}"#;
+    let text = r#"<|tool_call>call:propose_image_generation{"visual_prompt":"A portrait of Jasmine on a beach. Mode: bot_image"}"#;
     let parsed = first_model_tool_call(&json!({}), text).expect("fallback tool call");
     assert_eq!(parsed.0, "propose_image_generation");
     assert_eq!(
         parsed.1.get("visual_prompt").and_then(Value::as_str),
-        Some("A portrait of Jasmine on a beach. Mode: avatar_image")
+        Some("A portrait of Jasmine on a beach. Mode: bot_image")
     );
     let proposal = parse_image_proposal(&ToolCall {
         tool: parsed.0,
         arguments: parsed.1,
     })
     .expect("image proposal");
-    assert_eq!(proposal.mode, "avatar_image");
-    assert!(proposal.prompt.contains("Preserve the source image"));
+    assert_eq!(proposal.mode, "bot_image");
     assert!(proposal
         .prompt
-        .contains("A portrait of Jasmine on a beach. Mode: avatar_image"));
+        .contains("A portrait of Jasmine on a beach. Mode: bot_image"));
 }
 
 #[test]
@@ -1475,6 +1559,42 @@ fn gemma_pipe_call_tool_call_with_prompt_wrapper_is_recovered() {
         proposal.prompt,
         "A neon supercar racing through rain at night."
     );
+}
+
+#[test]
+fn malformed_json_like_tool_payload_is_rejected() {
+    let text = r#"<tool_call>{"name":"preview_random_media","arguments":{"kind":"audio","root_folder":"E:\Music"</tool_call>"#;
+    assert!(parse_inline_tool_markup(text).is_none());
+    assert!(first_model_tool_call(&json!({}), text).is_none());
+}
+
+#[test]
+fn preview_file_accepts_file_path_alias_but_requires_a_path() {
+    validate_tool_call(&ToolCall {
+        tool: "preview_file".to_string(),
+        arguments: json!({ "file_path": "E:\\Music\\song.mp3" }),
+    })
+    .expect("file_path alias should be accepted");
+
+    let error = validate_tool_call(&ToolCall {
+        tool: "preview_file".to_string(),
+        arguments: json!({ "kind": "audio" }),
+    })
+    .expect_err("preview_file must not run without a real path");
+    assert!(error.contains("preview_file requires a non-empty path"));
+}
+
+#[test]
+fn malformed_argument_keys_are_rejected_before_execution() {
+    let error = validate_tool_call(&ToolCall {
+        tool: "preview_random_media".to_string(),
+        arguments: json!({
+            "\",\"arguments\":{\"kind\":\"audio\"": "\\Music",
+            "kind": "audio"
+        }),
+    })
+    .expect_err("damaged JSON-like argument keys must be rejected");
+    assert!(error.contains("Tool arguments are malformed"));
 }
 
 #[test]
@@ -1504,32 +1624,32 @@ fn malformed_prompt_wrappers_are_removed_from_image_prompt() {
         }),
     })
     .expect("image proposal");
-    assert_eq!(proposal.mode, "avatar_image");
-    assert!(proposal.prompt.contains("Preserve the source image"));
-    assert!(proposal
-        .prompt
-        .contains("A candid portrait of Jasmine reading a book."));
+    assert_eq!(proposal.mode, "bot_image");
+    assert_eq!(
+        proposal.prompt,
+        "A candid portrait of Jasmine reading a book."
+    );
 }
 
 #[test]
 fn pending_image_proposal_is_parsed_from_serialized_context() {
     let parsed = parse_pending_image_proposal_text(
-            "Pending image proposal awaiting approval:\nPrompt: Doraemon walking on the beach\nMode: avatar_image\nMask prompt: sky",
+            "Pending image proposal awaiting approval:\nPrompt: Doraemon walking on the beach\nMode: bot_image\nMask prompt: sky",
         )
         .expect("pending proposal");
     assert_eq!(parsed.prompt, "Doraemon walking on the beach");
-    assert_eq!(parsed.mode, "avatar_image");
+    assert_eq!(parsed.mode, "bot_image");
     assert_eq!(parsed.mask_prompt.as_deref(), Some("sky"));
 }
 
 #[test]
 fn fake_tool_result_image_proposal_is_parsed_from_final_text() {
     let parsed = parse_pending_image_proposal_text(
-            "Anh xem lại mô tả này nhé:\nTool result: Image creation request\nA supercar speeding along a beach at night.\nMode: text_to_image",
+            "Anh xem lại mô tả này nhé:\nTool result: Image creation request\nA supercar speeding along a beach at night.\nMode: text_image",
         )
         .expect("image proposal");
     assert_eq!(parsed.prompt, "A supercar speeding along a beach at night.");
-    assert_eq!(parsed.mode, "text_to_image");
+    assert_eq!(parsed.mode, "text_image");
     assert_eq!(parsed.mask_prompt, None);
 }
 
@@ -1544,8 +1664,7 @@ fn image_to_image_prompt_preserves_source_context() {
         }),
     };
     let proposal = parse_image_proposal(&call).expect("image proposal");
-    assert!(proposal.prompt.contains("Preserve the source image"));
-    assert!(proposal.prompt.contains("add a realistic cowboy hat"));
+    assert_eq!(proposal.prompt, "add a realistic cowboy hat to the man");
 }
 
 #[test]
@@ -1554,7 +1673,7 @@ fn recent_pending_image_proposal_is_reused_for_confirmation() {
             ReactChatMessage {
                 role: "assistant".to_string(),
                 content: json!(
-                    "I can create this image. Review the prompt below and approve it before I start.\nPending image proposal awaiting approval:\nPrompt: Doraemon climbing a mountain\nMode: text_to_image"
+                    "I can create this image. Review the prompt below and approve it before I start.\nPending image proposal awaiting approval:\nPrompt: Doraemon climbing a mountain\nMode: text_image"
                 ),
             },
             ReactChatMessage {
@@ -1566,6 +1685,10 @@ fn recent_pending_image_proposal_is_reused_for_confirmation() {
     assert_eq!(proposal.prompt, "Doraemon climbing a mountain");
     let state = derive_conversation_task_state("ok", None, Some(&proposal), false, false);
     assert!(!state.image_required);
+    let required = state.with_image_required("semantic classifier");
+    assert!(required.image_required);
+    assert_eq!(required.allowed_tool_names(), "propose_image_generation");
+    assert_eq!(required.label, "pending_image_approval");
 }
 
 #[test]
@@ -1597,7 +1720,7 @@ fn older_image_proposal_is_not_pending_after_normal_assistant_reply() {
             ReactChatMessage {
                 role: "assistant".to_string(),
                 content: json!(
-                    "Pending image proposal awaiting approval:\nPrompt: A rainy tea table beside a stream\nMode: text_to_image"
+                    "Pending image proposal awaiting approval:\nPrompt: A rainy tea table beside a stream\nMode: text_image"
                 ),
             },
             ReactChatMessage {
@@ -1689,6 +1812,14 @@ fn image_generation_tool_call_is_allowed_for_visual_request() {
         }),
     };
     assert!(tool_allowed_for_context(&call, &messages).is_ok());
+}
+
+#[test]
+fn image_classifier_keeps_attached_image_questions_as_vision_chat() {
+    let instruction = image_tool_classifier_instruction();
+    assert!(instruction.contains("visual understanding"));
+    assert!(instruction.contains("question about the attached image"));
+    assert!(instruction.contains("An attached image by itself is not a request"));
 }
 
 #[test]

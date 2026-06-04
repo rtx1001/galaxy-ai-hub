@@ -270,6 +270,8 @@ function App() {
     setImageHeight,
     quickImagePrompt,
     setQuickImagePrompt,
+    quickImageMode,
+    setQuickImageMode,
   } = useImageStudioSettings();
   const [voiceFolder, setVoiceFolder] = useState(DEFAULT_SETTINGS.voice_folder);
   const [selectedVoicePath, setSelectedVoicePath] = useState(DEFAULT_SETTINGS.selected_voice_path);
@@ -861,12 +863,15 @@ function App() {
     recordClientToolRun,
     setComposerNotice,
     setComposerText,
+    activeTaskTypeRef,
+    setActiveTaskType,
     setIsGeneratingImage,
     setMessages,
     unloadLlmForTask,
     updateAssistantMessageById,
     updateLastAssistantMessage,
     userAvatar,
+    userName,
   });
 
   const { handleSend } = useChatRuntime({
@@ -1016,10 +1021,15 @@ function App() {
     handleSend,
     imageHeight,
     imageWidth,
+    quickImageMode,
     isGeneratingImage,
     quickImagePrompt,
+    assistantAvatar,
+    userAvatar,
     recordClientToolRun,
     setComposerNotice,
+    activeTaskTypeRef,
+    setActiveTaskType,
     setIsGeneratingImage,
     setQuickImagePrompt,
     unloadLlmForTask,
@@ -1284,6 +1294,8 @@ function App() {
     previewVoiceSample,
     previewingVoicePath,
     quickImagePrompt,
+    quickImageMode,
+    setQuickImageMode,
     recentAutomationJobs,
     refreshGoogleCalendarEvents,
     refreshToolRuns,

@@ -5,6 +5,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use image::imageops::FilterType;
+use image::{DynamicImage, GenericImageView};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -48,24 +50,26 @@ struct ImageServerProcess {
 static IMAGE_SERVER: OnceLock<Mutex<Option<ImageServerProcess>>> = OnceLock::new();
 
 const QWEN_IMAGE_MODELS: &[&str] = &[
+    "Qwen-Rapid-NSFW-v23_Q4_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q8_0.gguf",
     "Qwen-Rapid-NSFW-v23_Q6_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q5_K.gguf",
-    "Qwen-Rapid-NSFW-v23_Q4_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q3_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q2_K.gguf",
 ];
 const QWEN_IMAGE_LLMS: &[&str] = &[
+    "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
     "Qwen2.5-VL-7B-Instruct.Q8_0.gguf",
     "Qwen2.5-VL-7B-Instruct.Q6_K.gguf",
     "Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf",
-    "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
     "Qwen2.5-VL-7B-Instruct.Q3_K_M.gguf",
     "Qwen2.5-VL-7B-Instruct.Q2_K.gguf",
 ];
 const QWEN_IMAGE_VISION: &str = "Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf";
 const QWEN_IMAGE_VAE: &str = "qwen_image_vae.safetensors";
 const NEUTRAL_REFERENCE_CANVAS: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY2hoaPgPAAWEAoCjCMBmAAAAAElFTkSuQmCC";
+const REFERENCE_IMAGE_MIN_EDGE: u32 = 512;
+const REFERENCE_IMAGE_JPEG_QUALITY: u8 = 92;
 
 fn app_root_dir() -> PathBuf {
     app_paths::app_root_dir()
@@ -381,14 +385,54 @@ fn clamp_dimension(value: Option<u32>, cap: u32) -> u32 {
     value.unwrap_or(cap).clamp(256, cap)
 }
 
-fn extension_from_data_url(data_url: &str) -> &'static str {
-    if data_url.starts_with("data:image/jpeg") || data_url.starts_with("data:image/jpg") {
-        "jpg"
-    } else if data_url.starts_with("data:image/webp") {
-        "webp"
-    } else {
-        "png"
+fn resize_reference_image(image: DynamicImage) -> DynamicImage {
+    let (width, height) = image.dimensions();
+    if width == 0 || height == 0 {
+        return image;
     }
+    let min_edge = width.min(height);
+    if min_edge == REFERENCE_IMAGE_MIN_EDGE {
+        return image;
+    }
+    let scale = REFERENCE_IMAGE_MIN_EDGE as f32 / min_edge as f32;
+    let next_width = ((width as f32 * scale).round() as u32).max(1);
+    let next_height = ((height as f32 * scale).round() as u32).max(1);
+    image.resize_exact(next_width, next_height, FilterType::Lanczos3)
+}
+
+fn encode_reference_jpeg(image: DynamicImage) -> Result<Vec<u8>, String> {
+    let rgb = image.to_rgb8();
+    let mut bytes = Vec::new();
+    let encoder = jpeg_encoder::Encoder::new(&mut bytes, REFERENCE_IMAGE_JPEG_QUALITY);
+    encoder
+        .encode(
+            rgb.as_raw(),
+            rgb.width() as u16,
+            rgb.height() as u16,
+            jpeg_encoder::ColorType::Rgb,
+        )
+        .map_err(|e| format!("Could not encode the resized image reference: {}", e))?;
+    Ok(bytes)
+}
+
+fn prepare_reference_image(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u32), String> {
+    let image = image::load_from_memory(bytes)
+        .map_err(|e| format!("Could not decode the image reference: {}", e))?;
+    let (source_width, source_height) = image.dimensions();
+    let resized = resize_reference_image(image);
+    let (resized_width, resized_height) = resized.dimensions();
+    let encoded = encode_reference_jpeg(resized)?;
+    Ok((
+        encoded,
+        source_width,
+        source_height,
+        resized_width,
+        resized_height,
+    ))
+}
+
+fn prepared_reference_data_url(prepared_bytes: &[u8]) -> String {
+    format!("data:image/jpeg;base64,{}", BASE64.encode(prepared_bytes))
 }
 
 fn save_reference_image(data_url_or_path: &str) -> Result<String, String> {
@@ -403,17 +447,26 @@ fn save_reference_image(data_url_or_path: &str) -> Result<String, String> {
         let bytes = BASE64
             .decode(encoded)
             .map_err(|e| format!("Could not decode the attached image: {}", e))?;
+        let (prepared_bytes, source_width, source_height, resized_width, resized_height) =
+            prepare_reference_image(&bytes)?;
         let input_dir = sdcpp_input_dir();
         std::fs::create_dir_all(&input_dir)
             .map_err(|e| format!("Could not prepare the image input folder: {}", e))?;
-        let extension = extension_from_data_url(value);
-        let hash = crate::assistant_runtime::stable_bytes_hash(&bytes);
-        let path = input_dir.join(format!("galaxy-input-{}.{}", hash, extension));
+        let hash = crate::assistant_runtime::stable_bytes_hash(&prepared_bytes);
+        let path = input_dir.join(format!("galaxy-input-{}.jpg", hash));
         if !path.exists() {
-            std::fs::write(&path, &bytes)
+            std::fs::write(&path, &prepared_bytes)
                 .map_err(|e| format!("Could not save the attached image: {}", e))?;
         }
-        return Ok(value.to_string());
+        append_image_log(&format!(
+            "prepared reference image source={}x{} resized={}x{} file=\"{}\"",
+            source_width,
+            source_height,
+            resized_width,
+            resized_height,
+            path.display()
+        ));
+        return Ok(prepared_reference_data_url(&prepared_bytes));
     }
 
     let path = PathBuf::from(value);
@@ -422,12 +475,27 @@ fn save_reference_image(data_url_or_path: &str) -> Result<String, String> {
     }
     let bytes =
         std::fs::read(&path).map_err(|e| format!("Could not read the input image file: {}", e))?;
-    let mime = match path.extension().and_then(|ext| ext.to_str()).unwrap_or("") {
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        _ => "image/png",
-    };
-    Ok(format!("data:{};base64,{}", mime, BASE64.encode(bytes)))
+    let (prepared_bytes, source_width, source_height, resized_width, resized_height) =
+        prepare_reference_image(&bytes)?;
+    let input_dir = sdcpp_input_dir();
+    std::fs::create_dir_all(&input_dir)
+        .map_err(|e| format!("Could not prepare the image input folder: {}", e))?;
+    let hash = crate::assistant_runtime::stable_bytes_hash(&prepared_bytes);
+    let prepared_path = input_dir.join(format!("galaxy-input-{}.jpg", hash));
+    if !prepared_path.exists() {
+        std::fs::write(&prepared_path, &prepared_bytes)
+            .map_err(|e| format!("Could not save the resized image reference: {}", e))?;
+    }
+    append_image_log(&format!(
+        "prepared reference image source={}x{} resized={}x{} input=\"{}\" file=\"{}\"",
+        source_width,
+        source_height,
+        resized_width,
+        resized_height,
+        path.display(),
+        prepared_path.display()
+    ));
+    Ok(prepared_reference_data_url(&prepared_bytes))
 }
 
 fn generation_payload(
@@ -449,7 +517,7 @@ fn generation_payload(
         "strength": 0.55,
         "seed": -1,
         "batch_count": 1,
-        "auto_resize_ref_image": true,
+        "auto_resize_ref_image": false,
         "increase_ref_index": false,
         "control_strength": 0.9,
         "output_format": "jpeg",
@@ -701,4 +769,23 @@ pub async fn generate_image(
         mime_type,
         file_path: output_path.to_string_lossy().to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reference_resize_preserves_ratio_and_sets_smaller_edge() {
+        let image = DynamicImage::new_rgb8(360, 512);
+        let resized = resize_reference_image(image);
+        assert_eq!(resized.dimensions(), (512, 728));
+    }
+
+    #[test]
+    fn reference_resize_keeps_existing_target_min_edge() {
+        let image = DynamicImage::new_rgb8(512, 768);
+        let resized = resize_reference_image(image);
+        assert_eq!(resized.dimensions(), (512, 768));
+    }
 }

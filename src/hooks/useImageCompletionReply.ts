@@ -1,5 +1,19 @@
 import { PersonalityPreset, DisplayLanguage, extractChatResponseText, stripThinkBlocks } from "../appCore";
 
+const IMAGE_REPLY_TIMEOUT_MS = 25_000;
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
+
 type UseImageCompletionReplyOptions = {
   appLog: (message: string) => void;
   characterSoul: string;
@@ -55,9 +69,16 @@ ${options.personality || activePersonality?.prompt || "You are a helpful assista
       : `Original image request mode: ${mode}. Visual request: ${prompt}`;
 
     try {
-      await options.ensureChatModelReady();
+      options.appLog("image completion reply start");
+      const ready = await withTimeout(options.ensureChatModelReady(), IMAGE_REPLY_TIMEOUT_MS, "Image completion model load");
+      if (!ready) {
+        throw new Error("Image completion model was not ready");
+      }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), IMAGE_REPLY_TIMEOUT_MS);
       const response = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
         method: "POST",
+        signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: [
@@ -77,15 +98,17 @@ ${options.personality || activePersonality?.prompt || "You are a helpful assista
             thinking: false,
           },
         }),
-      });
+      }).finally(() => clearTimeout(timeoutId));
 
       if (!response.ok) {
         throw new Error(`Image reply failed with status ${response.status}`);
       }
 
-      return stripThinkBlocks(extractChatResponseText(await response.json()))
+      const reply = stripThinkBlocks(extractChatResponseText(await response.json()))
         .replace(/\s+/g, " ")
         .trim();
+      options.appLog(`image completion reply done length=${reply.length}`);
+      return reply;
     } catch (error) {
       console.error("Image completion reply error:", error);
       options.appLog(`image completion reply failed error=${error instanceof Error ? error.message : String(error)}`);

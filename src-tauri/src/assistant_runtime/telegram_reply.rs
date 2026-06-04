@@ -476,20 +476,40 @@ pub(super) async fn execute_telegram_pending_approval(
                             .and_then(|guard| guard.last_image_by_chat.get(&chat_id).cloned())
                             .and_then(|path| image_reference_data_url(&path))
                     });
-                let init_images = match proposal.mode.as_str() {
-                    "image_to_image" => recent_image_ref.clone().into_iter().collect::<Vec<_>>(),
-                    "avatar_image" => assistant_avatar_ref.clone().into_iter().collect::<Vec<_>>(),
-                    "user_avatar_image" | "avatar_user_image" => {
-                        user_avatar_ref.clone().into_iter().collect::<Vec<_>>()
+                let mut reference_sources = proposal.reference_sources.clone();
+                if reference_sources.is_empty() {
+                    reference_sources = match proposal.mode.as_str() {
+                        "image_image" | "image_to_image" => vec!["chat_image".to_string()],
+                        "avatar_image" | "bot_image" => vec!["bot_avatar".to_string()],
+                        "user_avatar_image" | "avatar_user_image" | "user_image" => {
+                            vec!["user_avatar".to_string()]
+                        }
+                        "user_character_image" | "user_and_character_image" | "both_avatars_image"
+                        | "user_bot_image" => vec!["user_avatar".to_string(), "bot_avatar".to_string()],
+                        _ => Vec::new(),
+                    };
+                }
+                let mut init_images = Vec::new();
+                for source in reference_sources {
+                    match source.as_str() {
+                        "chat_image" => {
+                            if let Some(value) = recent_image_ref.clone() {
+                                init_images.push(value);
+                            }
+                        }
+                        "user_avatar" => {
+                            if let Some(value) = user_avatar_ref.clone() {
+                                init_images.push(value);
+                            }
+                        }
+                        "bot_avatar" => {
+                            if let Some(value) = assistant_avatar_ref.clone() {
+                                init_images.push(value);
+                            }
+                        }
+                        _ => {}
                     }
-                    "user_character_image" | "user_and_character_image" | "both_avatars_image" => {
-                        [user_avatar_ref.clone(), assistant_avatar_ref.clone()]
-                            .into_iter()
-                            .flatten()
-                            .collect::<Vec<_>>()
-                    }
-                    _ => Vec::new(),
-                };
+                }
                 append_runtime_log(
                     "telegram",
                     &format!(
@@ -500,36 +520,39 @@ pub(super) async fn execute_telegram_pending_approval(
                         assistant_avatar_ref.is_some()
                     ),
                 );
-                if proposal.mode == "image_to_image" && init_images.is_empty() {
+                if matches!(proposal.mode.as_str(), "image_image" | "image_to_image") && init_images.is_empty() {
                     return Err(
                         "I need an input image before I can edit one from Telegram.".to_string()
                     );
                 }
                 if matches!(
                     proposal.mode.as_str(),
-                    "user_character_image" | "user_and_character_image" | "both_avatars_image"
+                    "user_character_image" | "user_and_character_image" | "both_avatars_image" | "user_bot_image"
                 ) && init_images.len() < 2
                 {
                     return Err(
-                        "I need both the selected user avatar and character avatar before I can use them as image references."
+                        "I need both the selected user avatar and assistant avatar before I can use them as image references."
                             .to_string(),
                     );
                 }
                 if matches!(
                     proposal.mode.as_str(),
                     "avatar_image"
+                        | "bot_image"
                         | "user_avatar_image"
                         | "avatar_user_image"
+                        | "user_image"
                         | "user_character_image"
                         | "user_and_character_image"
                         | "both_avatars_image"
+                        | "user_bot_image"
                 ) && init_images.is_empty()
                 {
                     return Err(match proposal.mode.as_str() {
-                        "avatar_image" => {
-                            "I need the selected character avatar before I can send that image."
+                        "avatar_image" | "bot_image" => {
+                            "I need the selected assistant avatar before I can send that image."
                         }
-                        "user_avatar_image" | "avatar_user_image" => {
+                        "user_avatar_image" | "avatar_user_image" | "user_image" => {
                             "I need the selected user avatar before I can use it as an image reference."
                         }
                         _ => "I need the selected profile avatars before I can use them as image references.",

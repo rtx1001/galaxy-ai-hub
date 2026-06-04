@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ModelLoadStatus, VoiceSetupStatus } from "../types";
 
 export function useRuntimeStatusDisplay({
@@ -37,7 +38,7 @@ export function useRuntimeStatusDisplay({
     )
     .replace(/^Preparing voice playback\.\.\.$/, "Voice: preparing playback");
 
-  const topStatusText =
+  const rawTopStatusText =
     (brainStatus === "Loading"
       ? `Model: ${modelLoadStatus.message || "loading"}`
       : "") ||
@@ -74,6 +75,27 @@ export function useRuntimeStatusDisplay({
                   ? 25
                   : 0;
 
+  const topProgressActive = topProgressPercent > 0;
+  const [showSettledStatus, setShowSettledStatus] = useState(true);
+
+  useEffect(() => {
+    if (topProgressActive || brainStatus === "Error") {
+      setShowSettledStatus(true);
+      return;
+    }
+    if (!rawTopStatusText) {
+      setShowSettledStatus(false);
+      return;
+    }
+    setShowSettledStatus(true);
+    const timeout = window.setTimeout(() => setShowSettledStatus(false), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [brainStatus, rawTopStatusText, topProgressActive]);
+
+  const topStatusText = topProgressActive || brainStatus === "Error" || showSettledStatus
+    ? rawTopStatusText
+    : "";
+
   const waveformProcessing =
     isGeneratingImage ||
     isStreaming ||
@@ -96,7 +118,7 @@ export function useRuntimeStatusDisplay({
   return {
     topStatusText,
     topProgressPercent,
-    topProgressActive: topProgressPercent > 0,
+    topProgressActive,
     imageStudioDrawing: isGeneratingImage,
     waveformProcessing,
   };

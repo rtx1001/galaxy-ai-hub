@@ -67,6 +67,7 @@ export type ImageProposal = {
       prompt: string;
       mode: string;
       mask_prompt?: string | null;
+      reference_sources?: string[];
     };
 export type ActionProposal = {
       action_type: string;

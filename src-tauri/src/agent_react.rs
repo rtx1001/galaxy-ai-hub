@@ -166,15 +166,44 @@ pub async fn agent_jan_chat_core(
     // The model planner receives the full tool schema and decides from meaning + context.
     let contextual_route: Option<ToolRoute> = None;
     let pending_image_proposal = recent_pending_image_proposal(&messages);
-    let has_recent_image_context = recent_image_context(&messages);
+    let has_recent_image_context = recent_image_context(&messages)
+        || context_block
+            .to_ascii_lowercase()
+            .contains("recent chat image reference: yes");
     let has_recent_image_creation_context = recent_unresolved_image_creation_context(&messages);
-    let task_state = derive_conversation_task_state(
+    let mut task_state = derive_conversation_task_state(
         &latest_text,
         contextual_route,
         pending_image_proposal.as_ref(),
         has_recent_image_context,
         has_recent_image_creation_context,
     );
+    if task_state.route.is_none() && !task_state.image_required && !latest_text.trim().is_empty() {
+        match classify_image_tool_requirement(&messages, &latest_text, sampling).await {
+            Ok(true) => {
+                task_state = task_state.with_image_required(
+                    "semantic tool classifier determined this turn needs the image proposal tool",
+                );
+                crate::assistant_runtime::append_runtime_log(
+                    "agent",
+                    &format!(
+                        "image_tool_required_by_classifier latest=\"{}\"",
+                        crate::assistant_runtime::compact_trace_text(&latest_text, 180)
+                    ),
+                );
+            }
+            Ok(false) => {}
+            Err(error) => {
+                crate::assistant_runtime::append_runtime_log(
+                    "agent",
+                    &format!(
+                        "image_tool_classifier_failed error=\"{}\"",
+                        crate::assistant_runtime::compact_trace_text(&error, 180)
+                    ),
+                );
+            }
+        }
+    }
     crate::assistant_runtime::append_runtime_log(
         "agent",
         &format!(
@@ -255,10 +284,43 @@ pub async fn agent_jan_chat_core(
                 if let Some((name, arguments, _, _)) =
                     first_model_tool_call(&json!({}), &assistant_text)
                 {
-                    let candidate = ToolCall {
-                        tool: name.clone(),
-                        arguments: arguments.clone(),
-                    };
+                    let candidate = ensure_image_tool_call_contract(
+                        ToolCall {
+                            tool: name.clone(),
+                            arguments: arguments.clone(),
+                        },
+                        &latest_text,
+                        &planner_task_state,
+                        &request_messages
+                            .iter()
+                            .rev()
+                            .filter_map(|message| {
+                                let role = message.get("role").and_then(Value::as_str)?;
+                                if role == "system" {
+                                    return None;
+                                }
+                                let text = extract_value_text(
+                                    message.get("content").unwrap_or(&Value::Null),
+                                );
+                                let text = text.trim();
+                                if text.is_empty() {
+                                    return None;
+                                }
+                                Some(format!(
+                                    "{}: {}",
+                                    role,
+                                    crate::assistant_runtime::compact_trace_text(text, 260)
+                                ))
+                            })
+                            .take(8)
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        sampling,
+                    )
+                    .await?;
                     if validate_tool_call(&candidate).is_ok() {
                         append_thinking(
                             &mut accumulated_thinking,
@@ -306,26 +368,150 @@ pub async fn agent_jan_chat_core(
                         ));
                     }
                 } else if let Some(proposal) = parse_pending_image_proposal_text(&assistant_text) {
-                    request_messages.push(json!({
-                        "role": "system",
-                        "content": format!(
-                            "Protocol error: the final answer wrote an image proposal instead of using propose_image_generation in the private planner. Return to planning and produce that tool call there. Proposal mode seen: {}.",
-                            proposal.mode
-                        )
-                    }));
-                    continue;
+                    let proposal = ensure_image_proposal_mode(
+                        proposal,
+                        &latest_text,
+                        &task_state,
+                        &request_messages
+                            .iter()
+                            .rev()
+                            .filter_map(|message| {
+                                let role = message.get("role").and_then(Value::as_str)?;
+                                if role == "system" {
+                                    return None;
+                                }
+                                let text = extract_value_text(
+                                    message.get("content").unwrap_or(&Value::Null),
+                                );
+                                let text = text.trim();
+                                if text.is_empty() {
+                                    return None;
+                                }
+                                Some(format!(
+                                    "{}: {}",
+                                    role,
+                                    crate::assistant_runtime::compact_trace_text(text, 260)
+                                ))
+                            })
+                            .take(8)
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        sampling,
+                    )
+                    .await?;
+                    append_thinking(
+                        &mut accumulated_thinking,
+                        "Tool protocol repair: converted a structured image proposal leaked in final text into the app approval card.",
+                    );
+                    let outcome = image_proposal_outcome(proposal.clone(), vi);
+                    tool_trace.push(ToolTrace {
+                        tool: "propose_image_generation".to_string(),
+                        success: true,
+                        summary: clean_summary(&outcome.observation),
+                    });
+                    return Ok(ReactChatResult {
+                        answer: image_approval_answer(vi),
+                        thinking: thinking_result(thinking_enabled, &accumulated_thinking),
+                        tool_used: Some("propose_image_generation".to_string()),
+                        observation: Some(outcome.observation),
+                        cards: outcome.cards,
+                        image_proposal: Some(proposal),
+                        file_preview: None,
+                        action_proposal: None,
+                        tool_trace,
+                    });
                 } else {
+                    if task_state.image_required
+                        && !answer_is_clarification_or_refusal(&assistant_text)
+                    {
+                        let prompt_seed = latest_text
+                            .replace("[image attached]", "")
+                            .trim()
+                            .to_string();
+                        if !prompt_seed.is_empty() {
+                            let rewritten_prompt = rewrite_image_prompt_to_english(
+                                &prompt_seed,
+                                &latest_text,
+                                "text_image",
+                                sampling,
+                            )
+                            .await?
+                            .unwrap_or(prompt_seed);
+                            let conversation_context = request_messages
+                                .iter()
+                                .rev()
+                                .filter_map(|message| {
+                                    let role = message.get("role").and_then(Value::as_str)?;
+                                    if role == "system" {
+                                        return None;
+                                    }
+                                    let text = extract_value_text(
+                                        message.get("content").unwrap_or(&Value::Null),
+                                    );
+                                    let text = text.trim();
+                                    if text.is_empty() {
+                                        return None;
+                                    }
+                                    Some(format!(
+                                        "{}: {}",
+                                        role,
+                                        crate::assistant_runtime::compact_trace_text(text, 260)
+                                    ))
+                                })
+                                .take(8)
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            let proposal = ensure_image_proposal_mode(
+                                ImageProposal {
+                                    prompt: rewritten_prompt,
+                                    mode: "text_image".to_string(),
+                                    mask_prompt: None,
+                                    reference_sources: Vec::new(),
+                                },
+                                &latest_text,
+                                &task_state,
+                                &conversation_context,
+                                sampling,
+                            )
+                            .await?;
+                            append_thinking(
+                                &mut accumulated_thinking,
+                                "Tool protocol repair: the model answered an image request as normal text, so the app converted the request into an image approval card.",
+                            );
+                            let outcome = image_proposal_outcome(proposal.clone(), vi);
+                            tool_trace.push(ToolTrace {
+                                tool: "propose_image_generation".to_string(),
+                                success: true,
+                                summary: clean_summary(&outcome.observation),
+                            });
+                            return Ok(ReactChatResult {
+                                answer: image_approval_answer(vi),
+                                thinking: thinking_result(thinking_enabled, &accumulated_thinking),
+                                tool_used: Some("propose_image_generation".to_string()),
+                                observation: Some(outcome.observation),
+                                cards: outcome.cards,
+                                image_proposal: Some(proposal),
+                                file_preview: None,
+                                action_proposal: None,
+                                tool_trace,
+                            });
+                        }
+                    }
                     let leaked_tool_narration =
                         looks_like_unexecuted_tool_narration(&assistant_text);
-                    let unverified_workspace_claim =
-                        last_observation.is_none()
-                            && answer_claims_verified_workspace_result(&assistant_text);
-                    let failed_tool_claim =
-                        last_observation
-                            .as_deref()
-                            .map(|observation| observation.trim_start().starts_with("ERROR:"))
-                            .unwrap_or(false)
-                            && answer_claims_verified_workspace_result(&assistant_text);
+                    let unverified_workspace_claim = last_observation.is_none()
+                        && answer_claims_verified_workspace_result(&assistant_text);
+                    let failed_tool_claim = last_observation
+                        .as_deref()
+                        .map(|observation| observation.trim_start().starts_with("ERROR:"))
+                        .unwrap_or(false)
+                        && answer_claims_verified_workspace_result(&assistant_text);
                     if leaked_tool_narration
                         || unverified_workspace_claim
                         || failed_tool_claim
@@ -499,10 +685,69 @@ pub async fn agent_jan_chat_core(
         "role": "system",
         "content": "Tool loop limit reached. Give the final answer from the verified tool observations already available."
     }));
-    let (answer, final_thinking) =
-        call_chat_text_with_continuation(request_messages, sampling, max_tokens, thinking_enabled)
-            .await?;
+    let (answer, final_thinking) = call_chat_text_with_continuation(
+        request_messages.clone(),
+        sampling,
+        max_tokens,
+        thinking_enabled,
+    )
+    .await?;
     append_thinking(&mut accumulated_thinking, &final_thinking);
+    if let Some(proposal) = parse_pending_image_proposal_text(&answer) {
+        let proposal = ensure_image_proposal_mode(
+            proposal,
+            &latest_text,
+            &task_state,
+            &request_messages
+                .iter()
+                .rev()
+                .filter_map(|message| {
+                    let role = message.get("role").and_then(Value::as_str)?;
+                    if role == "system" {
+                        return None;
+                    }
+                    let text = extract_value_text(message.get("content").unwrap_or(&Value::Null));
+                    let text = text.trim();
+                    if text.is_empty() {
+                        return None;
+                    }
+                    Some(format!(
+                        "{}: {}",
+                        role,
+                        crate::assistant_runtime::compact_trace_text(text, 260)
+                    ))
+                })
+                .take(8)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n"),
+            sampling,
+        )
+        .await?;
+        append_thinking(
+            &mut accumulated_thinking,
+            "Tool protocol repair: converted a structured image proposal leaked after the tool loop into the app approval card.",
+        );
+        let outcome = image_proposal_outcome(proposal.clone(), vi);
+        tool_trace.push(ToolTrace {
+            tool: "propose_image_generation".to_string(),
+            success: true,
+            summary: clean_summary(&outcome.observation),
+        });
+        return Ok(ReactChatResult {
+            answer: image_approval_answer(vi),
+            thinking: thinking_result(thinking_enabled, &accumulated_thinking),
+            tool_used: Some("propose_image_generation".to_string()),
+            observation: Some(outcome.observation),
+            cards: outcome.cards,
+            image_proposal: Some(proposal),
+            file_preview: None,
+            action_proposal: None,
+            tool_trace,
+        });
+    }
     if let Some((name, arguments, _, _)) = first_model_tool_call(&json!({}), &answer) {
         let invalid_detail = validate_tool_call(&ToolCall {
             tool: name.clone(),
@@ -537,7 +782,8 @@ pub async fn agent_jan_chat_core(
     if looks_like_unexecuted_tool_narration(&answer)
         || unverified_workspace_claim
         || failed_tool_claim
-        || (last_observation.is_none() && answer_claims_unverified_tool_result(&answer, &task_state))
+        || (last_observation.is_none()
+            && answer_claims_unverified_tool_result(&answer, &task_state))
     {
         append_thinking(
             &mut accumulated_thinking,

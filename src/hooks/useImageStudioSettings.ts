@@ -5,6 +5,7 @@ export function useImageStudioSettings() {
   const [imageWidth, setImageWidth] = useState(DEFAULT_SETTINGS.image_width);
   const [imageHeight, setImageHeight] = useState(DEFAULT_SETTINGS.image_height);
   const [quickImagePrompt, setQuickImagePrompt] = useState("");
+  const [quickImageMode, setQuickImageMode] = useState("text_image");
 
   return {
     imageWidth,
@@ -13,5 +14,7 @@ export function useImageStudioSettings() {
     setImageHeight,
     quickImagePrompt,
     setQuickImagePrompt,
+    quickImageMode,
+    setQuickImageMode,
   };
 }

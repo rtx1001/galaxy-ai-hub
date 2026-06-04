@@ -59,7 +59,10 @@ pub(super) fn resolve_directory(
         std::fs::canonicalize(candidate)
             .map_err(|e| format!("Could not inspect directory: {}", e))?
     } else if raw.contains(':') || raw.contains('\\') || raw.contains('/') {
-        return Err(format!("Directory does not exist or cannot be opened: {}", raw));
+        return Err(format!(
+            "Directory does not exist or cannot be opened: {}",
+            raw
+        ));
     } else {
         roots[0].join(raw)
     };

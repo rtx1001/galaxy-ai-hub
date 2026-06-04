@@ -52,9 +52,7 @@ export function useCharacterFiles({
     const saved = await invoke<CharacterFiles>("save_character_files", {
       id: activePersonality.id,
       name: nextName,
-      prompt: nextPrompt,
-      avatar: settings.avatar,
-      voicePath: settings.voice_path,
+      settings,
       soul: nextSoul,
     });
     setCharacterSoul(saved.soul);

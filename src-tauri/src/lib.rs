@@ -231,6 +231,7 @@ pub fn run() {
             file_tools::trash_linked_file,
             file_tools::open_in_explorer,
             file_tools::read_local_image_data_url,
+            file_tools::save_chat_input_image_data_url,
             file_tools::reveal_file_location,
             google_calendar::get_google_connection_status,
             google_calendar::connect_google_calendar,

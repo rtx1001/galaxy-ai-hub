@@ -61,6 +61,8 @@ pub struct ImageProposal {
     pub prompt: String,
     pub mode: String,
     pub mask_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub reference_sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

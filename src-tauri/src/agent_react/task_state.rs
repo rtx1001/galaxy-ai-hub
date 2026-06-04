@@ -41,11 +41,12 @@ impl ConversationTaskState {
 
     pub(super) fn planner_summary(&self) -> String {
         format!(
-            "Task state: {}. Required tool: {}. Route: {}. Pending image proposal: {}. Recent image creation context: {}. Reason: {}.",
+            "Task state: {}. Required tool: {}. Route: {}. Pending image proposal: {}. Recent image context: {}. Recent image creation context: {}. Reason: {}.",
             self.label,
             if self.requires_tool() { "yes" } else { "no" },
             self.route_text(),
             if self.pending_image_proposal { "yes" } else { "no" },
+            if self.recent_image_context { "yes" } else { "no" },
             if self.recent_image_creation_context { "yes" } else { "no" },
             self.reason
         )
@@ -62,6 +63,19 @@ impl ConversationTaskState {
             label: "tool_protocol_repair",
             reason,
         }
+    }
+
+    pub(super) fn with_image_required(mut self, reason: &'static str) -> Self {
+        self.route = None;
+        self.image_required = true;
+        self.tool_repair_required = false;
+        self.label = if self.pending_image_proposal {
+            "pending_image_approval"
+        } else {
+            "image_generation_or_edit"
+        };
+        self.reason = reason;
+        self
     }
 }
 

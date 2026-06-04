@@ -188,13 +188,30 @@ export const readToolString = (record: Record<string, unknown>, key: string) => 
 
 export const toolRunDisplayName = (run: ToolRunRecord) => {
   const input = parseToolJson(run.input_json);
-  if (run.tool_name === "propose_image_generation" || run.tool_name === "generate_image") {
+  if (
+    run.tool_name === "propose_image_generation" ||
+    run.tool_name === "generate_image" ||
+    run.tool_name === "text_image" ||
+    run.tool_name === "image_image" ||
+    run.tool_name === "bot_image" ||
+    run.tool_name === "user_image" ||
+    run.tool_name === "user_bot_image"
+  ) {
     const mode = readToolString(input, "mode");
-    if (mode === "image_to_image") return "img_to_image";
-    if (mode === "avatar_image") return "avatar_to_image";
-    if (mode === "user_avatar_image" || mode === "avatar_user_image") return "user_avatar_to_image";
-    if (mode === "user_character_image" || mode === "user_and_character_image" || mode === "both_avatars_image") return "user_character_to_image";
-    return "txt_to_image";
+    const source = mode || run.tool_name;
+    if (source === "text_to_image") return "text_image";
+    if (source === "image_to_image") return "image_image";
+    if (source === "avatar_image" || source === "avatar_to_image" || source === "bot_image") return "bot_image";
+    if (source === "user_avatar_image" || source === "avatar_user_image" || source === "user_image") return "user_image";
+    if (
+      source === "user_character_image" ||
+      source === "user_and_character_image" ||
+      source === "both_avatars_image" ||
+      source === "user_bot_image"
+    ) {
+      return "user_bot_image";
+    }
+    return "text_image";
   }
   if (run.tool_name === "voice_speech") return "voice_speech";
   if (run.tool_name === "voice_cached") return "voice_cached";

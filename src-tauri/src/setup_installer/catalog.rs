@@ -291,17 +291,17 @@ pub(super) fn image_files(tier: &str, has_nvidia_gpu: bool) -> Vec<SetupFile> {
             setup_file(
                 "Qwen Image Edit",
                 "Novice25/Qwen-Image-Edit-Rapid-AIO-GGUF",
-                "v23/Qwen-Rapid-NSFW-v23_Q5_K.gguf",
-                root.join("Qwen-Rapid-NSFW-v23_Q5_K.gguf"),
-                "about 14.5 GB",
+                "v23/Qwen-Rapid-NSFW-v23_Q4_K.gguf",
+                root.join("Qwen-Rapid-NSFW-v23_Q4_K.gguf"),
+                "about 12.2 GB",
             ),
             setup_file(
                 "Image text encoder",
                 "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
-                "Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf",
+                "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
                 root.join("text_encoders")
-                    .join("Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf"),
-                "about 5.2 GB",
+                    .join("Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf"),
+                "about 4.4 GB",
             ),
             setup_file(
                 "Image projector",

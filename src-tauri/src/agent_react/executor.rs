@@ -81,7 +81,9 @@ pub(super) fn explicit_windows_path_from_text(text: &str) -> Option<String> {
         }
         let candidate = text[start..end]
             .trim()
-            .trim_end_matches(|ch: char| matches!(ch, '.' | ',' | ';' | ':' | '?' | '!' | ')' | ']'))
+            .trim_end_matches(|ch: char| {
+                matches!(ch, '.' | ',' | ';' | ':' | '?' | '!' | ')' | ']')
+            })
             .to_string();
         if candidate.len() >= 3 {
             if std::path::Path::new(&candidate).exists() {
@@ -92,9 +94,9 @@ pub(super) fn explicit_windows_path_from_text(text: &str) -> Option<String> {
                 if !ch.is_whitespace() {
                     continue;
                 }
-                let prefix = candidate[..offset]
-                    .trim()
-                    .trim_end_matches(|ch: char| matches!(ch, '.' | ',' | ';' | ':' | '?' | '!' | ')' | ']'));
+                let prefix = candidate[..offset].trim().trim_end_matches(|ch: char| {
+                    matches!(ch, '.' | ',' | ';' | ':' | '?' | '!' | ')' | ']')
+                });
                 if prefix.len() >= 3 && std::path::Path::new(prefix).exists() {
                     best_existing_prefix = Some(prefix.to_string());
                 }
@@ -310,8 +312,7 @@ pub(super) async fn execute_tool_result(
                 Ok(outcome)
             } else {
                 let directory_text = strip_extended_path_prefix(&directory.display().to_string());
-                let observation =
-                    format!("Directory: {}\n{}", directory_text, rows.join("\n"));
+                let observation = format!("Directory: {}\n{}", directory_text, rows.join("\n"));
                 let mut outcome = text_outcome(observation);
                 outcome.cards.push(ToolResultCard {
                     kind: "folder".to_string(),
@@ -328,6 +329,7 @@ pub(super) async fn execute_tool_result(
             }
         }
         "search_directory" => {
+            let user_text = call_user_text(call);
             let query = call
                 .arguments
                 .get("query")
@@ -348,6 +350,24 @@ pub(super) async fn execute_tool_result(
                 ));
                 Ok(outcome)
             } else {
+                if request_wants_preview(&user_text) {
+                    if let Some(preview) =
+                        first_previewable_search_result(&matches, folders, &user_text)
+                    {
+                        let observation = format!(
+                            "Preview ready from search result.\nTitle: {}\nType: {}\nPath: {}\nSize: {} bytes",
+                            preview.name, preview.mime_type, preview.path, preview.size_bytes
+                        );
+                        return Ok(ToolOutcome {
+                            observation,
+                            cards: Vec::new(),
+                            file_preview: Some(preview),
+                            image_proposal: None,
+                            action_proposal: None,
+                            success: true,
+                        });
+                    }
+                }
                 let observation = matches
                     .iter()
                     .enumerate()
@@ -370,6 +390,124 @@ pub(super) async fn execute_tool_result(
                     Some(query.to_string()),
                     &matches,
                 ));
+                Ok(outcome)
+            }
+        }
+        "find_workspace_candidates" => {
+            let user_text = call_user_text(call);
+            let query = call
+                .arguments
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let clues = call
+                .arguments
+                .get("clues")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let kind = call
+                .arguments
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("any")
+                .trim()
+                .to_string();
+            let root_folder = call
+                .arguments
+                .get("root_folder")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let limit = call
+                .arguments
+                .get("limit")
+                .and_then(Value::as_u64)
+                .map(|value| value.clamp(1, 80) as u32)
+                .or(Some(24));
+            let matches = file_tools::find_workspace_candidates(
+                query.clone(),
+                clues.clone(),
+                kind.clone(),
+                root_folder,
+                folders.to_vec(),
+                limit,
+            )?;
+            if matches.is_empty() {
+                let summary = if clues.is_empty() {
+                    query.clone()
+                } else {
+                    format!("{} | clues: {}", query, clues.join(", "))
+                };
+                let mut outcome = text_outcome(format!(
+                    "No workspace candidates found for: {}",
+                    summary.trim()
+                ));
+                outcome.cards.push(simple_card(
+                    "file_search",
+                    "No workspace candidates",
+                    Some(summary),
+                ));
+                Ok(outcome)
+            } else {
+                let observation = matches
+                    .iter()
+                    .enumerate()
+                    .map(|(index, file)| {
+                        format!(
+                            "{}. {}\nType: {}\nSize: {} bytes\nFolder: {}\nPath: {}",
+                            index + 1,
+                            file.name,
+                            file.extension,
+                            file.size_bytes,
+                            file.folder,
+                            file.path
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                let mut outcome = text_outcome(format!(
+                    "Workspace candidates for broad file request:\n{}",
+                    observation
+                ));
+                outcome.cards.push(files_card(
+                    "file_search",
+                    format!("{} workspace candidates", matches.len()),
+                    Some(if clues.is_empty() {
+                        query
+                    } else {
+                        format!("{} | {}", query, clues.join(", "))
+                    }),
+                    &matches,
+                ));
+                if request_wants_preview(&user_text) {
+                    if let Some(preview) =
+                        first_previewable_search_result(&matches, folders, &user_text)
+                    {
+                        return Ok(ToolOutcome {
+                            observation: format!(
+                                "Preview ready from workspace candidate.\nTitle: {}\nType: {}\nPath: {}\nSize: {} bytes",
+                                preview.name, preview.mime_type, preview.path, preview.size_bytes
+                            ),
+                            cards: Vec::new(),
+                            file_preview: Some(preview),
+                            image_proposal: None,
+                            action_proposal: None,
+                            success: true,
+                        });
+                    }
+                }
                 Ok(outcome)
             }
         }
@@ -1314,7 +1452,12 @@ pub(super) async fn execute_tool(
 ) -> ToolOutcome {
     if matches!(
         call.tool.as_str(),
-        "list_media_files" | "preview_random_media" | "preview_file" | "search_directory" | "list_files_in_directory"
+        "list_media_files"
+            | "preview_random_media"
+            | "preview_file"
+            | "search_directory"
+            | "find_workspace_candidates"
+            | "list_files_in_directory"
     ) {
         crate::assistant_runtime::append_runtime_log(
             "agent",
@@ -1331,7 +1474,12 @@ pub(super) async fn execute_tool(
         .unwrap_or_else(error_outcome);
     if matches!(
         call.tool.as_str(),
-        "list_media_files" | "preview_random_media" | "preview_file" | "search_directory" | "list_files_in_directory"
+        "list_media_files"
+            | "preview_random_media"
+            | "preview_file"
+            | "search_directory"
+            | "find_workspace_candidates"
+            | "list_files_in_directory"
     ) {
         crate::assistant_runtime::append_runtime_log(
             "agent",

@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose, Engine as _};
 use serde::Serialize;
+use unicode_normalization::UnicodeNormalization;
 
 mod workspace;
 pub(crate) use workspace::normalize_text;
@@ -17,6 +18,126 @@ pub struct FileSearchResult {
     pub folder: String,
     pub extension: String,
     pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CandidateScore {
+    score: u16,
+    path_gap: usize,
+}
+
+fn fold_workspace_search_text(value: &str) -> String {
+    let mut folded = String::new();
+    for ch in value.nfd() {
+        let code = ch as u32;
+        if (0x0300..=0x036F).contains(&code) {
+            continue;
+        }
+        match ch {
+            '\u{0111}' | '\u{0110}' => folded.push('d'),
+            _ => folded.extend(ch.to_lowercase()),
+        }
+    }
+    folded
+}
+
+fn candidate_tokens(query: &str, clues: &[String]) -> Vec<String> {
+    let mut tokens = clues
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(query))
+        .flat_map(|value| {
+            fold_workspace_search_text(value)
+                .split(|ch: char| !ch.is_alphanumeric())
+                .filter(|token| token.chars().count() >= 2)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    let mut expanded = Vec::new();
+    for token in &tokens {
+        if token.chars().count() >= 6 {
+            expanded.push(token.chars().take(4).collect::<String>());
+        }
+    }
+    tokens.extend(expanded);
+    tokens.sort();
+    tokens.dedup();
+    tokens
+}
+
+fn file_kind_matches_extension(kind: &str, extension: &str) -> bool {
+    let kind = kind.trim().to_ascii_lowercase();
+    if kind.is_empty() || kind == "any" {
+        return true;
+    }
+    let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+    match kind.as_str() {
+        "audio" | "song" | "music" => matches!(
+            extension.as_str(),
+            "mp3" | "wav" | "m4a" | "aac" | "flac" | "ogg" | "opus" | "wma"
+        ),
+        "video" | "movie" => matches!(
+            extension.as_str(),
+            "mp4" | "mkv" | "webm" | "mov" | "avi" | "wmv" | "m4v"
+        ),
+        "image" | "photo" | "picture" => matches!(
+            extension.as_str(),
+            "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff"
+        ),
+        "document" => matches!(
+            extension.as_str(),
+            "pdf"
+                | "doc"
+                | "docx"
+                | "xls"
+                | "xlsx"
+                | "ppt"
+                | "pptx"
+                | "md"
+                | "txt"
+                | "rtf"
+                | "csv"
+                | "json"
+                | "xml"
+        ),
+        "text" => matches!(
+            extension.as_str(),
+            "txt" | "md" | "json" | "csv" | "xml" | "html" | "css" | "js" | "ts" | "tsx" | "rs"
+        ),
+        _ => true,
+    }
+}
+
+fn workspace_candidate_score(file: &IndexedFile, tokens: &[String]) -> Option<CandidateScore> {
+    if tokens.is_empty() {
+        return Some(CandidateScore {
+            score: 1,
+            path_gap: file.normalized_path.len(),
+        });
+    }
+    let folded_name = fold_workspace_search_text(&file.name);
+    let folded_folder = fold_workspace_search_text(&file.folder);
+    let folded_path = fold_workspace_search_text(&file.path_text);
+    let mut score = 0u16;
+    for token in tokens {
+        if folded_name == *token {
+            score = score.saturating_add(40);
+        } else if folded_name.starts_with(token) {
+            score = score.saturating_add(28);
+        } else if folded_name.contains(token) {
+            score = score.saturating_add(20);
+        } else if folded_folder.contains(token) {
+            score = score.saturating_add(14);
+        } else if folded_path.contains(token) {
+            score = score.saturating_add(8);
+        }
+    }
+    (score > 0).then_some(CandidateScore {
+        score,
+        path_gap: folded_path.len(),
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -111,6 +232,58 @@ pub fn search_linked_files(
         })
         .collect::<Vec<_>>();
     Ok(interleave_scored_matches(per_root, max_results))
+}
+
+pub fn find_workspace_candidates(
+    query: String,
+    clues: Vec<String>,
+    kind: String,
+    root_folder: Option<String>,
+    folders: Vec<String>,
+    limit: Option<u32>,
+) -> Result<Vec<FileSearchResult>, String> {
+    let scoped_folders = if let Some(root_folder) = root_folder
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        vec![display_path(&resolve_existing_permitted_folder_path(
+            root_folder,
+            &folders,
+        )?)]
+    } else {
+        folders
+    };
+    let max_results = limit.unwrap_or(24).clamp(1, 80) as usize;
+    let tokens = candidate_tokens(&query, &clues);
+    let mut matches = workspace_index(&scoped_folders)?
+        .files_by_root
+        .into_iter()
+        .flatten()
+        .filter(|file| file_kind_matches_extension(&kind, &file.extension))
+        .filter_map(|file| workspace_candidate_score(&file, &tokens).map(|score| (score, file)))
+        .collect::<Vec<_>>();
+
+    matches.sort_by(|left, right| {
+        right
+            .0
+            .score
+            .cmp(&left.0.score)
+            .then_with(|| left.0.path_gap.cmp(&right.0.path_gap))
+            .then_with(|| right.1.modified_unix.cmp(&left.1.modified_unix))
+            .then_with(|| left.1.path_text.cmp(&right.1.path_text))
+    });
+    matches.truncate(max_results);
+    Ok(matches
+        .into_iter()
+        .map(|(_, file)| FileSearchResult {
+            path: file.path_text,
+            name: file.name,
+            folder: file.folder,
+            extension: file.extension,
+            size_bytes: file.size_bytes,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -369,10 +542,11 @@ mod tests {
     fn search_matches_vietnamese_names_with_accents() {
         let root = temp_root("vietnamese_search");
         fs::create_dir_all(&root).expect("create temp folder");
-        fs::write(root.join("Công việc tháng 6.txt"), b"note").expect("write note");
+        let name = "C\u{00f4}ng vi\u{1ec7}c th\u{00e1}ng 6.txt";
+        fs::write(root.join(name), b"note").expect("write note");
 
         let results = search_linked_files(
-            "công việc tháng".to_string(),
+            "c\u{00f4}ng vi\u{1ec7}c th\u{00e1}ng".to_string(),
             vec![root.to_string_lossy().to_string()],
             Some(10),
         )
@@ -380,10 +554,38 @@ mod tests {
 
         let _ = fs::remove_dir_all(&root);
 
-        assert!(results
-            .iter()
-            .any(|file| file.name == "Công việc tháng 6.txt"));
+        assert!(results.iter().any(|file| file.name == name));
     }
+
+    #[test]
+    fn workspace_candidates_match_broad_non_audio_file_clues() {
+        let root = temp_root("workspace_candidates");
+        let docs = root.join("Work Documents");
+        fs::create_dir_all(&docs).expect("create temp folder");
+        let report_name = "C\u{00f4}ng vi\u{1ec7}c th\u{00e1}ng 6.pdf";
+        fs::write(docs.join(report_name), b"pdf").expect("write pdf");
+        fs::write(docs.join("holiday-photo.jpg"), b"image").expect("write image");
+
+        let results = find_workspace_candidates(
+            "monthly work document".to_string(),
+            vec![
+                "cong viec".to_string(),
+                "thang 6".to_string(),
+                "report".to_string(),
+            ],
+            "document".to_string(),
+            None,
+            vec![root.to_string_lossy().to_string()],
+            Some(10),
+        )
+        .expect("find candidates");
+
+        let _ = fs::remove_dir_all(&root);
+
+        assert!(results.iter().any(|file| file.name == report_name));
+        assert!(!results.iter().any(|file| file.name == "holiday-photo.jpg"));
+    }
+
     #[test]
     fn read_file_prefers_exact_name_over_fuzzy_match() {
         let root = temp_root("exact_match");
@@ -593,6 +795,57 @@ pub fn read_local_image_data_url(path: String) -> Result<LocalImageDataUrl, Stri
     Ok(LocalImageDataUrl {
         data_url: format!("data:{};base64,{}", mime_type, encoded),
         path: target.to_string_lossy().to_string(),
+    })
+}
+
+fn extension_from_image_data_url(data_url: &str) -> &'static str {
+    let header = data_url
+        .split_once(',')
+        .map(|(header, _)| header)
+        .unwrap_or(data_url)
+        .to_ascii_lowercase();
+    if header.contains("image/jpeg") || header.contains("image/jpg") {
+        "jpg"
+    } else if header.contains("image/webp") {
+        "webp"
+    } else if header.contains("image/gif") {
+        "gif"
+    } else {
+        "png"
+    }
+}
+
+#[tauri::command]
+pub fn save_chat_input_image_data_url(data_url: String) -> Result<LocalImageDataUrl, String> {
+    let value = data_url.trim();
+    if !value.starts_with("data:image/") {
+        return Err("That clipboard item is not a picture.".to_string());
+    }
+    let (_, encoded) = value
+        .split_once(',')
+        .ok_or_else(|| "Clipboard image data is not readable.".to_string())?;
+    let bytes = general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| format!("Could not decode clipboard image: {}", e))?;
+    if bytes.is_empty() {
+        return Err("Clipboard image data is empty.".to_string());
+    }
+
+    let input_dir = crate::app_paths::app_root_dir()
+        .join("assistant-runtime")
+        .join("chat-inputs");
+    std::fs::create_dir_all(&input_dir)
+        .map_err(|e| format!("Could not prepare chat image folder: {}", e))?;
+    let extension = extension_from_image_data_url(value);
+    let hash = crate::assistant_runtime::stable_bytes_hash(&bytes);
+    let path = input_dir.join(format!("clipboard-{}.{}", hash, extension));
+    if !path.exists() {
+        std::fs::write(&path, &bytes)
+            .map_err(|e| format!("Could not save clipboard image: {}", e))?;
+    }
+    Ok(LocalImageDataUrl {
+        data_url: value.to_string(),
+        path: path.to_string_lossy().to_string(),
     })
 }
 

@@ -62,6 +62,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
     personalityProfileOpen,
     previewVoiceSample,
     previewingVoicePath,
+    quickImageMode,
     quickImagePrompt,
     recentAutomationJobs,
     refreshGoogleCalendarEvents,
@@ -186,6 +187,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       imageStudioOpen={imageStudioOpen}
       imageStudioDrawing={imageStudioDrawing}
       quickImagePrompt={quickImagePrompt}
+      quickImageMode={quickImageMode}
       imageWidth={imageWidth}
       imageHeight={imageHeight}
       isGeneratingImage={isGeneratingImage}
@@ -228,6 +230,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       onRemoveLinkedFolder={handleRemoveLinkedFolder}
       onToggleImageStudio={setImageStudioOpen}
       onQuickImagePromptChange={setQuickImagePrompt}
+      onQuickImageModeChange={options.setQuickImageMode}
       onGenerateQuickImage={() => void handleQuickImageGenerate()}
       onImageWidthChange={setImageWidth}
       onImageHeightChange={setImageHeight}
@@ -377,8 +380,9 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
         setClearMemoryConfirmOpen(true);
       }}
       onSavePersonality={() => {
-        updateSelectedPersonalityPreset();
-        setPersonalityProfileOpen(false);
+        updateSelectedPersonalityPreset()
+          .then(() => setPersonalityProfileOpen(false))
+          .catch((error: unknown) => console.error("Character files save error:", error));
       }}
       onConfirmDeletePersonality={() => {
         deleteSelectedPersonalityPreset();

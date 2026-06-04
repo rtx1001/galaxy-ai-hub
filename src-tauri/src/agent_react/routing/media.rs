@@ -141,7 +141,9 @@ pub(in crate::agent_react) fn promote_media_list_to_preview_in_preview_flow(
     messages: &[ReactChatMessage],
     latest_text: &str,
 ) -> ToolCall {
-    if call.tool != "list_media_files" || recent_preview_paths(messages).is_empty() {
+    if call.tool != "list_media_files"
+        || !(request_wants_preview(latest_text) || recent_context_wants_media_preview(messages))
+    {
         return call;
     }
 
@@ -174,10 +176,12 @@ pub(in crate::agent_react) fn should_continue_after_observation(
     tool: &str,
     user_text: &str,
 ) -> bool {
-    matches!(tool, "search_directory" | "list_media_files") && request_wants_preview(user_text)
+    matches!(
+        tool,
+        "search_directory" | "list_media_files" | "find_workspace_candidates"
+    ) && request_wants_preview(user_text)
 }
 
-#[cfg(test)]
 pub(in crate::agent_react) fn first_previewable_search_result(
     matches: &[file_tools::FileSearchResult],
     folders: &[String],

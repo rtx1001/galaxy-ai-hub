@@ -20,6 +20,10 @@ pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
         purpose: "Search permitted workspace folders by file name or keyword.",
     },
     ToolDescriptor {
+        name: "find_workspace_candidates",
+        purpose: "Find real workspace file candidates from broad descriptions, attributes, or multiple filename/path clues before previewing, reading, moving, deleting, or otherwise managing files.",
+    },
+    ToolDescriptor {
         name: "read_file",
         purpose: "Read text content from a permitted workspace file.",
     },
@@ -53,7 +57,7 @@ pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "propose_image_generation",
-        purpose: "Create an approval card for text-to-image, image edit, character avatar image, user avatar image, or user+character image generation.",
+        purpose: "Create an approval card for text image, chat image reference, assistant avatar, user avatar, or user+assistant avatar image generation.",
     },
     ToolDescriptor {
         name: "propose_write_file",
@@ -135,7 +139,9 @@ pub(super) fn known_tool(tool: &str) -> bool {
 
 pub(super) fn default_tool_arguments(tool: &str) -> Value {
     match tool {
-        "preview_random_media" | "list_media_files" => json!({ "kind": "any" }),
+        "preview_random_media" | "list_media_files" | "find_workspace_candidates" => {
+            json!({ "kind": "any" })
+        }
         "get_current_time" | "gmail_recent" | "google_contacts_search" | "google_drive_search" => {
             json!({})
         }
@@ -206,6 +212,14 @@ pub(super) fn prompt_language_word_counts(prompt: &str) -> (usize, usize) {
     (english_words, non_english_words)
 }
 
+fn malformed_argument_key(key: &str) -> bool {
+    key.trim().is_empty()
+        || key
+            .chars()
+            .any(|ch| ch.is_control() || matches!(ch, '"' | '\'' | '{' | '}' | '[' | ']'))
+        || key.trim_start().starts_with(',')
+}
+
 pub(super) fn validate_tool_call(call: &ToolCall) -> Result<(), String> {
     if !known_tool(&call.tool) {
         return Err(format!(
@@ -215,6 +229,14 @@ pub(super) fn validate_tool_call(call: &ToolCall) -> Result<(), String> {
     }
     if !call.arguments.is_object() {
         return Err("Tool arguments must be a JSON object.".to_string());
+    }
+    if let Some(object) = call.arguments.as_object() {
+        if let Some(key) = object.keys().find(|key| malformed_argument_key(key)) {
+            return Err(format!(
+                "Tool arguments are malformed near key '{}'. Return one clean JSON object for arguments.",
+                key
+            ));
+        }
     }
     if matches!(
         call.tool.as_str(),
@@ -255,6 +277,41 @@ pub(super) fn validate_tool_call(call: &ToolCall) -> Result<(), String> {
     {
         return Err(format!("{} requires a non-empty query.", call.tool));
     }
+    if call.tool == "preview_file"
+        && call
+            .arguments
+            .get("path")
+            .or_else(|| call.arguments.get("file"))
+            .or_else(|| call.arguments.get("file_path"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default()
+            .is_empty()
+    {
+        return Err("preview_file requires a non-empty path.".to_string());
+    }
+    if call.tool == "find_workspace_candidates" {
+        let query = call
+            .arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        let has_clues = call
+            .arguments
+            .get("clues")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|value| !value.trim().is_empty())
+            })
+            .unwrap_or(false);
+        if query.is_empty() && !has_clues {
+            return Err("find_workspace_candidates requires query or non-empty clues.".to_string());
+        }
+    }
     if call.tool == "weather_forecast"
         && call
             .arguments
@@ -270,6 +327,17 @@ pub(super) fn validate_tool_call(call: &ToolCall) -> Result<(), String> {
         let prompt = image_prompt_argument(call);
         if prompt.is_empty() {
             return Err("propose_image_generation requires a non-empty prompt.".to_string());
+        }
+        let mode = call
+            .arguments
+            .get("mode")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("text_image");
+        if canonical_image_mode(mode).is_none() {
+            return Err(
+                "Image generation mode must be one of: text_image, image_image, bot_image, user_image, user_bot_image.".to_string(),
+            );
         }
         if image_prompt_needs_english_rewrite(&prompt) {
             return Err("Image generation prompt must be mainly written in English. Rewrite the user's visual request into an English-first prompt, while preserving names, places, brands, quoted text, mode, and mask_prompt.".to_string());
@@ -440,7 +508,8 @@ pub(super) fn tool_schema() -> Value {
     json!([
         { "type": "function", "function": { "name": "get_current_time", "description": "Returns local date and time", "parameters": { "type": "object", "properties": {}, "required": [] } } },
         { "type": "function", "function": { "name": "list_files_in_directory", "description": "Lists folders/files in a permitted workspace folder", "parameters": { "type": "object", "properties": { "path": { "type": "string", "description": "optional permitted folder path" } }, "required": [] } } },
-        { "type": "function", "function": { "name": "search_directory", "description": "Search for matching files in permitted workspace folders", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "file name or keyword" } }, "required": ["query"] } } },
+        { "type": "function", "function": { "name": "search_directory", "description": "Search for matching files in permitted workspace folders when the user gives a concrete file name, exact keyword, or path fragment.", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "file name, exact keyword, or path fragment" } }, "required": ["query"] } } },
+        { "type": "function", "function": { "name": "find_workspace_candidates", "description": "Returns real workspace file candidates for broad descriptions, inferred attributes, or multiple possible filename/path clues. Use this before preview_file/read_file/propose_move_file/propose_delete_file when the user describes a file by attributes instead of an exact name. For abstract attributes, provide several concrete clues likely to appear in file names or folders, such as translated labels, short codes, style/genre words, or romanized variants; do not claim success until a later tool uses a returned real path.", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "short natural description of what to find" }, "clues": { "type": "array", "items": { "type": "string" }, "description": "optional concrete filename/folder/path clue terms inferred from the request, including abbreviations, labels, short codes, or romanized variants when useful" }, "kind": { "type": "string", "description": "audio, video, image, document, text, or any" }, "root_folder": { "type": "string", "description": "optional exact permitted workspace folder path or folder name" }, "limit": { "type": "integer", "description": "optional candidate count, usually 12 to 30" } }, "required": [] } } },
         { "type": "function", "function": { "name": "read_file", "description": "Returns text content from a permitted workspace file", "parameters": { "type": "object", "properties": { "path": { "type": "string", "description": "file path or file name" } }, "required": ["path"] } } },
         { "type": "function", "function": { "name": "list_media_files", "description": "Lists previewable media files in workspace. Use root_folder when the user names one of the permitted workspace folders.", "parameters": { "type": "object", "properties": { "kind": { "type": "string", "description": "audio, video, image, document, text, or any" }, "root_folder": { "type": "string", "description": "optional exact permitted workspace folder path or folder name" } }, "required": ["kind"] } } },
         { "type": "function", "function": { "name": "preview_random_media", "description": "Returns one real random previewable workspace media file as a chat card. Use kind=audio for songs/music. Include query for artist/topic/filename clues. Use root_folder when the user names one of the permitted workspace folders, such as Music.", "parameters": { "type": "object", "properties": { "kind": { "type": "string", "description": "audio, video, image, document, text, or any" }, "query": { "type": "string", "description": "optional filename/path keyword constraint, e.g. jazz, beach, invoice" }, "root_folder": { "type": "string", "description": "optional exact permitted workspace folder path or folder name" } }, "required": ["kind"] } } },
@@ -449,7 +518,7 @@ pub(super) fn tool_schema() -> Value {
         { "type": "function", "function": { "name": "web_search", "description": "Returns fresh web search results from DuckDuckGo", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "search query" } }, "required": ["query"] } } },
         { "type": "function", "function": { "name": "gmail_recent", "description": "Returns recent Gmail messages", "parameters": { "type": "object", "properties": { "count": { "type": "integer", "description": "optional number requested by user" }, "query": { "type": "string", "description": "optional Gmail search query" } }, "required": [] } } },
         { "type": "function", "function": { "name": "google_calendar_check", "description": "Returns calendar events for that day or month", "parameters": { "type": "object", "properties": { "date": { "type": "string", "description": "today, tomorrow, YYYY-MM-DD, or YYYY-MM" } }, "required": ["date"] } } },
-        { "type": "function", "function": { "name": "propose_image_generation", "description": "Returns an image creation approval card; never runs shell. The prompt argument must be English-first, translated from the user's language when needed, while preserving names, places, brands, and quoted visible text. Build a creative, context-aware visual prompt instead of merely copying or translating a short user request. Use image_to_image when editing an attached or earlier chat image. Use avatar_image when the user asks for the current assistant/character to send or make its own image. Use user_avatar_image when the user asks to generate/edit from the selected user profile avatar. Use user_character_image when the user asks for an image involving both the selected user avatar and the selected character avatar.", "parameters": { "type": "object", "properties": { "prompt": { "type": "string", "description": "rich English-first visual prompt for the image model, usually 2 to 4 concise sentences including subject, action, setting, style, composition/framing, lighting, mood, and important constraints" }, "mode": { "type": "string", "description": "text_to_image, image_to_image, avatar_image, user_avatar_image, or user_character_image" }, "mask_prompt": { "type": "string", "description": "for image_to_image only: short English-first visual region/object to edit, such as head, hair, shirt, background, face, hands; omit for whole-image style changes" } }, "required": ["prompt", "mode"] } } },
+        { "type": "function", "function": { "name": "propose_image_generation", "description": "Returns an image creation approval card; never runs shell. The prompt argument must be English-first, translated from the user's language when needed, while preserving names, places, brands, and quoted visible text. Build a creative, context-aware visual prompt instead of merely copying or translating a short user request. Use image_image when using an attached, pasted, or earlier chat image as a visual reference, including when the user should appear with the person/object from that image. Use bot_image only when the user asks for the current assistant profile/avatar to send or make its own image. Use user_image when the user asks to generate/edit from the selected user profile avatar only. Use user_bot_image only when the requested image involves both the selected user avatar and the current assistant profile avatar.", "parameters": { "type": "object", "properties": { "prompt": { "type": "string", "description": "rich English-first visual prompt for the image model, usually 2 to 4 concise sentences including subject, action, setting, style, composition/framing, lighting, mood, and important constraints" }, "mode": { "type": "string", "enum": ["text_image", "image_image", "bot_image", "user_image", "user_bot_image"], "description": "Choose exactly one mode: text_image=no reference; image_image=attached/pasted/prior chat image reference; bot_image=current assistant profile avatar; user_image=selected user profile avatar; user_bot_image=selected user avatar plus current assistant profile avatar." }, "reference_sources": { "type": "array", "items": { "type": "string", "enum": ["chat_image", "user_avatar", "bot_avatar"] }, "description": "Exact visual references to pass. For image_image with a prior/attached image plus the selected user, use [\"chat_image\",\"user_avatar\"]. For image_image plus assistant profile, use [\"chat_image\",\"bot_avatar\"]. For user_bot_image, use [\"user_avatar\",\"bot_avatar\"]. Omit or leave empty for text_image." }, "mask_prompt": { "type": "string", "description": "for image_image only: short English-first visual region/object to edit, such as head, hair, shirt, background, face, hands; omit for whole-image style changes" } }, "required": ["prompt", "mode"] } } },
         { "type": "function", "function": { "name": "propose_write_file", "description": "Returns approval card for writing a file", "parameters": { "type": "object", "properties": { "relative_path": { "type": "string", "description": "path inside workspace" }, "content": { "type": "string", "description": "file content" }, "root_folder": { "type": "string", "description": "optional exact workspace root" } }, "required": ["relative_path", "content"] } } },
         { "type": "function", "function": { "name": "propose_move_file", "description": "Returns approval card for moving/renaming a file", "parameters": { "type": "object", "properties": { "source": { "type": "string", "description": "existing file" }, "destination_relative_path": { "type": "string", "description": "new path inside workspace" }, "root_folder": { "type": "string", "description": "optional exact workspace root" } }, "required": ["source", "destination_relative_path"] } } },
         { "type": "function", "function": { "name": "propose_delete_file", "description": "Returns approval card for moving a file to app trash", "parameters": { "type": "object", "properties": { "source": { "type": "string", "description": "existing file" } }, "required": ["source"] } } },
@@ -473,7 +542,10 @@ pub(super) fn tool_allowed_for_capability(tool: &str, route: Option<ToolRoute>) 
         Some(ToolRoute::MediaPreview) => {
             matches!(
                 tool,
-                "preview_random_media" | "preview_file" | "list_media_files"
+                "preview_random_media"
+                    | "preview_file"
+                    | "list_media_files"
+                    | "find_workspace_candidates"
             )
         }
         Some(ToolRoute::Gmail) => matches!(
@@ -489,6 +561,7 @@ pub(super) fn tool_allowed_for_capability(tool: &str, route: Option<ToolRoute>) 
             tool,
             "list_files_in_directory"
                 | "search_directory"
+                | "find_workspace_candidates"
                 | "read_file"
                 | "preview_file"
                 | "list_media_files"

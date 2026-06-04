@@ -49,6 +49,7 @@ export function LeftPanelContent({
   imageStudioOpen,
   imageStudioDrawing,
   quickImagePrompt,
+  quickImageMode,
   imageWidth,
   imageHeight,
   isGeneratingImage,
@@ -84,6 +85,7 @@ export function LeftPanelContent({
   onRemoveLinkedFolder,
   onToggleImageStudio,
   onQuickImagePromptChange,
+  onQuickImageModeChange,
   onGenerateQuickImage,
   onImageWidthChange,
   onImageHeightChange,
@@ -124,6 +126,7 @@ export function LeftPanelContent({
   imageStudioOpen: boolean;
   imageStudioDrawing: boolean;
   quickImagePrompt: string;
+  quickImageMode: string;
   imageWidth: number;
   imageHeight: number;
   isGeneratingImage: boolean;
@@ -159,6 +162,7 @@ export function LeftPanelContent({
   onRemoveLinkedFolder: (folderPath: string) => void;
   onToggleImageStudio: (open: boolean) => void;
   onQuickImagePromptChange: (prompt: string) => void;
+  onQuickImageModeChange: (mode: string) => void;
   onGenerateQuickImage: () => void;
   onImageWidthChange: (value: number) => void;
   onImageHeightChange: (value: number) => void;
@@ -231,11 +235,13 @@ export function LeftPanelContent({
         open={imageStudioOpen}
         drawing={imageStudioDrawing}
         quickPrompt={quickImagePrompt}
+        quickMode={quickImageMode}
         imageWidth={imageWidth}
         imageHeight={imageHeight}
         isGeneratingImage={isGeneratingImage}
         onToggle={onToggleImageStudio}
         onQuickPromptChange={onQuickImagePromptChange}
+        onQuickModeChange={onQuickImageModeChange}
         onGenerate={onGenerateQuickImage}
         onImageWidthChange={onImageWidthChange}
         onImageHeightChange={onImageHeightChange}

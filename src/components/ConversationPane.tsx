@@ -5,6 +5,8 @@ import { AvatarImage } from "./UI";
 import { FilePreviewCard, ToolResultCards, ImageProposalCard, ActionProposalCard } from "./ToolCards";
 import { FormattedMessageText } from "./ChatBubble";
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon, EditIcon, FolderIcon, SendIcon, SpeakerIcon, StopIcon, TrashIcon } from "./Icons";
+import { AudioPlaybackProvider } from "./AudioPlaybackContext";
+import { FloatingAudioControl } from "./FloatingAudioControl";
 
 const formatBubbleTimestamp = (value?: number) => {
   if (!value) return "";
@@ -78,7 +80,7 @@ export function ConversationPane({
   onDeleteImageMessage: (messageId: string) => void;
   onToggleImageCollapsed: (key: string) => void;
   onDismissImageProposal: (messageId: string, partIndex: number) => void;
-  onGenerateImage: (prompt: string, mode: string, maskPrompt?: string) => void;
+  onGenerateImage: (prompt: string, mode: string, maskPrompt?: string, extraReferenceImages?: string[], referenceSources?: string[]) => void;
   onDismissChatPart: (messageId: string, partIndex: number, fallbackText: string) => void;
   onApproveActionProposal: (messageId: string, partIndex: number, proposal: ActionProposal) => void;
   onDeleteCalendarEvent: (event: GoogleCalendarEvent) => void;
@@ -121,11 +123,26 @@ export function ConversationPane({
     setEditingText("");
     onEditLatestUserMessage(messageId, nextText);
   };
+  const latestImageReferenceBefore = (messageIndex: number) => {
+    for (let index = messageIndex; index >= 0; index -= 1) {
+      const content = messages[index]?.content;
+      if (!Array.isArray(content)) continue;
+      for (let partIndex = content.length - 1; partIndex >= 0; partIndex -= 1) {
+        const part = content[partIndex];
+        if (part.type === "image_url") {
+          return part.image_url.local_path || part.image_url.url || null;
+        }
+      }
+    }
+    return null;
+  };
   const bubbleActionClass = "inline-flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-[#d8dadc] transition hover:bg-white/5 hover:text-[var(--accent-color)]";
   const bubbleDangerActionClass = "inline-flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-[#d8dadc] transition hover:bg-rose-500/10 hover:text-rose-300";
 
   return (
+    <AudioPlaybackProvider>
     <section ref={scrollRef} onScroll={onScroll} className="conversation-scroll relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-0 pt-5">
+      <FloatingAudioControl scrollRef={scrollRef} />
       {messages.length === 0 ? (
         <div className="relative z-10 mx-auto flex h-full max-w-3xl flex-col items-center justify-center text-center">
           <img src={brandLogo} alt="Galaxy AI Hub" className="mx-auto h-auto w-full max-w-[260px] object-contain" />
@@ -189,7 +206,7 @@ export function ConversationPane({
                   </div>
                 )}
                 <div
-                  className={`chat-bubble min-w-0 max-w-[88%] ${hasApprovalContent ? "w-[88%]" : ""} overflow-hidden rounded-[28px] shadow-sm ring-1 ${hasImageContent ? "px-3 py-3" : isTypingIndicator ? "px-4 py-3" : "px-5 py-4"} ${
+                  className={`chat-bubble min-w-0 max-w-[88%] ${hasApprovalContent ? "w-[88%] overflow-visible" : "overflow-hidden"} rounded-[28px] shadow-sm ring-1 ${hasImageContent ? "px-3 py-3" : isTypingIndicator ? "px-4 py-3" : "px-5 py-4"} ${
                     message.role === "user" ? "text-[#e3e3e3]" : "bg-[#1e1f20] text-[#e3e3e3] ring-[#282a2c]"
                   }`}
                   style={message.role === "user" ? { backgroundColor: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent-soft-strong)" } : undefined}
@@ -260,9 +277,15 @@ export function ConversationPane({
                             proposal={part.image_proposal}
                             disabled={isGeneratingImage}
                             forceCollapsed={index < messages.length - 1}
+                            assistantAvatar={assistantAvatar}
+                            userAvatar={userAvatar}
+                            userName={userName}
+                            chatImageRef={latestImageReferenceBefore(index)}
                             language="en"
                             onCancel={() => onDismissImageProposal(message.id, partIndex)}
-                            onGenerate={(prompt) => onGenerateImage(prompt, part.image_proposal.mode, part.image_proposal.mask_prompt ?? undefined)}
+                            onGenerate={(prompt, mode, extraReferenceImages, referenceSources) =>
+                              onGenerateImage(prompt, mode, part.image_proposal.mask_prompt ?? undefined, extraReferenceImages, referenceSources)
+                            }
                           />
                         ) : part.type === "action_proposal" ? (
                           <ActionProposalCard
@@ -386,6 +409,7 @@ export function ConversationPane({
         </button>
       )}
     </section>
+    </AudioPlaybackProvider>
   );
 }
 
@@ -429,12 +453,12 @@ function ImagePart({
           type="button"
           title="View image"
           onClick={() => onOpen(part.image_url.url, part.image_url.local_path ?? undefined)}
-          className="block w-full overflow-hidden rounded-[14px] text-left"
+          className="block w-full overflow-hidden rounded-[18px] bg-[#131314] text-left ring-1 ring-[#282a2c]"
         >
-          <img src={part.image_url.url} alt="Chat visual" className="max-h-[420px] w-full rounded-[14px] object-contain transition hover:brightness-110" />
+          <img src={part.image_url.url} alt="Chat visual" className="max-h-[420px] w-full rounded-[18px] object-contain transition hover:brightness-110" />
         </button>
       ) : (
-        <div className="flex h-52 items-center justify-center rounded-[14px] border border-[#282a2c] bg-[#131314]/35 text-sm text-[#9aa0a6]">
+        <div className="flex h-52 items-center justify-center rounded-[18px] border border-[#282a2c] bg-[#131314]/35 text-sm text-[#9aa0a6]">
           Reloading image...
         </div>
       )}

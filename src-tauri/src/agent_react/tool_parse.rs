@@ -89,6 +89,13 @@ fn parse_gemma_call_payload(payload: &str) -> Option<(String, Value)> {
         return None;
     }
     let args = &after_call[open + 1..close];
+    if let Ok(value) = serde_json::from_str::<Value>(&format!("{{{}}}", args)) {
+        if value.is_object() {
+            return Some((canonical_tool_name(name), value));
+        }
+    } else if args.trim_start().starts_with('"') {
+        return None;
+    }
     Some((canonical_tool_name(name), parse_function_arguments(args)))
 }
 
@@ -122,7 +129,10 @@ fn parse_tool_name_directive(text: &str) -> Option<(String, Value)> {
             let name = mentions[0].to_string();
             crate::assistant_runtime::append_runtime_log(
                 "agent",
-                &format!("normalized_planner_tool_call tool={} source=directive", name),
+                &format!(
+                    "normalized_planner_tool_call tool={} source=directive",
+                    name
+                ),
             );
             return Some((name.clone(), default_tool_arguments(&name)));
         }
@@ -136,7 +146,10 @@ fn parse_tool_name_directive(text: &str) -> Option<(String, Value)> {
         let name = mentions[0].to_string();
         crate::assistant_runtime::append_runtime_log(
             "agent",
-            &format!("normalized_planner_tool_call tool={} source=bare_name", name),
+            &format!(
+                "normalized_planner_tool_call tool={} source=bare_name",
+                name
+            ),
         );
         return Some((name.clone(), default_tool_arguments(&name)));
     }
@@ -175,10 +188,7 @@ fn contains_exact_tool_name(text: &str, tool: &str) -> bool {
 fn parse_loose_named_tool_call(text: &str) -> Option<(String, Value)> {
     let mut candidates = available_tool_names()
         .into_iter()
-        .filter_map(|tool| {
-            text.find(tool)
-                .map(|start| (tool, start, tool.len()))
-        })
+        .filter_map(|tool| text.find(tool).map(|start| (tool, start, tool.len())))
         .collect::<Vec<_>>();
     candidates.sort_by_key(|(_, start, _)| *start);
     let (name, start, matched_len) = candidates.first().cloned()?;
@@ -192,6 +202,9 @@ fn parse_loose_named_tool_call(text: &str) -> Option<(String, Value)> {
     }
     if let Some(json_args) = parse_json_object_prefix(args) {
         return Some((name.to_string(), json_args));
+    }
+    if args.starts_with('{') || args.starts_with('"') {
+        return None;
     }
     args = args
         .trim_start_matches(|ch: char| matches!(ch, '{' | '['))

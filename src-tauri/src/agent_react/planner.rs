@@ -50,7 +50,8 @@ pub(super) fn tool_planner_instruction(
         "For propose_image_generation, the prompt and mask_prompt arguments must be written in English even when the user chats in another language.",
         "For propose_image_generation, write a rich, creative, context-aware English-first prompt. Do not merely translate the user's short request. Expand it into 2-4 concise sentences with subject, action, setting, style, composition/framing, lighting, mood, and must-preserve details. Keep names, places, brands, and quoted visible text exactly when useful.",
         "Keep image prompts faithful to the user's intent; do not add unrelated people, objects, nudity, violence, brands, or identity changes unless requested.",
-        "Image modes: text_to_image uses no reference; image_to_image uses the current attached/chat image; avatar_image uses the character avatar; user_avatar_image uses the selected user profile avatar; user_character_image uses both selected user and character avatars.",
+        "Image modes: text_image uses no reference; image_image uses the current attached/prior chat image as a visual reference; bot_image uses the current assistant profile avatar; user_image uses the selected user profile avatar; user_bot_image uses both selected user profile avatar and current assistant profile avatar.",
+        "If the requested image includes the selected user and a person/object from a pasted or previous chat image, choose image_image, not user_bot_image. user_bot_image is only for the selected user profile avatar plus the current assistant profile avatar.",
         &task_state.planner_summary(),
         recent_image_hint,
         "If a tool is required but a mandatory argument is missing, output NO_TOOL and the final answer should ask for that missing detail.",
@@ -77,6 +78,105 @@ pub(super) fn planner_sampling(sampling: SamplingConfig) -> SamplingConfig {
         repeat_last_n: sampling.repeat_last_n,
         repeat_penalty: sampling.repeat_penalty,
     }
+}
+
+fn image_mode_context_from_messages(messages: &[Value]) -> String {
+    messages
+        .iter()
+        .rev()
+        .filter_map(|message| {
+            let role = message.get("role").and_then(Value::as_str)?;
+            if role == "system" {
+                return None;
+            }
+            let text = extract_value_text(message.get("content").unwrap_or(&Value::Null));
+            let text = text.trim();
+            if text.is_empty() {
+                return None;
+            }
+            Some(format!(
+                "{}: {}",
+                role,
+                crate::assistant_runtime::compact_trace_text(text, 260)
+            ))
+        })
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(super) async fn classify_image_tool_requirement(
+    messages: &[ReactChatMessage],
+    latest_user_text: &str,
+    sampling: SamplingConfig,
+) -> Result<bool, String> {
+    if latest_user_text.trim().is_empty() {
+        return Ok(false);
+    }
+
+    let excerpt = messages
+        .iter()
+        .rev()
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(|message| {
+            format!(
+                "{}: {}",
+                message.role,
+                crate::assistant_runtime::compact_trace_text(&content_text(&message.content), 260)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let classifier_instruction = image_tool_classifier_instruction();
+
+    let reply = call_chat(
+        vec![
+            json!({
+                "role": "system",
+                "content": classifier_instruction
+            }),
+            json!({
+                "role": "user",
+                "content": format!(
+                    "Recent conversation:\n{}\n\nLatest user turn:\n{}\n\nAnswer YES or NO only.",
+                    excerpt,
+                    latest_user_text.trim()
+                )
+            }),
+        ],
+        None,
+        planner_sampling(sampling),
+        24,
+        false,
+    )
+    .await?;
+
+    let answer = normalize_text(&extract_chat_reply_text(&reply));
+    Ok(answer
+        .split_whitespace()
+        .next()
+        .is_some_and(|word| word == "yes"))
+}
+
+pub(super) fn image_tool_classifier_instruction() -> String {
+    [
+        "Classify the latest user turn for the local assistant app.",
+        "Return exactly YES or NO.",
+        "YES means the latest turn now requires the app to produce a new image output: create, generate, edit, redraw, transform, or render an image, including using the assistant avatar, user avatar, both avatars, or a recent/attached image as reference.",
+        "YES also applies when the latest turn confirms or continues an unresolved image creation/edit request from recent context.",
+        "NO means the user is only asking visual understanding about an attached/prior image: identify who/what it is, inspect it, describe it, compare it, explain it, answer a question about it, or discuss it without asking the app to produce a new image.",
+        "NO means normal conversation, text-only discussion, asking for ideas without asking the app to produce an image now, or a request for non-image tools.",
+        "An attached image by itself is not a request for the image generation tool. Treat it as vision chat unless the latest turn asks the app to create or modify an image output.",
+        "If the latest turn is a question about the attached image, return NO even when recent context includes image generation.",
+        "Do not use keyword matching. Decide from meaning and recent context only.",
+    ]
+    .join("\n")
 }
 
 pub(super) async fn rewrite_image_prompt_to_english(
@@ -123,21 +223,246 @@ pub(super) async fn rewrite_image_prompt_to_english(
     Ok(Some(rewritten))
 }
 
-pub(super) async fn ensure_image_tool_call_prompt_english(
+fn clean_mode_choice(text: &str) -> Option<String> {
+    let cleaned = clean_tool_markup_fragments(text)
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_string();
+    canonical_image_mode(&cleaned).map(str::to_string)
+}
+
+fn clean_reference_source_choices(text: &str) -> Vec<String> {
+    let cleaned = clean_tool_markup_fragments(text);
+    let mut sources = Vec::new();
+    for part in cleaned.split([',', ';', '|', '\n', ' ']) {
+        if let Some(source) = normalize_image_reference_source(part) {
+            if !sources.iter().any(|existing| existing == source) {
+                sources.push(source.to_string());
+            }
+        }
+    }
+    sources
+}
+
+pub(super) async fn choose_image_reference_sources_for_request(
+    latest_user_text: &str,
+    proposed_prompt: &str,
+    mode: &str,
+    conversation_context: &str,
+    recent_image_context: bool,
+    current_sources: &[String],
+    sampling: SamplingConfig,
+) -> Result<Vec<String>, String> {
+    let normalized_mode = normalize_image_mode(mode);
+    let mut fallback = current_sources.to_vec();
+    if fallback.is_empty() {
+        match normalized_mode.as_str() {
+            "image_image" => fallback.push("chat_image".to_string()),
+            "bot_image" => fallback.push("bot_avatar".to_string()),
+            "user_image" => fallback.push("user_avatar".to_string()),
+            "user_bot_image" => {
+                fallback.push("user_avatar".to_string());
+                fallback.push("bot_avatar".to_string());
+            }
+            _ => {}
+        }
+    }
+    if latest_user_text.trim().is_empty() || proposed_prompt.trim().is_empty() {
+        return Ok(fallback);
+    }
+
+    let source_instruction = [
+        "Choose which visual reference sources the image generator must receive.",
+        "Return only a comma-separated list using these tokens: chat_image, user_avatar, bot_avatar.",
+        "Return an empty response if no reference source is needed.",
+        "Definitions:",
+        "- chat_image: attached, pasted, found, generated, or prior image in the chat.",
+        "- user_avatar: selected user profile avatar; use when the requested generated image includes the user as a person/subject.",
+        "- bot_avatar: current assistant profile avatar; use when the requested generated image includes the assistant/character as a person/subject.",
+        "For image_image, include chat_image whenever a prior/current chat image is required. If the scene should also include the selected user, include user_avatar too. If it should also include the assistant profile, include bot_avatar too.",
+        "Do not infer bot_avatar for a public figure, celebrity, friend, or person from a pasted image. Those are chat_image context, not the assistant profile.",
+        "Do not explain.",
+    ]
+    .join("\n");
+
+    let reply = call_chat(
+        vec![
+            json!({
+                "role": "system",
+                "content": source_instruction
+            }),
+            json!({
+                "role": "user",
+                "content": format!(
+                    "Recent conversation:\n{}\n\nLatest user request:\n{}\n\nProposed image prompt:\n{}\n\nImage mode: {}\nRecent chat image available: {}\nCurrent reference sources: {}\n\nReturn source tokens only.",
+                    conversation_context.trim(),
+                    latest_user_text.trim(),
+                    proposed_prompt.trim(),
+                    normalized_mode,
+                    if recent_image_context { "yes" } else { "no" },
+                    if current_sources.is_empty() { "none".to_string() } else { current_sources.join(",") }
+                )
+            }),
+        ],
+        None,
+        planner_sampling(sampling),
+        32,
+        false,
+    )
+    .await?;
+    let selected = clean_reference_source_choices(&extract_chat_reply_text(&reply));
+    if selected.is_empty() {
+        return Ok(fallback);
+    }
+    Ok(selected)
+}
+
+pub(super) async fn choose_image_mode_for_request(
+    latest_user_text: &str,
+    proposed_prompt: &str,
+    current_mode: &str,
+    conversation_context: &str,
+    recent_image_context: bool,
+    sampling: SamplingConfig,
+) -> Result<Option<String>, String> {
+    if latest_user_text.trim().is_empty() || proposed_prompt.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let mode_instruction = [
+        "Choose the exact image generation mode for the app.",
+        "Return only one token from this set: text_image, image_image, bot_image, user_image, user_bot_image.",
+        "Definitions:",
+        "- text_image: no reference image is needed.",
+        "- image_image: use an attached/current/prior chat image as visual reference. Choose this when the request involves a pasted/sent image, even if the selected user also appears in the requested generated scene.",
+        "- bot_image: use the current assistant profile avatar as the reference image.",
+        "- user_image: use the selected user profile avatar as the reference image.",
+        "- user_bot_image: use both selected user profile avatar and current assistant profile avatar. Do not use it for a celebrity, a person in a pasted image, or any third-party person.",
+        "When Recent chat image available is yes, read the recent conversation carefully. If the latest request depends on a person/object/place from that prior image, choose image_image. This remains true when the user also asks to include themselves from the selected user profile.",
+        "Do not choose user_bot_image unless the request clearly involves the selected user profile and the current assistant profile together. A public figure, friend, uploaded person, pasted image subject, or named third-party is not the assistant profile.",
+        "The conversation is between a user and an assistant profile. If the user asks for the assistant's own image, photo, picture, avatar, body, look, or says the image should be of 'you' from the assistant's perspective, choose bot_image.",
+        "If the user asks for the user's own profile/avatar/image, choose user_image.",
+        "If the user asks for both the user and assistant profile together, choose user_bot_image.",
+        "Prefer a profile/reference mode whenever a profile identity is requested. Keep text_image only when no profile/reference identity is requested.",
+        "Do not explain.",
+    ]
+    .join("\n");
+
+    let reply = call_chat(
+        vec![
+            json!({
+                "role": "system",
+                "content": mode_instruction
+            }),
+            json!({
+                "role": "user",
+                "content": format!(
+                    "Recent conversation:\n{}\n\nLatest user request:\n{}\n\nProposed image prompt:\n{}\n\nCurrent proposed mode: {}\nRecent chat image available: {}",
+                    conversation_context.trim(),
+                    latest_user_text.trim(),
+                    proposed_prompt.trim(),
+                    current_mode,
+                    if recent_image_context { "yes" } else { "no" }
+                )
+            }),
+        ],
+        None,
+        planner_sampling(sampling),
+        24,
+        false,
+    )
+    .await?;
+    Ok(clean_mode_choice(&extract_chat_reply_text(&reply)))
+}
+
+pub(super) async fn ensure_image_proposal_mode(
+    mut proposal: ImageProposal,
+    latest_user_text: &str,
+    task_state: &ConversationTaskState,
+    conversation_context: &str,
+    sampling: SamplingConfig,
+) -> Result<ImageProposal, String> {
+    if let Some(mode) = choose_image_mode_for_request(
+        latest_user_text,
+        &proposal.prompt,
+        &proposal.mode,
+        conversation_context,
+        task_state.recent_image_context,
+        sampling,
+    )
+    .await?
+    {
+        if mode != proposal.mode {
+            crate::assistant_runtime::append_runtime_log(
+                "agent",
+                &format!(
+                    "image_mode_refined from={} to={} latest=\"{}\"",
+                    proposal.mode,
+                    mode,
+                    crate::assistant_runtime::compact_trace_text(latest_user_text, 140)
+                ),
+            );
+            proposal.mode = mode;
+            proposal.prompt = normalize_image_prompt_for_mode(proposal.prompt, &proposal.mode);
+        }
+    }
+    proposal.reference_sources = choose_image_reference_sources_for_request(
+        latest_user_text,
+        &proposal.prompt,
+        &proposal.mode,
+        conversation_context,
+        task_state.recent_image_context,
+        &proposal.reference_sources,
+        sampling,
+    )
+    .await?;
+    Ok(proposal)
+}
+
+pub(super) async fn ensure_image_tool_call_contract(
     mut call: ToolCall,
     latest_user_text: &str,
+    task_state: &ConversationTaskState,
+    conversation_context: &str,
     sampling: SamplingConfig,
 ) -> Result<ToolCall, String> {
     if call.tool != "propose_image_generation" {
         return Ok(call);
     }
-    let prompt = image_prompt_argument(&call);
-    let mode = call
+    let mut prompt = image_prompt_argument(&call);
+    if prompt.trim().is_empty() {
+        prompt = latest_user_text.trim().to_string();
+        let mut object = call.arguments.as_object().cloned().unwrap_or_default();
+        object.insert("prompt".to_string(), Value::String(prompt.clone()));
+        object.remove("description");
+        object.remove("visual_prompt");
+        object.remove("image_prompt");
+        call.arguments = Value::Object(object);
+    }
+    let raw_mode = call
         .arguments
         .get("mode")
         .and_then(Value::as_str)
-        .unwrap_or("text_to_image")
+        .unwrap_or("text_image")
         .to_string();
+    let mut mode = normalize_image_mode(&raw_mode);
+    if let Some(selected_mode) = choose_image_mode_for_request(
+        latest_user_text,
+        &prompt,
+        &mode,
+        conversation_context,
+        task_state.recent_image_context,
+        sampling,
+    )
+    .await?
+    {
+        mode = selected_mode;
+        let mut object = call.arguments.as_object().cloned().unwrap_or_default();
+        object.insert("mode".to_string(), Value::String(mode.clone()));
+        call.arguments = Value::Object(object);
+    }
     if let Some(rewritten) =
         rewrite_image_prompt_to_english(&prompt, latest_user_text, &mode, sampling).await?
     {
@@ -164,6 +489,44 @@ pub(super) async fn ensure_image_tool_call_prompt_english(
             call.arguments = Value::Object(object);
         }
     }
+    let mut object = call.arguments.as_object().cloned().unwrap_or_default();
+    object.insert("mode".to_string(), Value::String(mode));
+    let reference_sources = choose_image_reference_sources_for_request(
+        latest_user_text,
+        object
+            .get("prompt")
+            .and_then(Value::as_str)
+            .unwrap_or(&prompt),
+        object
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("text_image"),
+        conversation_context,
+        task_state.recent_image_context,
+        &normalize_image_reference_sources(object.get("reference_sources")),
+        sampling,
+    )
+    .await?;
+    if !reference_sources.is_empty() {
+        object.insert("reference_sources".to_string(), json!(reference_sources));
+    }
+    call.arguments = Value::Object(object);
+    crate::assistant_runtime::append_runtime_log(
+        "agent",
+        &format!(
+            "image_tool_contract mode={} refs={} prompt=\"{}\" latest=\"{}\"",
+            call.arguments
+                .get("mode")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+            call.arguments
+                .get("reference_sources")
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "[]".to_string()),
+            crate::assistant_runtime::compact_trace_text(&image_prompt_argument(&call), 160),
+            crate::assistant_runtime::compact_trace_text(latest_user_text, 140)
+        ),
+    );
     Ok(call)
 }
 
@@ -240,8 +603,14 @@ pub(super) async fn plan_next_tool_call(
                 tool: name,
                 arguments,
             };
-            let call =
-                ensure_image_tool_call_prompt_english(raw_call, latest_user_text, sampling).await?;
+            let call = ensure_image_tool_call_contract(
+                raw_call,
+                latest_user_text,
+                task_state,
+                &image_mode_context_from_messages(base_messages),
+                sampling,
+            )
+            .await?;
             return Ok((Some(call), accumulated_thinking));
         }
 
@@ -258,14 +627,14 @@ pub(super) async fn plan_next_tool_call(
             return Ok((None, accumulated_thinking));
         }
 
-        if !tool_required {
-            return Ok((None, accumulated_thinking));
-        }
-
         if attempt == 0 {
             planner_messages.push(json!({
                 "role": "system",
-                "content": "Planner correction: this turn appears to need a tool. Output exactly one valid tool call, or NO_TOOL only if a required argument is missing. Do not answer the user."
+                "content": if tool_required {
+                    "Planner correction: this turn appears to need a tool. Output exactly one valid tool call, or NO_TOOL only if a required argument is missing. Do not answer the user."
+                } else {
+                    "Planner correction: your previous planner output was not valid. Output exactly NO_TOOL for normal conversation, or exactly one valid tool call if the latest user turn clearly needs an app tool. Do not answer the user."
+                }
             }));
         }
     }
@@ -278,6 +647,9 @@ pub(super) async fn plan_next_tool_call(
             task_state.label
         ),
     );
+    if !tool_required {
+        return Ok((None, accumulated_thinking));
+    }
     Ok((None, accumulated_thinking))
 }
 

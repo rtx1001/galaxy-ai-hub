@@ -1,14 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ChatContentPart, ChatMessage } from "../types";
+import { ChatContentPart, ChatMessage, FilePreviewResult } from "../types";
 import {
   AgentReactResult,
+  BrainMessage,
+  LocalImageDataUrl,
   SendOptions,
   buildBrainMessages,
+  buildRecentImageContextBlock,
   buildToolAgentMessages,
   createMessageId,
   estimateTokens,
   extractChatResponseText,
   extractMessageText,
+  findRecentChatImageContext,
   findPendingActionProposal,
   findPendingImageProposal,
   formatReactThinking,
@@ -31,6 +35,72 @@ const buildOlderConversationMemory = (chatMessages: ChatMessage[]) => {
     .filter(Boolean)
     .join("\n")
     .slice(-3500);
+};
+
+const naturalChatStartDelay = () =>
+  new Promise<void>((resolve) => {
+    const delayMs = 500 + Math.floor(Math.random() * 501);
+    window.setTimeout(resolve, delayMs);
+  });
+
+const filePreviewToChatPart = (preview: FilePreviewResult): ChatContentPart => {
+  const mime = preview.mime_type.toLowerCase();
+  if (mime.startsWith("image/")) {
+    return {
+      type: "image_url",
+      image_url: {
+        url: localAssetUrl(preview.path) || preview.data_url || "",
+        local_path: preview.path,
+      },
+    };
+  }
+  return {
+    type: "file_preview",
+    file_preview: {
+      ...preview,
+      data_url: null,
+    },
+  };
+};
+
+const materializeVisionMessageImages = async (
+  messages: BrainMessage[],
+  appLog: (message: string) => void,
+): Promise<BrainMessage[]> => {
+  let converted = 0;
+  const nextMessages = await Promise.all(
+    messages.map(async (message) => {
+      if (!Array.isArray(message.content)) return message;
+      const content = await Promise.all(
+        message.content.map(async (part) => {
+          if (part.type !== "image_url") return part;
+          const localPath = part.image_url.local_path;
+          if (!localPath) return part;
+          try {
+            const image = await invoke<LocalImageDataUrl>("read_local_image_data_url", {
+              path: localPath,
+            });
+            converted += 1;
+            return {
+              type: "image_url" as const,
+              image_url: {
+                url: image.data_url,
+                local_path: image.path,
+              },
+            };
+          } catch (error) {
+            appLog(`vision image materialize failed path=${localPath} error=${error instanceof Error ? error.message : String(error)}`);
+            return part;
+          }
+        }),
+      );
+      return { ...message, content };
+    }),
+  );
+  if (converted > 0) {
+    appLog(`vision image materialized count=${converted}`);
+  }
+  return nextMessages;
 };
 
 export function useChatRuntime(options: UseChatRuntimeOptions) {
@@ -107,7 +177,7 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
       ? editTarget.content.filter((part: ChatContentPart): part is Extract<ChatContentPart, { type: "image_url" }> => part.type === "image_url")
       : [];
     const attachedImage = sendOptions.imageDataUrl ?? (sendOptions.text || sendOptions.editMessageId ? null : image);
-    const attachedImagePath = sendOptions.imagePath ?? imagePath;
+    let attachedImagePath = sendOptions.imagePath ?? imagePath;
     if ((!promptText.trim() && !attachedImage) || isStreaming) {
       return;
     }
@@ -183,6 +253,8 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
           pendingImageProposal.proposal.prompt,
           pendingImageProposal.proposal.mode,
           pendingImageProposal.proposal.mask_prompt,
+          [],
+          pendingImageProposal.proposal.reference_sources || [],
         );
         sendInFlightRef.current = false;
         return;
@@ -200,7 +272,7 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     }
 
     setComposerNotice("");
-    const newMessages: ChatMessage[] = sendOptions.editMessageId && editTargetIndex >= 0
+    let newMessages: ChatMessage[] = sendOptions.editMessageId && editTargetIndex >= 0
       ? [...messages.slice(0, editTargetIndex), userMessage]
       : [...messages, userMessage];
     if (!sendOptions.editMessageId) {
@@ -208,6 +280,31 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
         ...prev,
         { id: assistantMessageId, role: "assistant", content: "", created_at: Date.now() },
       ]);
+    }
+    if (attachedImage && !attachedImagePath && /^data:image\//i.test(attachedImage)) {
+      try {
+        const saved = await invoke<LocalImageDataUrl>("save_chat_input_image_data_url", {
+          dataUrl: attachedImage,
+        });
+        attachedImagePath = saved.path;
+        const displayImageUrl = saved.data_url;
+        const persistedUserMessage: ChatMessage = {
+          ...userMessage,
+          content: [
+            { type: "text", text: promptText || "Describe this image." },
+            { type: "image_url", image_url: { url: displayImageUrl, local_path: saved.path } },
+          ],
+        };
+        newMessages = sendOptions.editMessageId && editTargetIndex >= 0
+          ? [...messages.slice(0, editTargetIndex), persistedUserMessage]
+          : [...messages, persistedUserMessage];
+        setMessages((prev: ChatMessage[]) =>
+          prev.map((message) => message.id === userMessage.id ? persistedUserMessage : message),
+        );
+        appLog(`chat input image persisted path=${saved.path}`);
+      } catch (error) {
+        appLog(`chat input image persist failed; using data URL fallback: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     if (attachedImage && !sendOptions.imageDataUrl) {
       clearImage();
@@ -266,6 +363,9 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     };
 
     try {
+      if (!sendOptions.silentUser) {
+        await naturalChatStartDelay();
+      }
       if (isRequestStale()) return;
       const ready = await ensureChatModelReady();
       if (!ready) {
@@ -304,6 +404,9 @@ ${personalityMemory.trim()}`
         : profilePrompt;
       const effectiveRequestMessages = buildBrainMessages(effectiveProfilePrompt, newMessages, hasVision);
       const toolAgentMessages = buildToolAgentMessages(newMessages);
+      const recentImageContextBlock = buildRecentImageContextBlock(
+        findRecentChatImageContext(newMessages, { skipLatestUserImage: !attachedImage }),
+      );
       setLastContextTokens(
         [
           ...effectiveRequestMessages.filter((message) => message.role === "system"),
@@ -330,6 +433,7 @@ ${personalityMemory.trim()}`
           contextBlock: [
             buildSystemContextBlock(),
             `Workspace folders for this request: ${runtimeLinkedFolders.length ? runtimeLinkedFolders.join("; ") : "none"}`,
+            recentImageContextBlock,
           ].join(" | "),
           messages: toolAgentMessages,
           folders: runtimeLinkedFolders,
@@ -383,13 +487,7 @@ ${personalityMemory.trim()}`
           structuredParts.push({ type: "tool_result_cards", cards: reactResult.cards });
         }
         if (reactResult.file_preview) {
-          structuredParts.push({
-            type: "file_preview",
-            file_preview: {
-              ...reactResult.file_preview,
-              data_url: null,
-            },
-          });
+          structuredParts.push(filePreviewToChatPart(reactResult.file_preview));
         }
         if (reactResult.image_proposal) {
           structuredParts.push({ type: "image_proposal", image_proposal: reactResult.image_proposal });
@@ -419,8 +517,101 @@ ${personalityMemory.trim()}`
         return;
       }
 
+      setComposerNotice("Thinking with tools...");
+      appLog(
+        `chat-trace image request model=${selectedModelPath || "none"} thinking=${thinkingEnabled} folders=${runtimeLinkedFolders.length} messages=${toolAgentMessages.length}/${newMessages.length} user=${JSON.stringify(promptText).slice(0, 600)}`,
+      );
+      let imageReactResult: AgentReactResult | null = null;
+      try {
+        imageReactResult = await invoke<AgentReactResult>("agent_jan_chat", {
+          runtimePrompt: effectiveProfilePrompt,
+          contextBlock: [
+            buildSystemContextBlock(),
+            `Workspace folders for this request: ${runtimeLinkedFolders.length ? runtimeLinkedFolders.join("; ") : "none"}`,
+            recentImageContextBlock,
+            "The latest user message includes an attached image. Use image_image if the user asks to edit, transform, redraw, or generate from that image.",
+          ].join(" | "),
+          messages: toolAgentMessages,
+          folders: runtimeLinkedFolders,
+          googleClientId,
+          googleClientSecret,
+          temperature,
+          topK,
+          topP,
+          minP,
+          repeatLastN,
+          repeatPenalty,
+          maxTokens: replyLength,
+          thinkingEnabled,
+          requestElapsedMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
+        });
+      } catch (error) {
+        appLog(`chat-trace image planner failed; falling back to vision chat: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (isRequestStale()) {
+        return;
+      }
+      if (imageReactResult?.tool_trace?.length) {
+        refreshToolRuns().catch((error: unknown) => console.error("Tool activity refresh error:", error));
+      }
+      const imageReactHasStructuredResult = Boolean(
+        imageReactResult?.image_proposal ||
+        imageReactResult?.action_proposal ||
+        imageReactResult?.file_preview ||
+        imageReactResult?.cards?.length,
+      );
+      if (imageReactResult && imageReactHasStructuredResult) {
+        generatedText = imageReactResult.answer;
+        if (looksLikeBoringSystemFailure(generatedText)) {
+          generatedText = await naturalizeFailureReply(generatedText);
+        }
+        generatedThinking = thinkingEnabled ? formatReactThinking(imageReactResult) : "";
+        appLog(
+          `chat-trace image response tool=${imageReactResult.tool_used || "none"} answer=${JSON.stringify(imageReactResult.answer || "").slice(0, 800)} thinking=${generatedThinking ? "yes" : "no"}`,
+        );
+        const structuredParts: ChatContentPart[] = [{ type: "text", text: generatedText }];
+        if (imageReactResult.cards?.length) {
+          structuredParts.push({ type: "tool_result_cards", cards: imageReactResult.cards });
+        }
+        if (imageReactResult.file_preview) {
+          structuredParts.push(filePreviewToChatPart(imageReactResult.file_preview));
+        }
+        if (imageReactResult.image_proposal) {
+          structuredParts.push({ type: "image_proposal", image_proposal: imageReactResult.image_proposal });
+        }
+        if (imageReactResult.action_proposal) {
+          structuredParts.push({ type: "action_proposal", action_proposal: imageReactResult.action_proposal });
+        }
+        const finalizedAssistantIds = finalizeAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
+          ...last,
+          content: structuredParts.length > 1 ? structuredParts : generatedText,
+          thinking: thinkingEnabled ? generatedThinking || last.thinking : undefined,
+          ...replyTiming(),
+        }));
+        if (imageReactResult.file_preview) {
+          enrichPreviewPerception(finalizedAssistantIds[0] ?? assistantMessageId, imageReactResult.file_preview).catch((error: unknown) =>
+            console.error("Preview perception enrichment error:", error),
+          );
+        }
+        const elapsedSeconds = Math.max(0.1, (performance.now() - generationStartedAt) / 1000);
+        setLastTokenSpeed(estimateTokens(generatedText) / elapsedSeconds);
+        setBrainStatus("Ready");
+        setComposerNotice("");
+        await updatePersonalityMemoryAfterTurn(promptText, generatedText);
+        if (liveConversationRef.current) {
+          finalizedAssistantIds.forEach((id: string) => autoSpeechEligibleAssistantIdsRef.current.add(id));
+        }
+        return;
+      }
+      if (imageReactResult) {
+        appLog(
+          `chat-trace image planner fallback answer=${JSON.stringify(imageReactResult.answer || "").slice(0, 500)} tool=${imageReactResult.tool_used || "none"}`,
+        );
+      }
+
+      const visionRequestMessages = await materializeVisionMessageImages(effectiveRequestMessages, appLog);
       const chatPayload = {
-        messages: effectiveRequestMessages,
+        messages: visionRequestMessages,
         temperature,
         top_k: topK,
         top_p: topP,
@@ -447,7 +638,8 @@ ${personalityMemory.trim()}`
       });
 
       if (!response.ok) {
-        throw new Error(`Chat request failed with status ${response.status}`);
+        const errorBody = await response.text().catch(() => "");
+        throw new Error(`Chat request failed with status ${response.status}. ${errorBody}`.trim());
       }
 
       if (!response.body) {
@@ -570,6 +762,8 @@ ${personalityMemory.trim()}`
         thinking: thinkingEnabled ? generatedThinking.trim() || last.thinking : undefined,
         ...replyTiming(),
       }));
+      setComposerNotice("");
+      setBrainStatus("Ready");
       await updatePersonalityMemoryAfterTurn(promptText, generatedText);
       if (liveConversationRef.current) {
         finalizedAssistantIds.forEach((id: string) => autoSpeechEligibleAssistantIdsRef.current.add(id));

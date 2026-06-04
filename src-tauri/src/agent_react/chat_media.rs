@@ -383,13 +383,13 @@ pub(super) fn media_matches_constraints(
 }
 
 pub(super) fn preview_final_answer(
-    preview: &file_tools::FilePreviewResult,
+    _preview: &file_tools::FilePreviewResult,
     user_text: &str,
 ) -> String {
     if user_wants_vietnamese(user_text) {
-        return format!("Em đã tìm thấy và mở **{}** cho anh.", preview.name);
+        return "Em đã mở file này cho anh.".to_string();
     }
-    format!("Here is **{}** from your workspace.", preview.name)
+    "Opened this from your workspace.".to_string()
 }
 
 pub(super) fn random_media_scan_limit() -> u32 {

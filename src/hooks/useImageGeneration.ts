@@ -2,6 +2,7 @@ import { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ChatMessage } from "../types";
 import { createMessageId } from "../appCore";
+import { imageToolDisplayName, normalizeImageMode } from "../components/ImageModeDropdown";
 import { localAssetUrl } from "../utils";
 
 type GeneratedImageResult = {
@@ -33,16 +34,50 @@ type UseImageGenerationOptions = {
   ) => Promise<void>;
   setComposerNotice: Dispatch<SetStateAction<string>>;
   setComposerText: (value: string) => void;
+  activeTaskTypeRef: MutableRefObject<"none" | "llm" | "voice" | "image">;
+  setActiveTaskType: Dispatch<SetStateAction<"none" | "llm" | "voice" | "image">>;
   setIsGeneratingImage: Dispatch<SetStateAction<boolean>>;
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
   unloadLlmForTask: (taskType: "voice" | "image") => Promise<void>;
   updateAssistantMessageById: (messageId: string, updater: (message: ChatMessage) => ChatMessage) => void;
   updateLastAssistantMessage: (updater: (message: ChatMessage) => ChatMessage) => void;
   userAvatar: string;
+  userName: string;
+};
+
+const imagePromptMentionsUserProfile = (prompt: string, userName: string) => {
+  const lowered = prompt.toLocaleLowerCase();
+  const name = userName.trim().toLocaleLowerCase();
+  return Boolean(name && lowered.includes(name)) || /\b(the\s+user|selected\s+user|user\s+profile)\b/i.test(prompt);
+};
+
+const normalizeReferenceSources = (sources?: string[] | null) =>
+  Array.isArray(sources)
+    ? sources
+        .map((source) => source.trim().toLowerCase().replace(/[-\s]+/g, "_"))
+        .filter((source, index, items) =>
+          ["chat_image", "user_avatar", "bot_avatar"].includes(source) && items.indexOf(source) === index,
+        )
+    : [];
+
+const compactImageRefs = (refs: Array<string | null | undefined>) => {
+  const seen = new Set<string>();
+  return refs.filter((value): value is string => {
+    if (!value || seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
 };
 
 export function useImageGeneration(options: UseImageGenerationOptions) {
-  const handleGenerateImage = async (promptOverride?: string, mode = "text_to_image", maskPrompt?: string | null) => {
+  const handleGenerateImage = async (
+    promptOverride?: string,
+    mode = "text_image",
+    maskPrompt?: string | null,
+    extraReferenceImages: string[] = [],
+    referenceSources: string[] = [],
+  ) => {
+    const normalizedMode = normalizeImageMode(mode);
     const prompt = (promptOverride ?? options.composerInputRef.current?.value ?? options.input).trim();
     if (!prompt || options.isGeneratingImage) {
       return;
@@ -61,26 +96,32 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
       ? latestChatImage.find((part) => part.type === "image_url")?.image_url.local_path
       : null;
     const initImageDataUrls = (() => {
-      if (mode === "avatar_image") return options.assistantAvatar ? [options.assistantAvatar] : [];
-      if (mode === "user_avatar_image" || mode === "avatar_user_image") return options.userAvatar ? [options.userAvatar] : [];
-      if (mode === "user_character_image" || mode === "user_and_character_image" || mode === "both_avatars_image") {
-        return [options.userAvatar, options.assistantAvatar].filter((value): value is string => Boolean(value));
+      const selectedReferenceSources = normalizeReferenceSources(referenceSources);
+      if (normalizedMode === "bot_image") return options.assistantAvatar ? [options.assistantAvatar] : [];
+      if (normalizedMode === "user_image") return options.userAvatar ? [options.userAvatar] : [];
+      if (normalizedMode === "user_bot_image") {
+        return compactImageRefs([options.userAvatar, options.assistantAvatar]);
       }
-      const source = options.image || (mode === "image_to_image" ? latestChatImagePath || (latestChatImageUrl?.startsWith("data:image/") ? latestChatImageUrl : null) : null);
-      return source ? [source] : [];
+      const source = options.image || (normalizedMode === "image_image" ? latestChatImagePath || (latestChatImageUrl?.startsWith("data:image/") ? latestChatImageUrl : null) : null);
+      const userProfileRef =
+        normalizedMode === "image_image" &&
+        (selectedReferenceSources.includes("user_avatar") || imagePromptMentionsUserProfile(prompt, options.userName))
+          ? options.userAvatar
+          : null;
+      const botProfileRef =
+        normalizedMode === "image_image" && selectedReferenceSources.includes("bot_avatar")
+          ? options.assistantAvatar
+          : null;
+      return compactImageRefs([source, userProfileRef, botProfileRef, ...extraReferenceImages]);
     })();
     const needsReferenceImage =
-      mode === "avatar_image" ||
-      mode === "user_avatar_image" ||
-      mode === "avatar_user_image" ||
-      mode === "user_character_image" ||
-      mode === "user_and_character_image" ||
-      mode === "both_avatars_image" ||
-      mode === "image_to_image";
-    const needsBothAvatars =
-      mode === "user_character_image" || mode === "user_and_character_image" || mode === "both_avatars_image";
+      normalizedMode === "bot_image" ||
+      normalizedMode === "user_image" ||
+      normalizedMode === "user_bot_image" ||
+      normalizedMode === "image_image";
+    const needsBothAvatars = normalizedMode === "user_bot_image";
     if (needsBothAvatars && initImageDataUrls.length < 2) {
-      options.setComposerNotice("This image mode needs both the user avatar and character avatar first.");
+      options.setComposerNotice("This image mode needs both the user avatar and assistant avatar first.");
       return;
     }
     if (needsReferenceImage && initImageDataUrls.length === 0) {
@@ -102,7 +143,7 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
     ]);
     options.setComposerText("");
     const imageRunInput = {
-      mode,
+      mode: normalizedMode,
       prompt,
       mask_prompt: maskPrompt || "",
       width: options.imageWidth,
@@ -128,31 +169,44 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
       const displayImageUrl = localAssetUrl(result.file_path) || imageUrl;
       options.appLog(`image-trace response mime=${result.mime_type} bytes_b64=${result.image_base64.length} file=${result.file_path || "<unknown>"}`);
       options.setIsGeneratingImage(false);
-      const naturalReply = await options.generateNaturalImageCompletionReply(prompt, mode, imageUrl);
       options.updateAssistantMessageById(assistantMessageId, (last) => ({
         ...last,
         content: [
-          { type: "text", text: naturalReply || "" },
           { type: "image_url", image_url: { url: displayImageUrl, local_path: result.file_path } },
         ],
         completed_at: Date.now(),
         duration_ms: Math.max(0, Math.round(performance.now() - imageTaskStartedAt)),
       }));
-      if (options.liveConversationRef.current && naturalReply.trim()) {
-        options.autoSpeechEligibleAssistantIdsRef.current.add(assistantMessageId);
-      }
       options.clearImage();
       options.setComposerNotice("");
       options.recordClientToolRun(
-        "generate_image",
+        imageToolDisplayName(mode),
         imageRunInput,
         result.file_path ? `Generated image: ${result.file_path}` : "Generated image.",
         true,
         imageTaskStartedAt,
       ).catch(() => undefined);
+      void options.generateNaturalImageCompletionReply(prompt, normalizedMode, imageUrl)
+        .then((naturalReply) => {
+          const text = naturalReply.trim();
+          if (!text) return;
+          options.updateAssistantMessageById(assistantMessageId, (last) => ({
+            ...last,
+            content: [
+              { type: "text", text },
+              { type: "image_url", image_url: { url: displayImageUrl, local_path: result.file_path } },
+            ],
+          }));
+          if (options.liveConversationRef.current) {
+            options.autoSpeechEligibleAssistantIdsRef.current.add(assistantMessageId);
+          }
+        })
+        .catch((error) => {
+          options.appLog(`image completion reply skipped error=${error instanceof Error ? error.message : String(error)}`);
+        });
     } catch (error) {
       options.recordClientToolRun(
-        "generate_image",
+        imageToolDisplayName(mode),
         imageRunInput,
         error instanceof Error ? error.message : String(error),
         false,
@@ -166,6 +220,10 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
       }));
     } finally {
       options.setIsGeneratingImage(false);
+      if (options.activeTaskTypeRef.current === "image") {
+        options.activeTaskTypeRef.current = "none";
+        options.setActiveTaskType("none");
+      }
     }
   };
 

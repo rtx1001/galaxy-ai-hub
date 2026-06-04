@@ -201,6 +201,42 @@ option {
   max-width: 100%;
 }
 
+.chat-audio-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  background: var(--accent-color);
+  box-shadow: 0 0 14px var(--accent-soft-strong);
+}
+
+.chat-audio-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-color);
+  box-shadow: 0 0 14px var(--accent-soft-strong);
+}
+
+.chat-volume-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--accent-color);
+  box-shadow: 0 0 14px var(--accent-soft-strong);
+}
+
+.chat-volume-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-color);
+  box-shadow: 0 0 14px var(--accent-soft-strong);
+}
+
 details > summary .details-chevron {
   transition: transform 180ms ease;
 }

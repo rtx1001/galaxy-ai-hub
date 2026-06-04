@@ -201,7 +201,7 @@ export function useProfileActions(options: UseProfileActionsOptions) {
     options.setPersonalityProfileOpen(true);
   };
 
-  const updateSelectedPersonalityPreset = () => {
+  const updateSelectedPersonalityPreset = async () => {
     const nextName = options.personalityNameDraft.trim() || options.selectedPersonalityPreset?.name || "Assistant";
     options.setPersonalityPresets((prev) =>
       prev.map((preset) =>
@@ -217,13 +217,13 @@ export function useProfileActions(options: UseProfileActionsOptions) {
       ),
     );
     options.setPersonalityNameDraft(nextName);
-    options.saveActiveCharacterFiles({
+    await options.saveActiveCharacterFiles({
       name: nextName,
       prompt: options.personality,
       avatar: options.personalityAvatar,
       voice_path: options.selectedVoicePath,
       soul: options.characterSoul,
-    }).catch((error) => console.error("Character files save error:", error));
+    });
   };
 
   const deleteSelectedPersonalityPreset = () => {

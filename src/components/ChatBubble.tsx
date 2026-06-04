@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { pauseOtherMediaElements, renderInlineText } from "../utils";
+import { RegisteredAudio } from "./RegisteredAudio";
 
 export function FormattedMessageText({ text, compact = false }: { text: string; compact?: boolean }) {
     const codeFencePattern = /```(\w+)?\n?([\s\S]*?)```/g;
@@ -144,7 +145,13 @@ export function FormattedMessageText({ text, compact = false }: { text: string; 
                   );
                 } else if (["mp3", "wav"].includes(extension)) {
                   elements.push(
-                    <audio key={`audio-${blockIndex}-${elements.length}`} src={mediaUrl} controls onPlay={(event) => pauseOtherMediaElements(event.currentTarget)} className="my-3 w-full" />,
+                    <RegisteredAudio
+                      key={`audio-${blockIndex}-${elements.length}`}
+                      id={`inline-audio:${mediaUrl}`}
+                      title={decodeURIComponent(mediaUrl.split(/[\\/]/).pop()?.split("?")[0] || "Audio")}
+                      src={mediaUrl}
+                      className="my-3 w-full"
+                    />,
                   );
                 } else {
                   elements.push(

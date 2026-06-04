@@ -493,13 +493,17 @@ pub(super) fn load_personality_memory(personality_id: &str) -> String {
         .filter(|item| item.key.starts_with("event:"))
         .filter_map(|item| {
             let value = serde_json::from_str::<serde_json::Value>(&item.value).ok()?;
-            let user = value.get("user").and_then(serde_json::Value::as_str).unwrap_or_default();
+            let user = value
+                .get("user")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
             let assistant = value
                 .get("assistant")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
             let turn = [
-                (!user.trim().is_empty()).then(|| format!("User: {}", compact_memory_line(user, 260))),
+                (!user.trim().is_empty())
+                    .then(|| format!("User: {}", compact_memory_line(user, 260))),
                 (!assistant.trim().is_empty())
                     .then(|| format!("Assistant: {}", compact_memory_line(assistant, 260))),
             ]
@@ -511,7 +515,14 @@ pub(super) fn load_personality_memory(personality_id: &str) -> String {
         })
         .collect::<Vec<_>>();
     event_turns.sort_by_key(|(created_at, _)| *created_at);
-    for (_, turn) in event_turns.into_iter().rev().take(8).collect::<Vec<_>>().into_iter().rev() {
+    for (_, turn) in event_turns
+        .into_iter()
+        .rev()
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
         structured.recent_turns.retain(|item| item != &turn);
         structured.recent_turns.push(turn);
     }

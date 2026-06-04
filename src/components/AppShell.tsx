@@ -212,7 +212,9 @@ export function AppShell(props: AppShellProps) {
               onDeleteImageMessage={props.deleteImageFromChatMessage}
               onToggleImageCollapsed={(key) => props.setCollapsedImageParts((prev: Record<string, boolean>) => ({ ...prev, [key]: !prev[key] }))}
               onDismissImageProposal={props.dismissImageProposal}
-              onGenerateImage={(prompt, mode, maskPrompt) => void props.handleGenerateImage(prompt, mode, maskPrompt)}
+              onGenerateImage={(prompt, mode, maskPrompt, extraReferenceImages, referenceSources) =>
+                void props.handleGenerateImage(prompt, mode, maskPrompt, extraReferenceImages, referenceSources)
+              }
               onDismissChatPart={props.dismissChatPart}
               onApproveActionProposal={(messageId, partIndex, proposal) => void props.approveActionProposal(messageId, partIndex, proposal)}
               onDeleteCalendarEvent={props.openDeleteGoogleEventConfirm}

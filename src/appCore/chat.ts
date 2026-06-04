@@ -25,6 +25,64 @@ export const extractMessageText = (content: ChatMessage["content"]) => {
     .trim();
 };
 
+export type RecentChatImageContext = {
+  role: ChatMessage["role"];
+  path?: string;
+  hasPixels: boolean;
+  text: string;
+};
+
+export const findRecentChatImageContext = (
+  chatMessages: ChatMessage[],
+  options: { skipLatestUserImage?: boolean } = {},
+): RecentChatImageContext | null => {
+  const latestIndex = chatMessages.length - 1;
+  for (let index = latestIndex; index >= 0; index -= 1) {
+    const message = chatMessages[index];
+    if (options.skipLatestUserImage && index === latestIndex && message.role === "user") {
+      continue;
+    }
+    if (!Array.isArray(message.content)) continue;
+
+    const imagePart = message.content.find((part) => part.type === "image_url");
+    if (imagePart?.type === "image_url") {
+      return {
+        role: message.role,
+        path: imagePart.image_url.local_path,
+        hasPixels: Boolean(imagePart.image_url.url || imagePart.image_url.local_path),
+        text: extractMessageText(message.content).replace(/\s+/g, " ").trim().slice(0, 320),
+      };
+    }
+
+    const filePreviewPart = message.content.find(
+      (part) =>
+        part.type === "file_preview" &&
+        part.file_preview.mime_type.toLowerCase().startsWith("image/"),
+    );
+    if (filePreviewPart?.type === "file_preview") {
+      return {
+        role: message.role,
+        path: filePreviewPart.file_preview.path,
+        hasPixels: Boolean(filePreviewPart.file_preview.data_url || filePreviewPart.file_preview.path),
+        text: extractMessageText(message.content).replace(/\s+/g, " ").trim().slice(0, 320),
+      };
+    }
+  }
+  return null;
+};
+
+export const buildRecentImageContextBlock = (context: RecentChatImageContext | null) => {
+  if (!context) return "";
+  const parts = [
+    "Recent chat image reference: yes.",
+    `Latest prior image was from: ${context.role}.`,
+    context.path ? `Latest prior image path: ${context.path}.` : "",
+    context.text ? `Nearby text around that image: ${context.text}.` : "",
+    "If the user asks to create/edit an image involving a person, object, or scene from that prior chat image, choose image_image. If the generated scene also includes the selected user, image_image is still the correct mode because the prior chat image is a required reference.",
+  ].filter(Boolean);
+  return parts.join(" ");
+};
+
 export const splitAssistantTextForChat = (text: string) => {
   const clean = text.trim();
   const target = 620;
@@ -139,6 +197,8 @@ export const buildAgentMessageContent = (content: ChatMessage["content"], includ
     } else if (part.type === "image_url") {
       if (includeImages) {
         parts.push(part);
+      } else {
+        parts.push({ type: "text", text: "[image attached]" });
       }
     } else if (part.type === "file_preview") {
       parts.push({ type: "text", text: filePreviewContextText(part.file_preview) });
@@ -169,6 +229,7 @@ export const buildAgentMessageContent = (content: ChatMessage["content"], includ
         "Pending image proposal awaiting approval:",
         `Prompt: ${part.image_proposal.prompt}`,
         `Mode: ${part.image_proposal.mode}`,
+        part.image_proposal.reference_sources?.length ? `Reference sources: ${part.image_proposal.reference_sources.join(", ")}` : "",
         part.image_proposal.mask_prompt ? `Mask prompt: ${part.image_proposal.mask_prompt}` : "",
       ].filter(Boolean);
       parts.push({ type: "text", text: proposalLines.join("\n") });

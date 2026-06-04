@@ -341,7 +341,7 @@ pub(super) fn resolve_existing_permitted_folder_path(
     let mut ranked = matches.into_values().collect::<Vec<_>>();
     ranked.sort_by(|left, right| {
         compare_match_scores(left.0, right.0)
-        .then_with(|| display_path(&left.1).cmp(&display_path(&right.1)))
+            .then_with(|| display_path(&left.1).cmp(&display_path(&right.1)))
     });
 
     match ranked.len() {

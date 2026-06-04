@@ -1,4 +1,5 @@
 import { ChevronDownIcon } from "./Icons";
+import { ImageModeDropdown } from "./ImageModeDropdown";
 import { NumberStepper } from "./UI";
 import { clampNumber } from "../utils";
 
@@ -6,11 +7,13 @@ export function ImageStudioSection({
   open,
   drawing,
   quickPrompt,
+  quickMode,
   imageWidth,
   imageHeight,
   isGeneratingImage,
   onToggle,
   onQuickPromptChange,
+  onQuickModeChange,
   onGenerate,
   onImageWidthChange,
   onImageHeightChange,
@@ -18,11 +21,13 @@ export function ImageStudioSection({
   open: boolean;
   drawing: boolean;
   quickPrompt: string;
+  quickMode: string;
   imageWidth: number;
   imageHeight: number;
   isGeneratingImage: boolean;
   onToggle: (open: boolean) => void;
   onQuickPromptChange: (value: string) => void;
+  onQuickModeChange: (value: string) => void;
   onGenerate: () => void;
   onImageWidthChange: (value: number) => void;
   onImageHeightChange: (value: number) => void;
@@ -45,7 +50,15 @@ export function ImageStudioSection({
       </summary>
       <div className="space-y-3 border-t border-[#282a2c] px-4 py-3">
         <label className="block">
-          <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">Quick prompt</span>
+          <span className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-[#c4c7c5]">Quick prompt</span>
+            <ImageModeDropdown
+              value={quickMode}
+              onChange={onQuickModeChange}
+              minWidthClass="min-w-[142px]"
+              className="shrink-0"
+            />
+          </span>
           <textarea
             value={quickPrompt}
             onChange={(event) => onQuickPromptChange(event.target.value)}
