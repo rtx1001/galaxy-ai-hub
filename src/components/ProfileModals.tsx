@@ -1,6 +1,9 @@
-import type { RefObject } from "react";
-import type { PersonalityPreset, UserProfilePreset, VoiceSample } from "../appCore";
-import { CameraIcon, CloseIcon, FolderIcon, PlayIcon, SaveIcon, TrashIcon } from "./Icons";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
+import type { AudioSynthesisResult, PersonalityPreset, UserProfilePreset, VoiceSample } from "../appCore";
+import { sanitizeTextForSpeech } from "../appCore";
+import { CameraIcon, CloseIcon, DownloadIcon, FolderIcon, PlayIcon, SaveIcon, SpeakerIcon, StopIcon, TrashIcon } from "./Icons";
 import { AvatarImage, IconButton, NumberStepper } from "./UI";
 
 function VoiceSampleList({
@@ -52,7 +55,7 @@ function VoiceSampleList({
                   >
                     {previewing ? <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent-color)]" /> : <PlayIcon />}
                   </button>
-                  <button type="button" onClick={() => onSelect(sample.path)} className="min-w-0 flex-1 text-left" title={sample.name}>
+                  <button type="button" onClick={() => onSelect(sample.path)} className="min-w-0 flex-1 text-left">
                     <div className="truncate text-[13px] font-semibold text-[#e3e3e3]">{sample.label}</div>
                     <div className="truncate text-[10px] leading-4 text-[#9aa0a6]">Preview</div>
                   </button>
@@ -99,7 +102,7 @@ function VoicePanel({
       <div className="mb-3 flex items-center gap-2 rounded-2xl border border-[#282a2c] bg-[#131314] px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9aa0a6]">Voice folder</div>
-          <div className="mt-1 truncate text-xs text-[#c4c7c5]" title={voiceFolder || "Default voices folder"}>
+          <div className="mt-1 truncate text-xs text-[#c4c7c5]">
             {voiceFolder || "Default voices folder"}
           </div>
         </div>
@@ -116,6 +119,236 @@ function VoicePanel({
         onPreview={onPreview}
         onSelect={onSelect}
       />
+    </div>
+  );
+}
+
+function audioResultToBlob(result: AudioSynthesisResult) {
+  const binary = atob(result.audio_base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: result.mime_type || "audio/wav" });
+}
+
+function safeVoiceDownloadName(name: string) {
+  const clean = name
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `${clean || "voice-test"}.wav`;
+}
+
+function isInterruptedPlayError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+type VoiceTestCacheResult = {
+  path: string;
+  audio_base64: string;
+  mime_type: string;
+};
+
+const VOICE_TEST_DRAFT_STORAGE_PREFIX = "galaxy.voiceTestDraft";
+
+function CharacterVoiceTestBlock({
+  characterName,
+  selectedVoicePath,
+  storageKey,
+}: {
+  characterName: string;
+  selectedVoicePath: string;
+  storageKey: string;
+}) {
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState("");
+  const [rendering, setRendering] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [audioUrl, setAudioUrl] = useState("");
+  const [cachedPath, setCachedPath] = useState("");
+  const [cachedKey, setCachedKey] = useState("");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef("");
+  const currentKey = JSON.stringify([selectedVoicePath || "", sanitizeTextForSpeech(text)]);
+  const draftStorageKey = `${VOICE_TEST_DRAFT_STORAGE_PREFIX}.${storageKey || "default"}`;
+
+  useEffect(() => () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = "";
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      setText(localStorage.getItem(draftStorageKey) || "");
+    } catch {
+      setText("");
+    }
+    setStatus("");
+    setCachedPath("");
+    setCachedKey("");
+  }, [draftStorageKey]);
+
+  useEffect(() => {
+    try {
+      if (text) {
+        localStorage.setItem(draftStorageKey, text);
+      } else {
+        localStorage.removeItem(draftStorageKey);
+      }
+    } catch {
+      // localStorage can be unavailable in restricted environments.
+    }
+  }, [draftStorageKey, text]);
+
+  const stopPreviousAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setPlaying(false);
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = "";
+      setAudioUrl("");
+    }
+  };
+
+  const loadAudioResult = async (result: AudioSynthesisResult | VoiceTestCacheResult, path: string) => {
+    const nextUrl = URL.createObjectURL(audioResultToBlob(result));
+    stopPreviousAudio();
+    audioUrlRef.current = nextUrl;
+    setAudioUrl(nextUrl);
+    setCachedPath(path);
+    setCachedKey(currentKey);
+    const audio = new Audio(nextUrl);
+    audioRef.current = audio;
+    audio.addEventListener("ended", () => setPlaying(false));
+    audio.addEventListener("pause", () => setPlaying(false));
+    audio.addEventListener("play", () => setPlaying(true));
+    await audio.play().catch((error) => {
+      if (!isInterruptedPlayError(error)) throw error;
+    });
+    setStatus("Voice ready");
+  };
+
+  const renderAndPlay = async () => {
+    const speechText = sanitizeTextForSpeech(text);
+    if (!speechText.trim() || rendering) return;
+    if (playing) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      setPlaying(false);
+      return;
+    }
+    setRendering(true);
+    try {
+      if (audioRef.current && audioUrl && cachedKey === currentKey) {
+        audioRef.current.currentTime = 0;
+        await audioRef.current.play().catch((error) => {
+          if (!isInterruptedPlayError(error)) throw error;
+        });
+        setStatus("Voice ready");
+        return;
+      }
+      setStatus("Checking cache...");
+      const cached = await invoke<VoiceTestCacheResult | null>("get_cached_voice_test_speech", {
+        text: speechText,
+        voiceSamplePath: selectedVoicePath || null,
+      });
+      if (cached) {
+        await loadAudioResult(cached, cached.path);
+        return;
+      }
+      setStatus("Rendering voice...");
+      await invoke("prepare_omnivoice_engine").catch(() => undefined);
+      const result = await invoke<AudioSynthesisResult>("synthesize_speech", {
+        text: speechText,
+        voiceSamplePath: selectedVoicePath || null,
+        useSidecar: false,
+      });
+      const saved = await invoke<VoiceTestCacheResult>("save_voice_test_speech", {
+        text: speechText,
+        voiceSamplePath: selectedVoicePath || null,
+        audioBase64: result.audio_base64,
+      });
+      await loadAudioResult(saved, saved.path);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRendering(false);
+    }
+  };
+
+  const downloadRenderedVoice = async () => {
+    if (!cachedPath || cachedKey !== currentKey) return;
+    const destination = await save({
+      defaultPath: safeVoiceDownloadName(`${characterName || "character"} voice test`),
+      filters: [{ name: "WAV audio", extensions: ["wav"] }],
+    });
+    if (!destination) return;
+    try {
+      await invoke("copy_voice_test_speech", {
+        sourcePath: cachedPath,
+        destinationPath: destination,
+      });
+      setStatus("WAV saved");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const cachedAudioReady = Boolean(cachedPath && cachedKey === currentKey);
+
+  return (
+    <div className="flex min-h-[132px] flex-col">
+      <textarea
+        value={text}
+        onChange={(event) => {
+          setText(event.target.value);
+          setStatus("");
+        }}
+        className="min-h-0 flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm leading-5 text-[#e3e3e3] outline-none transition placeholder:text-[#6f767d] focus:border-[var(--accent-color)]"
+        placeholder={`Type or paste text for ${characterName || "this character"}...`}
+      />
+      <div className="mt-2 flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#c4c7c5]">Test voice</div>
+          {status && <div className="truncate text-[10px] font-semibold text-[#9aa0a6]">{status}</div>}
+        </div>
+        <button
+          type="button"
+          onClick={() => void renderAndPlay()}
+          disabled={!text.trim() || rendering}
+          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-2xl bg-[var(--accent-color)] px-4 text-xs font-bold text-[#131314] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          {playing ? <StopIcon className="h-4 w-4" /> : <SpeakerIcon className="h-4 w-4" />}
+          {playing ? "Stop" : rendering ? "Rendering" : "Speak"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void downloadRenderedVoice()}
+          disabled={!cachedAudioReady}
+          className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition ${
+            cachedAudioReady
+              ? "bg-[var(--accent-soft)] text-[var(--accent-color)] hover:bg-[var(--accent-soft-strong)]"
+              : "cursor-not-allowed bg-[#131314] text-[#5f666d] opacity-55"
+          }`}
+          title={cachedAudioReady ? "Download rendered WAV" : "Render speech first"}
+        >
+          <DownloadIcon className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -182,8 +415,8 @@ export function UserProfileModal({
           </IconButton>
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto px-4 py-3 md:h-[500px] md:grid-cols-[minmax(0,0.88fr)_minmax(320px,1fr)] md:overflow-hidden">
-          <div className="flex min-h-0 flex-col gap-2.5 rounded-2xl border border-[#282a2c] bg-[#1b1c1e] p-3">
+        <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto px-4 py-3 md:h-[560px] md:grid-cols-[minmax(0,0.88fr)_minmax(320px,1fr)] md:overflow-hidden">
+          <div className="grid min-h-0 grid-rows-[auto_auto_minmax(132px,1fr)_minmax(132px,1fr)] gap-2.5 overflow-y-auto overflow-x-hidden rounded-2xl border border-[#282a2c] bg-[#1b1c1e] p-3 [scrollbar-gutter:stable]">
             <div className="flex justify-center">
               <button type="button" onClick={onChooseAvatar} className="group relative h-32 w-32 shrink-0 overflow-hidden rounded-[18px] ring-1 ring-[#282a2c]" title="Change avatar">
                 <AvatarImage src={userAvatar} fallback={userName || "You"} className="h-full w-full rounded-[18px]" />
@@ -196,10 +429,15 @@ export function UserProfileModal({
               <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">Profile name</span>
               <input value={userName} onChange={(event) => onUserNameChange(event.target.value)} className="h-10 w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 text-sm font-semibold text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Your name" />
             </label>
-            <label className="flex min-h-0 flex-1 flex-col">
+            <label className="flex min-h-0 flex-col">
               <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">About you</span>
-              <textarea value={userDescription} onChange={(event) => onUserDescriptionChange(event.target.value)} rows={7} className="min-h-[160px] flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm leading-5 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Details the assistant should remember about you." />
+              <textarea value={userDescription} onChange={(event) => onUserDescriptionChange(event.target.value)} rows={7} className="min-h-0 flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm leading-5 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Details the assistant should remember about you." />
             </label>
+            <CharacterVoiceTestBlock
+              characterName={userName.trim() || "you"}
+              selectedVoicePath={selectedVoicePath}
+              storageKey={`user.${selectedProfile?.id || "active"}`}
+            />
           </div>
           <VoicePanel
             title="User voice"
@@ -216,7 +454,7 @@ export function UserProfileModal({
         </div>
 
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[#282a2c] px-5 py-2">
-          <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-[#c4c7c5]" title="Play your messages with this profile voice when main Auto voice is on">
+          <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-[#c4c7c5]">
             <button type="button" onClick={onToggleAutoSpeech} className={`relative h-5 w-9 shrink-0 rounded-full transition ${autoSpeech ? "bg-[var(--accent-color)]" : "bg-[#3a3b3d]"}`} aria-pressed={autoSpeech}>
               <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-[#0f1011] transition ${autoSpeech ? "left-[18px]" : "left-0.5"}`} />
             </button>
@@ -310,24 +548,29 @@ export function CharacterProfileModal({
           </IconButton>
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto px-4 py-3 md:h-[500px] md:grid-cols-[minmax(0,0.88fr)_minmax(320px,1fr)] md:overflow-hidden">
-          <div className="flex min-h-0 flex-col gap-2.5 rounded-2xl border border-[#282a2c] bg-[#1b1c1e] p-3">
-            <div className="flex justify-center">
-              <button type="button" onClick={onChooseAvatar} className="group relative h-32 w-32 shrink-0 overflow-hidden rounded-[18px] ring-1 ring-[#282a2c]" title="Change avatar">
-                <AvatarImage src={preset?.avatar || fallbackAvatar} fallback={preset?.name || "AI"} className="h-full w-full rounded-[18px]" />
+        <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto overflow-x-hidden px-4 py-3 md:h-[560px] md:grid-cols-[minmax(0,0.88fr)_minmax(320px,1fr)] md:overflow-hidden">
+          <div className="grid min-h-0 grid-rows-[auto_auto_minmax(132px,1fr)_minmax(132px,1fr)] gap-2.5 overflow-y-auto overflow-x-hidden rounded-2xl border border-[#282a2c] bg-[#1b1c1e] p-3 [scrollbar-gutter:stable]">
+            <div className="flex shrink-0 justify-center">
+              <button type="button" onClick={onChooseAvatar} className="group relative h-24 w-24 shrink-0 overflow-hidden rounded-[16px] ring-1 ring-[#282a2c] sm:h-28 sm:w-28 sm:rounded-[17px] [@media(min-height:760px)]:md:h-32 [@media(min-height:760px)]:md:w-32 [@media(min-height:760px)]:md:rounded-[18px]" title="Change avatar">
+                <AvatarImage src={preset?.avatar || fallbackAvatar} fallback={preset?.name || "AI"} className="h-full w-full rounded-[16px] sm:rounded-[17px] [@media(min-height:760px)]:md:rounded-[18px]" />
                 <span className="absolute inset-0 hidden items-center justify-center bg-black/45 text-[#e3e3e3] group-hover:flex">
                   <CameraIcon className="h-6 w-6" />
                 </span>
               </button>
             </div>
-            <label className="block">
+            <label className="block shrink-0">
               <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">Character name</span>
               <input value={nameDraft} onChange={(event) => onNameChange(event.target.value)} className="h-10 w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 text-sm font-semibold text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Assistant name" />
             </label>
-            <label className="flex min-h-0 flex-1 flex-col">
+            <label className="flex min-h-0 flex-col">
               <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">Personality</span>
-              <textarea value={personality} onChange={(event) => onPersonalityChange(event.target.value)} rows={7} className="min-h-[160px] flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm leading-5 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Describe how this assistant should think, speak, and behave." />
+              <textarea value={personality} onChange={(event) => onPersonalityChange(event.target.value)} rows={7} className="min-h-0 flex-1 resize-none rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm leading-5 text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Describe how this assistant should think, speak, and behave." />
             </label>
+            <CharacterVoiceTestBlock
+              characterName={nameDraft || preset?.name || "this character"}
+              selectedVoicePath={selectedVoicePath}
+              storageKey={`character.${preset?.id || "active"}`}
+            />
           </div>
           <VoicePanel
             title="Character voice"

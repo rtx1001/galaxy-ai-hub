@@ -133,9 +133,7 @@ export function SliderField({
       min,
       max,
       step,
-      suffix = "",
       onChange,
-      helper,
     }: {
           label: string;
           value: number;
@@ -146,14 +144,13 @@ export function SliderField({
           onChange: (nextValue: number) => void;
           helper?: string;
         }) {
-    const valueTitle = suffix ? `${value} ${suffix}` : String(value);
     return (
-    <div className="space-y-2.5" title={helper}>
+    <div className="space-y-2.5">
       <div className="grid grid-cols-[minmax(0,1fr)_128px] items-center gap-2">
-        <div className="min-w-0" title={helper}>
+        <div className="min-w-0">
           <div className="truncate text-sm font-semibold leading-tight text-[#e3e3e3]">{label}</div>
         </div>
-        <div title={valueTitle}>
+        <div>
           <NumberStepper value={value} min={min} max={max} step={step} onChange={onChange} />
         </div>
       </div>
@@ -186,7 +183,7 @@ export function ResourceBar({
         <div className="mb-1 flex min-h-[12px] items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#c4c7c5]">
           <span className="shrink-0 truncate">{metric.label}</span>
           {detail ? (
-            <span className="min-w-0 flex-1 truncate normal-case tracking-normal text-[#9aa0a6]" title={detail}>
+            <span className="min-w-0 flex-1 truncate normal-case tracking-normal text-[#9aa0a6]">
               {detail}
             </span>
           ) : (
@@ -222,7 +219,7 @@ export function AvatarImage({
       {imageSrc ? (
         <img src={imageSrc} alt={fallback} className="h-full w-full object-cover" />
       ) : (
-        <div className="relative flex h-full w-full items-center justify-center bg-[#131314] text-[#c4c7c5]" title={fallback}>
+        <div className="relative flex h-full w-full items-center justify-center bg-[#131314] text-[#c4c7c5]">
           <CameraIcon className="h-1/2 w-1/2" />
           <span className="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--accent-color)] text-[#131314] ring-2 ring-[#131314]">
             <PlusIcon className="h-3 w-3" />

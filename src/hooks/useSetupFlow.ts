@@ -8,6 +8,7 @@ import {
   SetupTier,
   SystemInfo,
   setupTierFromSystem,
+  setupTierLabel,
 } from "../appCore";
 
 const installedSetupTierFromModel = (path: string | null): SetupTier | null => {
@@ -120,7 +121,7 @@ export function useSetupFlow({
   const chooseSetupTier = (tier: SetupTier) => {
     setSetupTierOverride(tier);
     setSetupNotice(
-      `Selected ${tier} setup. Galaxy will use this tier when its files are installed.`,
+      `Selected ${setupTierLabel(tier)} setup. Galaxy will use this preset when its files are installed.`,
     );
   };
 

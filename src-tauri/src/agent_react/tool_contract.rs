@@ -154,6 +154,7 @@ pub(super) fn tool_knowledge_prompt(route: Option<ToolRoute>) -> String {
         "Available app tools are fixed knowledge. When deciding whether to use a tool, choose only from this list and use the exact name.".to_string(),
         "If none of these tools match the user's actual request, do not call a tool; answer normally or ask one short clarification.".to_string(),
         "Never invent, translate, rename, abbreviate, or repair tool names.".to_string(),
+        "Attached or pasted chat images are already part of the conversation; they are not workspace files. Do not use preview_file, read_file, search_directory, or find_workspace_candidates for attached chat images. Use NO_TOOL for visual Q&A, or propose_image_generation only when the user asks to create/edit an image.".to_string(),
     ];
     for descriptor in TOOL_REGISTRY
         .iter()
@@ -220,6 +221,70 @@ fn malformed_argument_key(key: &str) -> bool {
         || key.trim_start().starts_with(',')
 }
 
+pub(super) const CHAT_ATTACHMENT_WORKSPACE_TOOL_ERROR: &str =
+    "Attached chat images are conversation inputs, not workspace files. Output NO_TOOL so the vision chat path can answer, or use propose_image_generation only for image creation/editing.";
+
+pub(super) fn validation_requests_vision_fallback(error: &str) -> bool {
+    error.contains("Attached chat images are conversation inputs")
+}
+
+fn is_chat_attachment_reference(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let normalized = trimmed
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "[image attached]"
+            | "image attached"
+            | "attached_image_from_user_message"
+            | "current_attached_image"
+            | "current_chat_image"
+            | "latest_chat_image"
+    ) || normalized.contains("\\assistant-runtime\\chat-inputs\\")
+        || normalized.contains("\\assistant-runtime\\chat-inputs")
+        || normalized.contains("assistant-runtime\\chat-inputs\\")
+        || normalized.contains("assistant-runtime\\chat-inputs")
+}
+
+fn string_argument<'a>(call: &'a ToolCall, keys: &[&str]) -> &'a str {
+    keys.iter()
+        .find_map(|key| call.arguments.get(*key).and_then(Value::as_str))
+        .unwrap_or_default()
+        .trim()
+}
+
+fn workspace_tool_targets_chat_attachment(call: &ToolCall) -> bool {
+    match call.tool.as_str() {
+        "preview_file" | "read_file" => is_chat_attachment_reference(string_argument(
+            call,
+            &["path", "file", "file_path", "source"],
+        )),
+        "search_directory" => is_chat_attachment_reference(string_argument(call, &["query"])),
+        "find_workspace_candidates" => {
+            is_chat_attachment_reference(string_argument(call, &["query"]))
+                || call
+                    .arguments
+                    .get("clues")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .any(is_chat_attachment_reference)
+                    })
+                    .unwrap_or(false)
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn validate_tool_call(call: &ToolCall) -> Result<(), String> {
     if !known_tool(&call.tool) {
         return Err(format!(
@@ -237,6 +302,9 @@ pub(super) fn validate_tool_call(call: &ToolCall) -> Result<(), String> {
                 key
             ));
         }
+    }
+    if workspace_tool_targets_chat_attachment(call) {
+        return Err(CHAT_ATTACHMENT_WORKSPACE_TOOL_ERROR.to_string());
     }
     if matches!(
         call.tool.as_str(),

@@ -1,5 +1,9 @@
 use super::*;
 
+const OPTIONAL_PLANNER_MAX_TOKENS: u32 = 96;
+const REQUIRED_PLANNER_MAX_TOKENS: u32 = 160;
+const REPAIR_PLANNER_MAX_TOKENS: u32 = 192;
+
 pub(super) fn tool_planner_instruction(
     _latest_user_text: &str,
     task_state: &ConversationTaskState,
@@ -45,6 +49,7 @@ pub(super) fn tool_planner_instruction(
         "Do not infer a tool from one keyword. Use a tool only when the full request clearly asks for app data, local files, live/external info, image generation/editing, voice, or a system/account action.",
         "Never say that a tool was called, checked, found, opened, created, or verified. Only the app may execute tools.",
         "If a sufficient verified tool result is already present in the conversation, output NO_TOOL so the final answer can be written.",
+        "Attached or pasted chat images are not workspace files. Do not call preview_file, read_file, search_directory, or find_workspace_candidates for them. For visual questions about an attached image, output NO_TOOL so the vision chat path can answer.",
         "Use read-only tools directly for harmless lookup/preview tasks. Use propose_* tools for writes, deletes, sending email, calendar changes, contact changes, image generation, or local system actions.",
         "When the user asks you to create, generate, draw, edit, or send an image, do not answer with a promise, idea, or waiting message. Use propose_image_generation so the app can show an approval card.",
         "For propose_image_generation, the prompt and mask_prompt arguments must be written in English even when the user chats in another language.",
@@ -152,7 +157,7 @@ pub(super) async fn classify_image_tool_requirement(
         ],
         None,
         planner_sampling(sampling),
-        24,
+        8,
         false,
     )
     .await?;
@@ -206,7 +211,7 @@ pub(super) async fn rewrite_image_prompt_to_english(
         ],
         None,
         planner_sampling(sampling),
-        320,
+        220,
         false,
     )
     .await?;
@@ -308,7 +313,7 @@ pub(super) async fn choose_image_reference_sources_for_request(
         ],
         None,
         planner_sampling(sampling),
-        32,
+        24,
         false,
     )
     .await?;
@@ -370,7 +375,7 @@ pub(super) async fn choose_image_mode_for_request(
         ],
         None,
         planner_sampling(sampling),
-        24,
+        16,
         false,
     )
     .await?;
@@ -560,13 +565,22 @@ pub(super) async fn plan_next_tool_call(
         )
     }));
 
-    for attempt in 0..2 {
+    let max_attempts = if tool_required { 2 } else { 1 };
+    let planner_max_tokens = if task_state.tool_repair_required {
+        REPAIR_PLANNER_MAX_TOKENS
+    } else if tool_required {
+        REQUIRED_PLANNER_MAX_TOKENS
+    } else {
+        OPTIONAL_PLANNER_MAX_TOKENS
+    };
+
+    for attempt in 0..max_attempts {
         let scoped_tools = filtered_tool_schema(task_state.route);
         let reply = call_chat(
             planner_messages.clone(),
             Some(scoped_tools),
             planner_sampling(sampling),
-            256,
+            planner_max_tokens,
             false,
         )
         .await?;
@@ -627,7 +641,7 @@ pub(super) async fn plan_next_tool_call(
             return Ok((None, accumulated_thinking));
         }
 
-        if attempt == 0 {
+        if attempt + 1 < max_attempts {
             planner_messages.push(json!({
                 "role": "system",
                 "content": if tool_required {

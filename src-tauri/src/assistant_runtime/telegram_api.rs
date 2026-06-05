@@ -692,11 +692,105 @@ pub(super) async fn synthesize_and_send_telegram_voice(
     voice_status_loop.store(false, Ordering::Relaxed);
 }
 
+fn nearest_non_space_before(chars: &[char], index: usize) -> Option<char> {
+    chars[..index]
+        .iter()
+        .rev()
+        .copied()
+        .find(|ch| !ch.is_whitespace())
+}
+
+fn nearest_non_space_after(chars: &[char], index: usize) -> Option<char> {
+    chars
+        .get(index + 1..)
+        .unwrap_or_default()
+        .iter()
+        .copied()
+        .find(|ch| !ch.is_whitespace())
+}
+
+fn normalize_telegram_speech_symbols(text: &str) -> String {
+    let vi = telegram_speech_looks_vietnamese(text);
+    let text = normalize_telegram_hyphen_dates(text, vi);
+    let plus = if vi { " cộng " } else { " plus " };
+    let range = if vi { " đến " } else { " to " };
+    let chars: Vec<char> = text.chars().collect();
+    let mut output = String::with_capacity(text.len());
+
+    for (index, ch) in chars.iter().copied().enumerate() {
+        let before = nearest_non_space_before(&chars, index);
+        let after = nearest_non_space_after(&chars, index);
+        match ch {
+            '+' => output.push_str(plus),
+            '-' | '\u{2013}' | '\u{2014}'
+                if before.map(|value| value.is_ascii_digit()).unwrap_or(false)
+                    && after.map(|value| value.is_ascii_digit()).unwrap_or(false) =>
+            {
+                output.push_str(range);
+            }
+            '~' | '\u{223c}'
+                if before.map(|value| value.is_ascii_digit()).unwrap_or(false)
+                    && after.map(|value| value.is_ascii_digit()).unwrap_or(false) =>
+            {
+                output.push_str(range);
+            }
+            '-' | '\u{2013}' | '\u{2014}'
+                if before.map(|value| value.is_alphabetic()).unwrap_or(false)
+                    && after.map(|value| value.is_alphabetic()).unwrap_or(false) =>
+            {
+                output.push(' ');
+            }
+            ':' if !(before.map(|value| value.is_ascii_digit()).unwrap_or(false)
+                && after.map(|value| value.is_ascii_digit()).unwrap_or(false)) =>
+            {
+                output.push_str(". ");
+            }
+            _ => output.push(ch),
+        }
+    }
+
+    output
+}
+
+fn normalize_telegram_hyphen_dates(text: &str, vi: bool) -> String {
+    text.split_whitespace()
+        .map(|token| {
+            let without_trailing =
+                token.trim_end_matches(|ch: char| matches!(ch, ',' | ';' | ':' | '.' | '!' | '?'));
+            let trailing = &token[without_trailing.len()..];
+            let core = without_trailing
+                .trim_start_matches(|ch: char| matches!(ch, ',' | ';' | ':' | '.' | '!' | '?'));
+            if let Some((day, month, year)) = parse_hyphen_date(core) {
+                let spoken = if vi {
+                    format!(
+                        "{} tháng {} năm {}",
+                        strip_numeric_leading_zero(day),
+                        strip_numeric_leading_zero(month),
+                        year
+                    )
+                } else {
+                    format!(
+                        "{} {} {}",
+                        strip_numeric_leading_zero(month),
+                        strip_numeric_leading_zero(day),
+                        year
+                    )
+                };
+                format!("{}{}", spoken, trailing)
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub(super) fn sanitize_telegram_speech_text(text: &str) -> String {
     let mut output = String::new();
     let mut in_code_block = false;
     for raw_line in text.lines() {
-        let line = raw_line.trim();
+        let normalized_line = normalize_telegram_speech_symbols(raw_line);
+        let line = normalized_line.trim();
         if line.is_empty() {
             continue;
         }
@@ -967,6 +1061,24 @@ pub(super) fn normalize_telegram_speech_token(token: &str, vi: bool) -> String {
 
 pub(super) fn parse_slash_date(value: &str) -> Option<(&str, &str, &str)> {
     let parts = value.split('/').collect::<Vec<_>>();
+    if parts.len() != 3
+        || !parts
+            .iter()
+            .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return None;
+    }
+    if !(1..=2).contains(&parts[0].len())
+        || !(1..=2).contains(&parts[1].len())
+        || !(2..=4).contains(&parts[2].len())
+    {
+        return None;
+    }
+    Some((parts[0], parts[1], parts[2]))
+}
+
+pub(super) fn parse_hyphen_date(value: &str) -> Option<(&str, &str, &str)> {
+    let parts = value.split('-').collect::<Vec<_>>();
     if parts.len() != 3
         || !parts
             .iter()

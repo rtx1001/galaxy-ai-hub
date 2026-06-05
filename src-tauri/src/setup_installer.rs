@@ -97,7 +97,7 @@ pub fn get_setup_catalog(tier: String, has_nvidia_gpu: Option<bool>) -> SetupCat
             },
             SetupPartCatalog {
                 key: "voice".to_string(),
-                title: "Voice".to_string(),
+                title: "Speech".to_string(),
                 installed: files_installed(&voice),
                 files: voice,
             },
@@ -220,7 +220,7 @@ pub fn get_setup_preflight(tier: String, has_nvidia_gpu: Option<bool>) -> SetupP
             "Local AI parts",
             all_components_ready,
             if all_components_ready {
-                "Brain, Voice, and Image Studio parts are ready.".to_string()
+                "Brain, Speech, and Image Studio parts are ready.".to_string()
             } else {
                 "Some AI parts still need to be installed or repaired.".to_string()
             },

@@ -75,7 +75,7 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
     mode = "text_image",
     maskPrompt?: string | null,
     extraReferenceImages: string[] = [],
-    referenceSources: string[] = [],
+    referenceSources?: string[],
   ) => {
     const normalizedMode = normalizeImageMode(mode);
     const prompt = (promptOverride ?? options.composerInputRef.current?.value ?? options.input).trim();
@@ -96,16 +96,20 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
       ? latestChatImage.find((part) => part.type === "image_url")?.image_url.local_path
       : null;
     const initImageDataUrls = (() => {
+      const referenceSourcesProvided = Array.isArray(referenceSources);
       const selectedReferenceSources = normalizeReferenceSources(referenceSources);
       if (normalizedMode === "bot_image") return options.assistantAvatar ? [options.assistantAvatar] : [];
       if (normalizedMode === "user_image") return options.userAvatar ? [options.userAvatar] : [];
       if (normalizedMode === "user_bot_image") {
         return compactImageRefs([options.userAvatar, options.assistantAvatar]);
       }
-      const source = options.image || (normalizedMode === "image_image" ? latestChatImagePath || (latestChatImageUrl?.startsWith("data:image/") ? latestChatImageUrl : null) : null);
+      const shouldUseChatImage =
+        normalizedMode === "image_image" &&
+        (!referenceSourcesProvided || selectedReferenceSources.includes("chat_image"));
+      const source = options.image || (shouldUseChatImage ? latestChatImagePath || (latestChatImageUrl?.startsWith("data:image/") ? latestChatImageUrl : null) : null);
       const userProfileRef =
         normalizedMode === "image_image" &&
-        (selectedReferenceSources.includes("user_avatar") || imagePromptMentionsUserProfile(prompt, options.userName))
+        (selectedReferenceSources.includes("user_avatar") || (!referenceSourcesProvided && imagePromptMentionsUserProfile(prompt, options.userName)))
           ? options.userAvatar
           : null;
       const botProfileRef =

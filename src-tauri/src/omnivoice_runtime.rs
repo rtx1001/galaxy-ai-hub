@@ -60,12 +60,62 @@ pub struct OmniVoiceVramEstimate {
     pub overhead_mb: u32,
 }
 
+#[derive(Debug, Serialize)]
+pub struct VoiceTestCacheResult {
+    pub path: String,
+    pub audio_base64: String,
+    pub mime_type: String,
+}
+
 fn app_root_dir() -> PathBuf {
     crate::app_paths::app_root_dir()
 }
 
 fn assistant_runtime_dir() -> PathBuf {
     app_root_dir().join("assistant-runtime")
+}
+
+fn voice_test_cache_dir() -> PathBuf {
+    assistant_runtime_dir().join("voice").join("test-speech")
+}
+
+fn voice_test_cache_path() -> PathBuf {
+    voice_test_cache_dir().join("voice-test-latest.wav")
+}
+
+fn voice_test_cache_text_path() -> PathBuf {
+    voice_test_cache_dir().join("voice-test-latest.txt")
+}
+
+fn read_voice_test_cache(
+    path: &Path,
+    text_path: &Path,
+    request_text: &str,
+    voice_sample_path: &Option<String>,
+) -> Result<Option<VoiceTestCacheResult>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let cached_text = std::fs::read_to_string(text_path).unwrap_or_default();
+    let request_marker = voice_test_cache_marker(request_text, voice_sample_path);
+    if cached_text != request_marker {
+        return Ok(None);
+    }
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("Could not read cached voice test: {}", e))?;
+    Ok(Some(VoiceTestCacheResult {
+        path: path.to_string_lossy().to_string(),
+        audio_base64: BASE64.encode(bytes),
+        mime_type: "audio/wav".to_string(),
+    }))
+}
+
+fn voice_test_cache_marker(request_text: &str, voice_sample_path: &Option<String>) -> String {
+    format!(
+        "voice={}\ntext={}",
+        voice_sample_path.as_deref().unwrap_or(""),
+        request_text
+    )
 }
 
 fn omnivoice_runtime_dir() -> PathBuf {
@@ -507,7 +557,7 @@ fn ensure_omnivoice_ready(
     let missing_runtime = missing_omnivoice_runtime_files();
     if !missing_runtime.is_empty() {
         let error = format!(
-            "OmniVoice GGUF engine is missing runtime files: {}. Open Downloads and repair Voice.",
+            "Speech engine is missing runtime files: {}. Open Downloads and repair Speech.",
             missing_runtime.join(", ")
         );
         set_status(
@@ -611,6 +661,79 @@ pub async fn synthesize_speech(
         use_sidecar.unwrap_or(false),
     )
     .await
+}
+
+#[tauri::command]
+pub fn get_cached_voice_test_speech(
+    text: String,
+    voice_sample_path: Option<String>,
+) -> Result<Option<VoiceTestCacheResult>, String> {
+    let request_text = text.trim();
+    if request_text.is_empty() {
+        return Ok(None);
+    }
+    read_voice_test_cache(
+        &voice_test_cache_path(),
+        &voice_test_cache_text_path(),
+        request_text,
+        &voice_sample_path,
+    )
+}
+
+#[tauri::command]
+pub fn save_voice_test_speech(
+    text: String,
+    voice_sample_path: Option<String>,
+    audio_base64: String,
+) -> Result<VoiceTestCacheResult, String> {
+    let request_text = text.trim();
+    if request_text.is_empty() {
+        return Err("The speech text is empty.".to_string());
+    }
+    let path = voice_test_cache_path();
+    let text_path = voice_test_cache_text_path();
+    if let Some(cached) =
+        read_voice_test_cache(&path, &text_path, request_text, &voice_sample_path)?
+    {
+        return Ok(cached);
+    }
+    let bytes = BASE64
+        .decode(audio_base64.trim())
+        .map_err(|e| format!("Could not decode generated voice test: {}", e))?;
+    if bytes.is_empty() {
+        return Err("Generated voice test was empty.".to_string());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Could not prepare voice test cache: {}", e))?;
+    }
+    std::fs::write(&path, &bytes).map_err(|e| format!("Could not save voice test cache: {}", e))?;
+    std::fs::write(
+        &text_path,
+        voice_test_cache_marker(request_text, &voice_sample_path),
+    )
+    .map_err(|e| format!("Could not save voice test cache marker: {}", e))?;
+    Ok(VoiceTestCacheResult {
+        path: path.to_string_lossy().to_string(),
+        audio_base64: BASE64.encode(bytes),
+        mime_type: "audio/wav".to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn copy_voice_test_speech(source_path: String, destination_path: String) -> Result<(), String> {
+    let source = PathBuf::from(source_path);
+    if !source.exists() || !source.is_file() {
+        return Err("Render speech before downloading it.".to_string());
+    }
+    let destination = PathBuf::from(destination_path);
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Could not prepare download folder: {}", e))?;
+    }
+    std::fs::copy(&source, &destination)
+        .map_err(|e| format!("Could not save voice test WAV: {}", e))?;
+    Ok(())
 }
 
 pub async fn synthesize_speech_with_state(

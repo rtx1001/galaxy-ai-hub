@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -244,6 +245,51 @@ pub fn save_character_files(
             .map_err(|e| format!("Could not read saved soul.md: {}", e))?,
         settings,
     })
+}
+
+#[tauri::command]
+pub fn delete_character_files(id: String, name: String) -> Result<bool, String> {
+    let root = characters_dir();
+    let root_canonical = if root.exists() {
+        root.canonicalize()
+            .map_err(|e| format!("Could not access characters folder: {}", e))?
+    } else {
+        return Ok(false);
+    };
+
+    let mut targets = vec![character_dir(&id, &name)];
+    if let Some(legacy_dir) = legacy_character_dir(&id) {
+        targets.push(legacy_dir);
+    }
+
+    let mut seen = HashSet::new();
+    let mut deleted_any = false;
+    for target in targets {
+        if !target.exists() {
+            continue;
+        }
+        let target_canonical = target
+            .canonicalize()
+            .map_err(|e| format!("Could not access character folder: {}", e))?;
+        if !target_canonical.starts_with(&root_canonical) || target_canonical == root_canonical {
+            return Err(
+                "Refusing to delete a folder outside the characters directory.".to_string(),
+            );
+        }
+        if !seen.insert(target_canonical.clone()) {
+            continue;
+        }
+        std::fs::remove_dir_all(&target_canonical).map_err(|e| {
+            format!(
+                "Could not delete character folder {}: {}",
+                target_canonical.display(),
+                e
+            )
+        })?;
+        deleted_any = true;
+    }
+
+    Ok(deleted_any)
 }
 
 #[tauri::command]

@@ -188,6 +188,7 @@ export type SendOptions = {
   text?: string;
   imageDataUrl?: string;
   imagePath?: string;
+  brainText?: string;
   editMessageId?: string;
   sourceLabel?: string;
   skipLocalIntent?: boolean;

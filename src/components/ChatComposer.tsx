@@ -26,6 +26,7 @@ export function ChatComposer({
   pendingShellActions,
   executingShellActionId,
   image,
+  assistantName,
   composerInputRef,
   input,
   composerHasText,
@@ -70,6 +71,7 @@ export function ChatComposer({
   pendingShellActions: PendingShellAction[];
   executingShellActionId: number | null;
   image: string | null;
+  assistantName?: string;
   composerInputRef: RefObject<HTMLTextAreaElement | null>;
   input: string;
   composerHasText: boolean;
@@ -113,6 +115,10 @@ export function ChatComposer({
 }) {
   const activeSend = isStreaming || sendInFlight;
   const canSend = composerHasText || Boolean(image);
+  const assistantDisplayName = assistantName?.trim();
+  const composerPlaceholder = assistantDisplayName
+    ? `Ask ${assistantDisplayName} anything...`
+    : "Ask Galaxy anything...";
 
   return (
     <footer className="shrink-0 border-t border-[#282a2c] bg-[#131314] px-4 pb-4 pt-2">
@@ -176,7 +182,7 @@ export function ChatComposer({
                     <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap border-t border-[#282a2c] p-3 text-xs leading-5 text-[#e3e3e3]">{action.command}</pre>
                   </details>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="min-w-0 truncate text-xs text-[#c4c7c5]" title={action.working_directory}>
+                    <div className="min-w-0 truncate text-xs text-[#c4c7c5]">
                       Folder: {action.working_directory}
                     </div>
                     <div className="flex items-center gap-2">
@@ -221,7 +227,7 @@ export function ChatComposer({
             onPaste={onComposerPaste}
             rows={1}
             className="min-h-[40px] w-full resize-none overflow-y-auto bg-transparent px-3 py-[10px] text-sm leading-5 text-[#e3e3e3] outline-none placeholder:text-[#73777f]"
-            placeholder="Ask Galaxy anything..."
+            placeholder={composerPlaceholder}
           />
           <button
             type="button"

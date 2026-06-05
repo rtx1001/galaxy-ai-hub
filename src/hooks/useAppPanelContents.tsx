@@ -12,6 +12,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
     availableModels,
     brainStatus,
     calendarOpen,
+    clearToolRuns,
     clearMemoryConfirmOpen,
     clearSessionToo,
     createUserProfile,
@@ -66,7 +67,6 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
     quickImagePrompt,
     recentAutomationJobs,
     refreshGoogleCalendarEvents,
-    refreshToolRuns,
     removeTelegramGuest,
     repeatLastN,
     repeatPenalty,
@@ -188,6 +188,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       imageStudioDrawing={imageStudioDrawing}
       quickImagePrompt={quickImagePrompt}
       quickImageMode={quickImageMode}
+      assistantAvatar={selectedPersonalityPreset?.avatar || personalityAvatar || ""}
       imageWidth={imageWidth}
       imageHeight={imageHeight}
       isGeneratingImage={isGeneratingImage}
@@ -231,7 +232,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       onToggleImageStudio={setImageStudioOpen}
       onQuickImagePromptChange={setQuickImagePrompt}
       onQuickImageModeChange={options.setQuickImageMode}
-      onGenerateQuickImage={() => void handleQuickImageGenerate()}
+      onGenerateQuickImage={(extraReferenceImages) => void handleQuickImageGenerate(extraReferenceImages)}
       onImageWidthChange={setImageWidth}
       onImageHeightChange={setImageHeight}
       onToggleTelegram={setTelegramPanelOpen}
@@ -390,7 +391,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       }}
       onCancelDeletePersonality={() => setDeletePersonalityConfirmOpen(false)}
       onToggleToolRuns={setToolRunsOpen}
-      onRefreshToolRuns={() => refreshToolRuns().catch((error: unknown) => console.error("Tool activity refresh error:", error))}
+      onClearToolRuns={() => clearToolRuns().catch((error: unknown) => console.error("Tool activity clear error:", error))}
       onToggleSampling={setSamplingOpen}
       onResetSampling={resetSamplingDefaults}
       onTemperatureChange={setSamplingTemperature}

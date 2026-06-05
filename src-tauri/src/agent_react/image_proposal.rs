@@ -14,13 +14,9 @@ pub(super) fn canonical_image_mode(raw_mode: &str) -> Option<&'static str> {
         .trim()
         .to_ascii_lowercase();
     let mode = match cleaned.as_str() {
-        "txt2img" | "text2img" | "text-to-image" | "text_to_image" | "text_image" => {
-            "text_image"
-        }
+        "txt2img" | "text2img" | "text-to-image" | "text_to_image" | "text_image" => "text_image",
         "img2img" | "image2image" | "image-to-image" | "image_to_image" | "image_image"
-        | "edit_image" => {
-            "image_image"
-        }
+        | "edit_image" => "image_image",
         "user_avatar"
         | "user-avatar"
         | "user_avatar_image"
@@ -103,8 +99,13 @@ pub(super) fn normalize_image_reference_source(raw_source: &str) -> Option<&'sta
     match cleaned.as_str() {
         "chat" | "chat_image" | "current_image" | "attached_image" | "pasted_image"
         | "prior_image" | "previous_image" | "source_image" | "input_image" => Some("chat_image"),
-        "user" | "user_avatar" | "selected_user" | "selected_user_avatar" | "profile_user"
-        | "user_profile" | "user_profile_avatar" => Some("user_avatar"),
+        "user"
+        | "user_avatar"
+        | "selected_user"
+        | "selected_user_avatar"
+        | "profile_user"
+        | "user_profile"
+        | "user_profile_avatar" => Some("user_avatar"),
         "bot" | "assistant" | "assistant_avatar" | "bot_avatar" | "character"
         | "character_avatar" | "profile_character" => Some("bot_avatar"),
         _ => None,
@@ -189,7 +190,8 @@ pub(super) fn parse_image_proposal(call: &ToolCall) -> Result<ImageProposal, Str
         .map(ToOwned::to_owned);
 
     let prompt = normalize_image_prompt_for_mode(prompt, &mode);
-    let reference_sources = normalize_image_reference_sources(call.arguments.get("reference_sources"));
+    let reference_sources =
+        normalize_image_reference_sources(call.arguments.get("reference_sources"));
 
     Ok(ImageProposal {
         prompt,
@@ -248,7 +250,8 @@ pub(super) fn parse_pending_image_proposal_text(text: &str) -> Option<ImagePropo
                     continue;
                 }
                 "reference sources" | "references" | "reference_sources" => {
-                    reference_sources = normalize_image_reference_sources(Some(&Value::String(value.to_string())));
+                    reference_sources =
+                        normalize_image_reference_sources(Some(&Value::String(value.to_string())));
                     continue;
                 }
                 _ => {}

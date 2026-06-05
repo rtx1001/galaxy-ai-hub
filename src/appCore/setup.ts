@@ -77,12 +77,12 @@ export const SETUP_PARTS: SetupPart[] = [
   },
   {
     key: "voice",
-    title: "Voice",
+    title: "Speech",
     icon: "voice",
     purpose: "Local character speech and one-shot voice samples.",
-    light: "Q4 voice model, loaded only when needed",
-    balanced: "Q8 voice model, kept ready when VRAM allows",
-    high: "Q8 voice model, persistent beside the LLM when possible",
+    light: "OmniVoice GGUF Q4_K_M",
+    balanced: "OmniVoice GGUF Q8_0",
+    high: "OmniVoice GGUF Q8_0",
     note: "Starter samples are included for new users.",
   },
   {
@@ -92,7 +92,7 @@ export const SETUP_PARTS: SetupPart[] = [
     purpose: "Text-to-image and image editing from chat.",
     light: "Z-Image Turbo Q4 at 512px",
     balanced: "Z-Image Turbo Q6 at 1024px",
-    high: "Qwen Image Edit Q5 at 1024-1536px",
+    high: "Qwen Image Edit Q6 at 1024-1536px",
     note: "Image files stay outside Git and will be downloaded by setup.",
   },
 ];
@@ -105,15 +105,15 @@ export const setupTierFromSystem = (info: SystemInfo | null): SetupTier => {
 };
 
 export const setupTierLabel = (tier: SetupTier) => {
-  if (tier === "high") return "High";
+  if (tier === "high") return "Ultra";
   if (tier === "balanced") return "Balanced";
-  return "Light";
+  return "Fast";
 };
 
 export const setupTierDescription = (tier: SetupTier) => {
-  if (tier === "high") return "Best for larger context, smoother voice, and heavier image work.";
+  if (tier === "high") return "Best quality for stronger PCs, larger context, and heavier image work.";
   if (tier === "balanced") return "Best default for local chat, voice, and 1024px image generation.";
-  return "Best for lighter PCs. Chat comes first and other models swap when needed.";
+  return "Best for speed and lighter PCs. Chat comes first and other models swap when needed.";
 };
 
 export const setupPartModel = (part: SetupPart, tier: SetupTier) => {
@@ -124,7 +124,7 @@ export const setupPartModel = (part: SetupPart, tier: SetupTier) => {
 
 export const setupPartIntro = (part: SetupPart) => {
   if (part.key === "brain") return "The part that thinks and chats.";
-  if (part.key === "voice") return "The part that lets characters speak.";
+  if (part.key === "voice") return "The part that turns replies into speech.";
   return "The part that paints and edits images.";
 };
 

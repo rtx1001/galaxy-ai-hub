@@ -93,7 +93,7 @@ export function FloatingAudioControl({ scrollRef }: { scrollRef: React.RefObject
           <StopIcon className="h-3.5 w-3.5" />
         </button>
         <div className="mx-1 h-6 w-px bg-[var(--accent-soft-strong)]" />
-        <div className="max-w-[220px] truncate text-xs font-semibold text-[#f1f3f4]" title={currentTrack.title}>
+        <div className="max-w-[220px] truncate text-xs font-semibold text-[#f1f3f4]">
           {currentTrack.title}
         </div>
         <button type="button" title="Close floating control" onClick={() => setDismissedTrackId(currentTrack.id)} className={controlClass}>

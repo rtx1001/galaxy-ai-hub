@@ -220,6 +220,7 @@ pub async fn agent_jan_chat_core(
     let mut last_cards: Vec<ToolResultCard> = Vec::new();
     let mut planner_task_state = task_state.clone();
     let mut tool_repair_used = false;
+    let final_answer_thinking_enabled = false;
     if is_confirmation(&latest_text) {
         if let Some(proposal) = pending_image_proposal.clone() {
             let outcome = image_proposal_outcome(proposal.clone(), vi);
@@ -242,13 +243,7 @@ pub async fn agent_jan_chat_core(
         }
     }
 
-    let max_tool_steps = if task_state.image_required {
-        2
-    } else if task_state.requires_tool() {
-        4
-    } else {
-        2
-    };
+    let max_tool_steps = if task_state.requires_tool() { 2 } else { 1 };
 
     for step in 0..max_tool_steps {
         let (planned_tool_call, planner_thinking) = plan_next_tool_call(
@@ -277,7 +272,7 @@ pub async fn agent_jan_chat_core(
                     request_messages.clone(),
                     sampling,
                     max_tokens,
-                    thinking_enabled,
+                    final_answer_thinking_enabled,
                 )
                 .await?;
                 append_thinking(&mut accumulated_thinking, &final_thinking);
@@ -344,6 +339,18 @@ pub async fn agent_jan_chat_core(
                                 invalid_detail
                             ),
                         );
+                        if validation_requests_vision_fallback(&invalid_detail)
+                            && task_state.recent_image_context
+                        {
+                            append_thinking(
+                                &mut accumulated_thinking,
+                                "The invalid tool targeted a chat attachment as a workspace file; handing the turn back to the vision chat path.",
+                            );
+                            return Ok(empty_react_result(
+                                String::new(),
+                                thinking_result(thinking_enabled, &accumulated_thinking),
+                            ));
+                        }
                         if !tool_repair_used {
                             tool_repair_used = true;
                             planner_task_state = ConversationTaskState::tool_repair(
@@ -572,6 +579,16 @@ pub async fn agent_jan_chat_core(
             &latest_text,
         );
         if let Err(error) = validate_tool_call(&tool_call) {
+            if validation_requests_vision_fallback(&error) && task_state.recent_image_context {
+                append_thinking(
+                    &mut accumulated_thinking,
+                    "The planner tried to use a workspace file tool on a chat attachment; handing the turn back to the vision chat path.",
+                );
+                return Ok(empty_react_result(
+                    String::new(),
+                    thinking_result(thinking_enabled, &accumulated_thinking),
+                ));
+            }
             push_tool_validation_error(&mut request_messages, "planner_tool_call", false, error);
             continue;
         }
@@ -655,7 +672,7 @@ pub async fn agent_jan_chat_core(
                 request_messages.clone(),
                 sampling,
                 max_tokens,
-                thinking_enabled,
+                final_answer_thinking_enabled,
             )
             .await?;
             append_thinking(&mut accumulated_thinking, &final_thinking);
@@ -689,7 +706,7 @@ pub async fn agent_jan_chat_core(
         request_messages.clone(),
         sampling,
         max_tokens,
-        thinking_enabled,
+        final_answer_thinking_enabled,
     )
     .await?;
     append_thinking(&mut accumulated_thinking, &final_thinking);

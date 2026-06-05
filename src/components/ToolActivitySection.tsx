@@ -1,17 +1,17 @@
 import { ToolRunRecord, formatToolDuration, formatToolRunTime, toolRunBrief, toolRunDisplayName } from "../appCore";
-import { ChevronDownIcon, RefreshIcon } from "./Icons";
+import { ChevronDownIcon, EraserIcon } from "./Icons";
 import { IconButton } from "./UI";
 
 export function ToolActivitySection({
   open,
   toolRuns,
   onToggle,
-  onRefresh,
+  onClear,
 }: {
   open: boolean;
   toolRuns: ToolRunRecord[];
   onToggle: (open: boolean) => void;
-  onRefresh: () => void;
+  onClear: () => void;
 }) {
   return (
     <details
@@ -28,8 +28,8 @@ export function ToolActivitySection({
           <div className="text-xs font-bold uppercase tracking-[0.14em] text-[#c4c7c5]">
             {toolRuns.length ? `${Math.min(toolRuns.length, 10)} recent calls` : "No calls yet"}
           </div>
-          <IconButton title="Refresh tool activity" onClick={onRefresh} size="sm">
-            <RefreshIcon className="h-4 w-4" />
+          <IconButton title="Clear recent calls" onClick={onClear} size="sm" disabled={!toolRuns.length}>
+            <EraserIcon className="h-4 w-4" />
           </IconButton>
         </div>
         <div className="rounded-2xl bg-[#131314] p-2 ring-1 ring-[#282a2c]">

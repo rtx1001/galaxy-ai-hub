@@ -24,6 +24,7 @@ type ImageReferencePreview = {
   id: string;
   src: string;
   label: string;
+  source?: "chat_image" | "user_avatar" | "bot_avatar" | "extra_image";
 };
 
 type LocalImageDataUrl = {
@@ -55,50 +56,76 @@ const imagePromptMentionsUserProfile = (prompt: string, userName?: string) => {
   return Boolean(name && lowered.includes(name)) || /\b(the\s+user|selected\s+user|user\s+profile)\b/i.test(prompt);
 };
 
-function ImageReferenceDots({
+const initialReferenceSourcesForMode = ({
   mode,
   prompt,
+  proposalSources,
+  chatImageRef,
+  userAvatar,
+  assistantAvatar,
+  userName,
+}: {
+  mode: string;
+  prompt: string;
+  proposalSources?: string[] | null;
+  chatImageRef?: string | null;
+  userAvatar?: string;
+  assistantAvatar?: string;
+  userName?: string;
+}) => {
+  const normalizedMode = normalizeImageMode(mode);
+  const proposalReferenceSources = normalizedReferenceSources(proposalSources);
+  if (proposalReferenceSources.length) return proposalReferenceSources;
+  if (normalizedMode !== "image_image") return [];
+  const sources: string[] = [];
+  if (displayImageSource(chatImageRef)) sources.push("chat_image");
+  if (userAvatar && imagePromptMentionsUserProfile(prompt, userName)) sources.push("user_avatar");
+  if (assistantAvatar && /\b(the\s+assistant|assistant\s+avatar|bot\s+avatar|current\s+assistant)\b/i.test(prompt)) {
+    sources.push("bot_avatar");
+  }
+  return sources;
+};
+
+function ImageReferenceDots({
+  mode,
   assistantAvatar,
   userAvatar,
-  userName,
   chatImageRef,
   extraImageRefs,
   referenceSources,
   onAddImages,
+  onRemoveImage,
 }: {
   mode: string;
-  prompt: string;
   assistantAvatar?: string;
   userAvatar?: string;
-  userName?: string;
   chatImageRef?: string | null;
   extraImageRefs: ImageReferencePreview[];
   referenceSources?: string[];
   onAddImages: () => void;
+  onRemoveImage: (ref: ImageReferencePreview) => void;
 }) {
   const refs: ImageReferencePreview[] = [];
   const normalizedMode = normalizeImageMode(mode);
   const selectedSources = normalizedReferenceSources(referenceSources);
-  const wantsUserReference =
-    selectedSources.includes("user_avatar") ||
-    (!selectedSources.length && imagePromptMentionsUserProfile(prompt, userName));
+  const wantsUserReference = selectedSources.includes("user_avatar");
   const wantsBotReference = selectedSources.includes("bot_avatar");
-  const wantsChatReference = !selectedSources.length || selectedSources.includes("chat_image");
+  const wantsChatReference = selectedSources.includes("chat_image");
   if (isBotImageMode(normalizedMode) && assistantAvatar) {
-    refs.push({ id: "bot", src: assistantAvatar, label: "Bot avatar" });
+    refs.push({ id: "bot", src: assistantAvatar, label: "Bot avatar", source: "bot_avatar" });
   } else if (isUserImageMode(normalizedMode) && userAvatar) {
-    refs.push({ id: "user", src: userAvatar, label: "User avatar" });
+    refs.push({ id: "user", src: userAvatar, label: "User avatar", source: "user_avatar" });
   } else if (isUserBotImageMode(normalizedMode)) {
-    if (userAvatar) refs.push({ id: "user", src: userAvatar, label: "User avatar" });
-    if (assistantAvatar) refs.push({ id: "bot", src: assistantAvatar, label: "Bot avatar" });
+    if (userAvatar) refs.push({ id: "user", src: userAvatar, label: "User avatar", source: "user_avatar" });
+    if (assistantAvatar) refs.push({ id: "bot", src: assistantAvatar, label: "Bot avatar", source: "bot_avatar" });
   } else if (normalizedMode === "image_image") {
     const displayChatImage = displayImageSource(chatImageRef);
-    if (displayChatImage && wantsChatReference) refs.push({ id: "chat-image", src: displayChatImage, label: "Chat image" });
+    if (displayChatImage && wantsChatReference) refs.push({ id: "chat-image", src: displayChatImage, label: "Chat image", source: "chat_image" });
     if (userAvatar && wantsUserReference) {
-      refs.push({ id: "user", src: userAvatar, label: "User avatar" });
+      refs.push({ id: "user", src: userAvatar, label: "User avatar", source: "user_avatar" });
     }
-    if (assistantAvatar && wantsBotReference) refs.push({ id: "bot", src: assistantAvatar, label: "Bot avatar" });
-    refs.push(...extraImageRefs);
+    if (assistantAvatar && wantsBotReference) refs.push({ id: "bot", src: assistantAvatar, label: "Bot avatar", source: "bot_avatar" });
+    refs.push(...extraImageRefs.map((ref) => ({ ...ref, source: "extra_image" as const })));
   }
   if (!refs.length && normalizedMode !== "image_image") return null;
   return (
@@ -106,10 +133,23 @@ function ImageReferenceDots({
       {refs.map((ref) => (
         <span
           key={ref.id}
-          className="inline-flex h-8 w-8 shrink-0 overflow-hidden rounded-full border border-[var(--accent-soft-strong)] bg-[#0f1011] p-0.5 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
-          title={ref.label}
+          className="group/ref relative inline-flex h-8 w-8 shrink-0 overflow-hidden rounded-full border border-[var(--accent-soft-strong)] bg-[#0f1011] p-0.5 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
         >
           <img src={ref.src} alt="" className="h-full w-full rounded-full object-cover" />
+          {normalizedMode === "image_image" && (
+            <button
+              type="button"
+              aria-label={`Remove ${ref.label}`}
+              title={`Remove ${ref.label}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemoveImage(ref);
+              }}
+              className="absolute inset-0 flex items-center justify-center rounded-full bg-black/70 text-white opacity-0 backdrop-blur-[1px] transition hover:bg-rose-500/85 group-hover/ref:opacity-100"
+            >
+              <CloseIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
         </span>
       ))}
       {normalizedMode === "image_image" && (
@@ -397,12 +437,35 @@ export function ImageProposalCard({
     const [draftPrompt, setDraftPrompt] = useState(proposal.prompt);
     const [selectedMode, setSelectedMode] = useState(normalizeImageMode(proposal.mode || "text_image"));
     const [extraImageRefs, setExtraImageRefs] = useState<ImageReferencePreview[]>([]);
+    const [selectedReferenceSources, setSelectedReferenceSources] = useState<string[]>(() =>
+      initialReferenceSourcesForMode({
+        mode: proposal.mode || "text_image",
+        prompt: proposal.prompt,
+        proposalSources: proposal.reference_sources,
+        chatImageRef,
+        userAvatar,
+        assistantAvatar,
+        userName,
+      }),
+    );
     const [open, setOpen] = useState(true);
     useEffect(() => {
       setDraftPrompt(proposal.prompt);
-      setSelectedMode(normalizeImageMode(proposal.mode || "text_image"));
+      const nextMode = normalizeImageMode(proposal.mode || "text_image");
+      setSelectedMode(nextMode);
+      setSelectedReferenceSources(
+        initialReferenceSourcesForMode({
+          mode: nextMode,
+          prompt: proposal.prompt,
+          proposalSources: proposal.reference_sources,
+          chatImageRef,
+          userAvatar,
+          assistantAvatar,
+          userName,
+        }),
+      );
       setExtraImageRefs([]);
-    }, [proposal.prompt, proposal.mode]);
+    }, [proposal.prompt, proposal.mode, proposal.reference_sources, chatImageRef, userAvatar, assistantAvatar, userName]);
     useEffect(() => {
       if (forceCollapsed) {
         setOpen(false);
@@ -410,6 +473,30 @@ export function ImageProposalCard({
     }, [forceCollapsed]);
     const selectedModeLabel = imageModeLabel(selectedMode);
     const maskText = "Mask";
+    const changeSelectedMode = (mode: string) => {
+      const nextMode = normalizeImageMode(mode);
+      setSelectedMode(nextMode);
+      setSelectedReferenceSources(
+        initialReferenceSourcesForMode({
+          mode: nextMode,
+          prompt: draftPrompt,
+          proposalSources: proposal.reference_sources,
+          chatImageRef,
+          userAvatar,
+          assistantAvatar,
+          userName,
+        }),
+      );
+    };
+    const removeReferenceImage = (ref: ImageReferencePreview) => {
+      if (ref.source === "extra_image") {
+        setExtraImageRefs((prev) => prev.filter((item) => item.id !== ref.id));
+        return;
+      }
+      if (ref.source) {
+        setSelectedReferenceSources((prev) => prev.filter((source) => source !== ref.source));
+      }
+    };
     const addReferenceImages = async () => {
       const selected = await openDialog({
         directory: false,
@@ -472,17 +559,16 @@ export function ImageProposalCard({
         />
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-[11px] leading-5">
-            <ImageModeDropdown value={selectedMode} onChange={setSelectedMode} />
+            <ImageModeDropdown value={selectedMode} onChange={changeSelectedMode} />
             <ImageReferenceDots
               mode={selectedMode}
-              prompt={draftPrompt}
               assistantAvatar={assistantAvatar}
               userAvatar={userAvatar}
-              userName={userName}
               chatImageRef={chatImageRef}
               extraImageRefs={extraImageRefs}
-              referenceSources={proposal.reference_sources}
+              referenceSources={selectedReferenceSources}
               onAddImages={addReferenceImages}
+              onRemoveImage={removeReferenceImage}
             />
             {proposal.mask_prompt && (
               <span className="max-w-full rounded-full border border-[#282a2c] bg-[#0f1011] px-2.5 py-1 font-semibold text-[#c4c7c5]">
@@ -506,7 +592,7 @@ export function ImageProposalCard({
               disabled={disabled || !draftPrompt.trim()}
               onClick={() => {
                 setOpen(false);
-                const referenceSources = normalizedReferenceSources(proposal.reference_sources);
+                const referenceSources = normalizedReferenceSources(selectedReferenceSources);
                 const sourceRefs =
                   normalizeImageMode(selectedMode) === "image_image"
                     ? [

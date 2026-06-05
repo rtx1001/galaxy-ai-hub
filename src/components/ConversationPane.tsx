@@ -197,13 +197,18 @@ export function ConversationPane({
             const bubbleTimestamp = messageComplete ? formatBubbleTimestamp(message.created_at) : "";
             const replyDuration = messageComplete && message.role === "assistant" ? formatReplyDuration(message.duration_ms) : "";
             const hasBubbleFooter = !isEditingUserMessage && Boolean(bubbleTimestamp || replyDuration || firstImagePath || firstImagePartKey || canSpeak || canEditUserMessage);
+            const hideGroupedAssistantAvatar = message.role === "assistant" && messages[index - 1]?.role === "assistant";
 
             return (
               <div key={message.id} data-message-id={message.id} className={`chat-message-row flex items-start gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
                 {message.role === "assistant" && (
-                  <div className="mt-1 h-10 w-10 shrink-0 overflow-hidden rounded-2xl bg-[#1e1f20] ring-1 ring-[#282a2c]" title={assistantName || "Assistant"}>
-                    <AvatarImage src={assistantAvatar} fallback={assistantName || "AI"} className="h-full w-full rounded-2xl" />
-                  </div>
+                  hideGroupedAssistantAvatar ? (
+                    <div className="mt-1 h-10 w-10 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <div className="mt-1 h-10 w-10 shrink-0 overflow-hidden rounded-2xl bg-[#1e1f20] ring-1 ring-[#282a2c]">
+                      <AvatarImage src={assistantAvatar} fallback={assistantName || "AI"} className="h-full w-full rounded-2xl" />
+                    </div>
+                  )
                 )}
                 <div
                   className={`chat-bubble min-w-0 max-w-[88%] ${hasApprovalContent ? "w-[88%] overflow-visible" : "overflow-hidden"} rounded-[28px] shadow-sm ring-1 ${hasImageContent ? "px-3 py-3" : isTypingIndicator ? "px-4 py-3" : "px-5 py-4"} ${

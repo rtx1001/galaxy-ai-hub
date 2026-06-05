@@ -15,10 +15,20 @@ export function useToolRuns(defaultOpen: boolean) {
     }
   }, []);
 
+  const clearToolRuns = useCallback(async () => {
+    try {
+      await invoke("clear_agent_tool_runs");
+      setToolRuns([]);
+    } catch (error) {
+      console.error("Tool activity clear error:", error);
+    }
+  }, []);
+
   return {
     toolRuns,
     toolRunsOpen,
     setToolRunsOpen,
     refreshToolRuns,
+    clearToolRuns,
   };
 }

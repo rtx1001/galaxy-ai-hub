@@ -239,6 +239,7 @@ export function AppShell(props: AppShellProps) {
               pendingShellActions={props.pendingShellActions}
               executingShellActionId={props.executingShellActionId}
               image={props.image}
+              assistantName={props.selectedPersonalityPreset?.name || ""}
               composerInputRef={props.composerInputRef}
               input={props.input}
               composerHasText={props.composerHasText}

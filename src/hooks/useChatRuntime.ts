@@ -39,7 +39,7 @@ const buildOlderConversationMemory = (chatMessages: ChatMessage[]) => {
 
 const naturalChatStartDelay = () =>
   new Promise<void>((resolve) => {
-    const delayMs = 500 + Math.floor(Math.random() * 501);
+    const delayMs = 1000 + Math.floor(Math.random() * 1001);
     window.setTimeout(resolve, delayMs);
   });
 
@@ -177,6 +177,15 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
       ? editTarget.content.filter((part: ChatContentPart): part is Extract<ChatContentPart, { type: "image_url" }> => part.type === "image_url")
       : [];
     const attachedImage = sendOptions.imageDataUrl ?? (sendOptions.text || sendOptions.editMessageId ? null : image);
+    const hiddenBrainText =
+      sendOptions.brainText?.trim() ||
+      (attachedImage && !promptText.trim()
+        ? "The user sent this image without text. Look at the image itself and respond naturally with your honest opinion, in the current conversation language. Do not call image generation unless the user explicitly asks for another image or an edit."
+        : "");
+    const shouldHideVisibleImageText =
+      Boolean(hiddenBrainText) && Boolean(attachedImage) && !promptText.trim();
+    const shouldSkipImageToolPlanning =
+      Boolean(sendOptions.skipLocalIntent) || (Boolean(attachedImage) && !promptText.trim());
     let attachedImagePath = sendOptions.imagePath ?? imagePath;
     if ((!promptText.trim() && !attachedImage) || isStreaming) {
       return;
@@ -214,10 +223,12 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
       ];
     } else if (attachedImage) {
       const displayImageUrl = attachedImagePath ? localAssetUrl(attachedImagePath) || attachedImage : attachedImage;
-      content = [
-        { type: "text", text: promptText || "Describe this image." },
-        { type: "image_url", image_url: { url: displayImageUrl, local_path: attachedImagePath ?? undefined } },
-      ];
+      content = shouldHideVisibleImageText
+        ? [{ type: "image_url", image_url: { url: displayImageUrl, local_path: attachedImagePath ?? undefined } }]
+        : [
+            { type: "text", text: promptText || "Describe this image." },
+            { type: "image_url", image_url: { url: displayImageUrl, local_path: attachedImagePath ?? undefined } },
+          ];
     }
 
     const userMessage: ChatMessage = {
@@ -290,10 +301,12 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
         const displayImageUrl = saved.data_url;
         const persistedUserMessage: ChatMessage = {
           ...userMessage,
-          content: [
-            { type: "text", text: promptText || "Describe this image." },
-            { type: "image_url", image_url: { url: displayImageUrl, local_path: saved.path } },
-          ],
+          content: shouldHideVisibleImageText
+            ? [{ type: "image_url", image_url: { url: displayImageUrl, local_path: saved.path } }]
+            : [
+                { type: "text", text: promptText || "Describe this image." },
+                { type: "image_url", image_url: { url: displayImageUrl, local_path: saved.path } },
+              ],
         };
         newMessages = sendOptions.editMessageId && editTargetIndex >= 0
           ? [...messages.slice(0, editTargetIndex), persistedUserMessage]
@@ -309,6 +322,25 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     if (attachedImage && !sendOptions.imageDataUrl) {
       clearImage();
     }
+    const brainUserMessage: ChatMessage =
+      attachedImage && hiddenBrainText
+        ? {
+            ...userMessage,
+            content: [
+              { type: "text", text: hiddenBrainText },
+              ...(Array.isArray(userMessage.content)
+                ? userMessage.content.filter(
+                    (part): part is Extract<ChatContentPart, { type: "image_url" }> => part.type === "image_url",
+                  )
+                : []),
+            ],
+          }
+        : userMessage;
+    const requestMessages =
+      brainUserMessage === userMessage
+        ? newMessages
+        : [...newMessages.slice(0, -1), brainUserMessage];
+    const memoryPromptText = promptText.trim() || hiddenBrainText;
     setIsStreaming(true);
     setBrainStatus("Loading");
 
@@ -398,14 +430,14 @@ ${personalityMemory.trim()}`
           : "\nPermitted workspace folders: none selected.",
         `\nCurrent date: ${new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}`,
       ].join("");
-      const olderConversationMemory = buildOlderConversationMemory(newMessages);
+      const olderConversationMemory = buildOlderConversationMemory(requestMessages);
       const effectiveProfilePrompt = olderConversationMemory
         ? `${profilePrompt}\n\nEarlier conversation memory:\n${olderConversationMemory}`
         : profilePrompt;
-      const effectiveRequestMessages = buildBrainMessages(effectiveProfilePrompt, newMessages, hasVision);
-      const toolAgentMessages = buildToolAgentMessages(newMessages);
+      const effectiveRequestMessages = buildBrainMessages(effectiveProfilePrompt, requestMessages, hasVision);
+      const toolAgentMessages = buildToolAgentMessages(requestMessages);
       const recentImageContextBlock = buildRecentImageContextBlock(
-        findRecentChatImageContext(newMessages, { skipLatestUserImage: !attachedImage }),
+        findRecentChatImageContext(requestMessages, { skipLatestUserImage: !attachedImage }),
       );
       setLastContextTokens(
         [
@@ -476,7 +508,7 @@ ${personalityMemory.trim()}`
           setLastTokenSpeed(estimateTokens(generatedText) / elapsedSeconds);
           setBrainStatus("Ready");
           setComposerNotice("");
-          await updatePersonalityMemoryAfterTurn(promptText, generatedText);
+          await updatePersonalityMemoryAfterTurn(memoryPromptText, generatedText);
           if (liveConversationRef.current) {
             finalizedAssistantIds.forEach((id: string) => autoSpeechEligibleAssistantIdsRef.current.add(id));
           }
@@ -510,7 +542,7 @@ ${personalityMemory.trim()}`
         setLastTokenSpeed(estimateTokens(generatedText) / elapsedSeconds);
         setBrainStatus("Ready");
         setComposerNotice("");
-        await updatePersonalityMemoryAfterTurn(promptText, generatedText);
+        await updatePersonalityMemoryAfterTurn(memoryPromptText, generatedText);
         if (liveConversationRef.current) {
           finalizedAssistantIds.forEach((id: string) => autoSpeechEligibleAssistantIdsRef.current.add(id));
         }
@@ -522,31 +554,33 @@ ${personalityMemory.trim()}`
         `chat-trace image request model=${selectedModelPath || "none"} thinking=${thinkingEnabled} folders=${runtimeLinkedFolders.length} messages=${toolAgentMessages.length}/${newMessages.length} user=${JSON.stringify(promptText).slice(0, 600)}`,
       );
       let imageReactResult: AgentReactResult | null = null;
-      try {
-        imageReactResult = await invoke<AgentReactResult>("agent_jan_chat", {
-          runtimePrompt: effectiveProfilePrompt,
-          contextBlock: [
-            buildSystemContextBlock(),
-            `Workspace folders for this request: ${runtimeLinkedFolders.length ? runtimeLinkedFolders.join("; ") : "none"}`,
-            recentImageContextBlock,
-            "The latest user message includes an attached image. Use image_image if the user asks to edit, transform, redraw, or generate from that image.",
-          ].join(" | "),
-          messages: toolAgentMessages,
-          folders: runtimeLinkedFolders,
-          googleClientId,
-          googleClientSecret,
-          temperature,
-          topK,
-          topP,
-          minP,
-          repeatLastN,
-          repeatPenalty,
-          maxTokens: replyLength,
-          thinkingEnabled,
-          requestElapsedMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
-        });
-      } catch (error) {
-        appLog(`chat-trace image planner failed; falling back to vision chat: ${error instanceof Error ? error.message : String(error)}`);
+      if (!shouldSkipImageToolPlanning) {
+        try {
+          imageReactResult = await invoke<AgentReactResult>("agent_jan_chat", {
+            runtimePrompt: effectiveProfilePrompt,
+            contextBlock: [
+              buildSystemContextBlock(),
+              `Workspace folders for this request: ${runtimeLinkedFolders.length ? runtimeLinkedFolders.join("; ") : "none"}`,
+              recentImageContextBlock,
+              "The latest user message includes an attached image. Use image_image if the user asks to edit, transform, redraw, or generate from that image.",
+            ].join(" | "),
+            messages: toolAgentMessages,
+            folders: runtimeLinkedFolders,
+            googleClientId,
+            googleClientSecret,
+            temperature,
+            topK,
+            topP,
+            minP,
+            repeatLastN,
+            repeatPenalty,
+            maxTokens: replyLength,
+            thinkingEnabled,
+            requestElapsedMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
+          });
+        } catch (error) {
+          appLog(`chat-trace image planner failed; falling back to vision chat: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
       if (isRequestStale()) {
         return;
@@ -597,7 +631,7 @@ ${personalityMemory.trim()}`
         setLastTokenSpeed(estimateTokens(generatedText) / elapsedSeconds);
         setBrainStatus("Ready");
         setComposerNotice("");
-        await updatePersonalityMemoryAfterTurn(promptText, generatedText);
+        await updatePersonalityMemoryAfterTurn(memoryPromptText, generatedText);
         if (liveConversationRef.current) {
           finalizedAssistantIds.forEach((id: string) => autoSpeechEligibleAssistantIdsRef.current.add(id));
         }
@@ -620,8 +654,8 @@ ${personalityMemory.trim()}`
         repeat_penalty: repeatPenalty,
         max_tokens: replyLength,
         chat_template_kwargs: {
-          enable_thinking: thinkingEnabled,
-          thinking: thinkingEnabled,
+          enable_thinking: thinkingEnabled && !shouldSkipImageToolPlanning,
+          thinking: thinkingEnabled && !shouldSkipImageToolPlanning,
         },
       };
 
@@ -764,7 +798,7 @@ ${personalityMemory.trim()}`
       }));
       setComposerNotice("");
       setBrainStatus("Ready");
-      await updatePersonalityMemoryAfterTurn(promptText, generatedText);
+      await updatePersonalityMemoryAfterTurn(memoryPromptText, generatedText);
       if (liveConversationRef.current) {
         finalizedAssistantIds.forEach((id: string) => autoSpeechEligibleAssistantIdsRef.current.add(id));
       }

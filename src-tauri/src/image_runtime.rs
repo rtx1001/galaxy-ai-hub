@@ -50,17 +50,17 @@ struct ImageServerProcess {
 static IMAGE_SERVER: OnceLock<Mutex<Option<ImageServerProcess>>> = OnceLock::new();
 
 const QWEN_IMAGE_MODELS: &[&str] = &[
+    "Qwen-Rapid-NSFW-v23_Q6_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q4_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q8_0.gguf",
-    "Qwen-Rapid-NSFW-v23_Q6_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q5_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q3_K.gguf",
     "Qwen-Rapid-NSFW-v23_Q2_K.gguf",
 ];
 const QWEN_IMAGE_LLMS: &[&str] = &[
+    "Qwen2.5-VL-7B-Instruct.Q6_K.gguf",
     "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
     "Qwen2.5-VL-7B-Instruct.Q8_0.gguf",
-    "Qwen2.5-VL-7B-Instruct.Q6_K.gguf",
     "Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf",
     "Qwen2.5-VL-7B-Instruct.Q3_K_M.gguf",
     "Qwen2.5-VL-7B-Instruct.Q2_K.gguf",

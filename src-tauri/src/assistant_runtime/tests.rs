@@ -97,6 +97,14 @@ fn telegram_speech_text_reads_lines_dates_and_units_naturally() {
         sanitize_telegram_speech_text("H\u{1eb9}n ng\u{00e0}y 08/05 (th\u{1ee9} s\u{00e1}u)");
     assert!(short_date.contains("8 th\u{00e1}ng 5"));
     assert!(short_date.contains(", th\u{1ee9} s\u{00e1}u,"));
+    let ranges = sanitize_telegram_speech_text(
+        "T\u{00ed}nh 1+2: xong. The Gloam-Eyed Queen. Ng\u{00e0}y 5-6-2026 l\u{00e0} th\u{1ee9} 6. t\u{1eeb} 1-10, kho\u{1ea3}ng 1~2",
+    );
+    assert!(ranges.contains("1 c\u{1ed9}ng 2. xong."));
+    assert!(ranges.contains("The Gloam Eyed Queen"));
+    assert!(ranges.contains("Ng\u{00e0}y 5 th\u{00e1}ng 6 n\u{0103}m 2026"));
+    assert!(ranges.contains("1 \u{0111}\u{1ebf}n 10"));
+    assert!(ranges.contains("1 \u{0111}\u{1ebf}n 2"));
 }
 
 #[test]

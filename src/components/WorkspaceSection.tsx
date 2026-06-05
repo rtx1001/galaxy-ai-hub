@@ -100,7 +100,7 @@ export function WorkspaceSection({
             No workspace folder selected.
           </div>
         ) : (
-          folderRows.map(({ folder, displayPath, exists, message }) => (
+          folderRows.map(({ folder, displayPath, exists }) => (
             <div
               key={folder}
               className={[
@@ -109,7 +109,6 @@ export function WorkspaceSection({
                   ? "border-[#282a2c] bg-[#131314]"
                   : "border-rose-500/25 bg-rose-950/20",
               ].join(" ")}
-              title={message || displayPath}
             >
               <div className={["min-w-0 flex-1 truncate text-sm", exists ? "text-[#e3e3e3]" : "text-rose-100/90"].join(" ")}>
                 {displayPath}

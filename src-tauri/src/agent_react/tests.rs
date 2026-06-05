@@ -957,7 +957,10 @@ fn image_proposal_parses_structured_reference_sources() {
     .expect("image proposal");
 
     assert_eq!(proposal.mode, "image_image");
-    assert_eq!(proposal.reference_sources, vec!["chat_image", "user_avatar"]);
+    assert_eq!(
+        proposal.reference_sources,
+        vec!["chat_image", "user_avatar"]
+    );
 }
 
 #[test]
@@ -1582,6 +1585,45 @@ fn preview_file_accepts_file_path_alias_but_requires_a_path() {
     })
     .expect_err("preview_file must not run without a real path");
     assert!(error.contains("preview_file requires a non-empty path"));
+}
+
+#[test]
+fn workspace_file_tools_reject_chat_attachment_placeholders() {
+    let error = validate_tool_call(&ToolCall {
+        tool: "preview_file".to_string(),
+        arguments: json!({ "path": "attached_image_from_user_message" }),
+    })
+    .expect_err("chat attachments are not workspace files");
+    assert!(error.contains("Attached chat images are conversation inputs"));
+
+    let error = validate_tool_call(&ToolCall {
+        tool: "preview_file".to_string(),
+        arguments: json!({ "path": "[image attached]" }),
+    })
+    .expect_err("chat attachment marker is not a workspace path");
+    assert!(error.contains("Attached chat images are conversation inputs"));
+}
+
+#[test]
+fn workspace_file_tools_reject_cached_chat_input_paths() {
+    let error = validate_tool_call(&ToolCall {
+        tool: "preview_file".to_string(),
+        arguments: json!({
+            "path": "D:\\AI\\Galaxy_Bot\\assistant-runtime\\chat-inputs\\clipboard-f7e9b017ed61add7.png"
+        }),
+    })
+    .expect_err("chat input cache is not a workspace file target");
+    assert!(error.contains("Attached chat images are conversation inputs"));
+
+    let error = validate_tool_call(&ToolCall {
+        tool: "find_workspace_candidates".to_string(),
+        arguments: json!({
+            "query": "",
+            "clues": ["assistant-runtime/chat-inputs/clipboard-f7e9b017ed61add7.png"]
+        }),
+    })
+    .expect_err("candidate search must not target chat input cache");
+    assert!(error.contains("Attached chat images are conversation inputs"));
 }
 
 #[test]

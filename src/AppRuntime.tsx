@@ -62,8 +62,47 @@ import {
 } from "./appCore";
 
 const MIN_CHAT_CONTEXT_SIZE = 8192;
+const SUPPRESSED_TEXT_FIELD_TITLE_ATTR = "data-suppressed-text-field-title";
+
+function restoreSuppressedTextFieldTitles() {
+  document.querySelectorAll(`[${SUPPRESSED_TEXT_FIELD_TITLE_ATTR}]`).forEach((element) => {
+    const title = element.getAttribute(SUPPRESSED_TEXT_FIELD_TITLE_ATTR) ?? "";
+    element.removeAttribute(SUPPRESSED_TEXT_FIELD_TITLE_ATTR);
+    element.setAttribute("title", title);
+  });
+}
+
+function suppressTextFieldTitles(target: EventTarget | null) {
+  if (!(target instanceof Element)) return;
+  const textField = target.closest("input:not([type='range']):not([type='checkbox']):not([type='radio']), textarea");
+  if (!textField) return;
+  let element: Element | null = textField;
+  while (element && element !== document.body) {
+    if (element.hasAttribute("title") && !element.hasAttribute(SUPPRESSED_TEXT_FIELD_TITLE_ATTR)) {
+      element.setAttribute(SUPPRESSED_TEXT_FIELD_TITLE_ATTR, element.getAttribute("title") ?? "");
+      element.removeAttribute("title");
+    }
+    element = element.parentElement;
+  }
+}
 
 function App() {
+  useEffect(() => {
+    const handleEnter = (event: Event) => suppressTextFieldTitles(event.target);
+    const handleLeave = () => restoreSuppressedTextFieldTitles();
+    document.addEventListener("pointerover", handleEnter, true);
+    document.addEventListener("focusin", handleEnter, true);
+    document.addEventListener("pointerout", handleLeave, true);
+    document.addEventListener("focusout", handleLeave, true);
+    return () => {
+      document.removeEventListener("pointerover", handleEnter, true);
+      document.removeEventListener("focusin", handleEnter, true);
+      document.removeEventListener("pointerout", handleLeave, true);
+      document.removeEventListener("focusout", handleLeave, true);
+      restoreSuppressedTextFieldTitles();
+    };
+  }, []);
+
   const [brainStatus, setBrainStatus] = useState<"Idle" | "Loading" | "Ready" | "Thinking" | "Error">("Idle");
   const [modelLoadStatus, setModelLoadStatus] = useState<ModelLoadStatus>({
     state: "idle",
@@ -106,7 +145,7 @@ function App() {
     playAudioBase64,
     stopActiveAudio,
   } = useAudioPlayback();
-  const { toolRuns, toolRunsOpen, setToolRunsOpen, refreshToolRuns } = useToolRuns(DEFAULT_SETTINGS.ui_tool_activity_open);
+  const { toolRuns, toolRunsOpen, setToolRunsOpen, refreshToolRuns, clearToolRuns } = useToolRuns(DEFAULT_SETTINGS.ui_tool_activity_open);
   const {
     automationOpen,
     setAutomationOpen,
@@ -1240,6 +1279,7 @@ function App() {
     calendarOpen,
     clearMemoryConfirmOpen,
     clearSessionToo,
+    clearToolRuns,
     connectGoogle,
     createUserProfile,
     currentModelEntry,

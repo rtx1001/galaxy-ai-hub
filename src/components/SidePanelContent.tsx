@@ -50,6 +50,7 @@ export function LeftPanelContent({
   imageStudioDrawing,
   quickImagePrompt,
   quickImageMode,
+  assistantAvatar,
   imageWidth,
   imageHeight,
   isGeneratingImage,
@@ -127,6 +128,7 @@ export function LeftPanelContent({
   imageStudioDrawing: boolean;
   quickImagePrompt: string;
   quickImageMode: string;
+  assistantAvatar: string;
   imageWidth: number;
   imageHeight: number;
   isGeneratingImage: boolean;
@@ -163,7 +165,7 @@ export function LeftPanelContent({
   onToggleImageStudio: (open: boolean) => void;
   onQuickImagePromptChange: (prompt: string) => void;
   onQuickImageModeChange: (mode: string) => void;
-  onGenerateQuickImage: () => void;
+  onGenerateQuickImage: (extraReferenceImages?: string[]) => void;
   onImageWidthChange: (value: number) => void;
   onImageHeightChange: (value: number) => void;
   onToggleTelegram: (open: boolean) => void;
@@ -236,6 +238,8 @@ export function LeftPanelContent({
         drawing={imageStudioDrawing}
         quickPrompt={quickImagePrompt}
         quickMode={quickImageMode}
+        assistantAvatar={assistantAvatar}
+        userAvatar={userAvatar}
         imageWidth={imageWidth}
         imageHeight={imageHeight}
         isGeneratingImage={isGeneratingImage}
@@ -366,7 +370,7 @@ export function RightPanelContent({
   onConfirmDeletePersonality,
   onCancelDeletePersonality,
   onToggleToolRuns,
-  onRefreshToolRuns,
+  onClearToolRuns,
   onToggleSampling,
   onResetSampling,
   onTemperatureChange,
@@ -460,7 +464,7 @@ export function RightPanelContent({
   onConfirmDeletePersonality: () => void;
   onCancelDeletePersonality: () => void;
   onToggleToolRuns: (open: boolean) => void;
-  onRefreshToolRuns: () => void;
+  onClearToolRuns: () => void;
   onToggleSampling: (open: boolean) => void;
   onResetSampling: () => void;
   onTemperatureChange: (value: number) => void;
@@ -564,7 +568,7 @@ export function RightPanelContent({
         open={toolRunsOpen}
         toolRuns={toolRuns}
         onToggle={onToggleToolRuns}
-        onRefresh={onRefreshToolRuns}
+        onClear={onClearToolRuns}
       />
       <SamplingSection
         open={samplingOpen}

@@ -40,8 +40,12 @@ export const stripSpeechLeadingZero = (value: string) => {
 
 export const normalizeTextForSpeechReading = (text: string) => {
   const vi = textLooksVietnamese(text);
+  const rangeWord = vi ? " đến " : " to ";
   return text
     .replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g, (_, day, month, year) =>
+      vi ? `${stripSpeechLeadingZero(day)} tháng ${stripSpeechLeadingZero(month)} năm ${year}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}/${year}`,
+    )
+    .replace(/\b(\d{1,2})-(\d{1,2})-(\d{2,4})\b/g, (_, day, month, year) =>
       vi ? `${stripSpeechLeadingZero(day)} tháng ${stripSpeechLeadingZero(month)} năm ${year}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}/${year}`,
     )
     .replace(/\b(\d{1,2})\/(\d{1,2})\b/g, (_, day, month) =>
@@ -72,9 +76,14 @@ export const normalizeTextForSpeechReading = (text: string) => {
     .replace(/([\d.,]+)\s*(?:USD|usd)\b/g, (_, value) => vi ? `${value} đô la` : `${value} dollars`)
     .replace(/([\d.,]+)\s*(?:VND|vnd|VNĐ|vnđ|₫)\b/g, (_, value) => vi ? `${value} đồng` : `${value} Vietnamese dong`)
     .replace(/€\s*([\d.,]+)/g, (_, value) => vi ? `${value} euro` : `${value} euros`)
-    .replace(/£\s*([\d.,]+)/g, (_, value) => vi ? `${value} bảng Anh` : `${value} pounds`);
+    .replace(/£\s*([\d.,]+)/g, (_, value) => vi ? `${value} bảng Anh` : `${value} pounds`)
+    .replace(/(?<=\d)\s*[~∼]\s*(?=\d)/g, rangeWord)
+    .replace(/(?<=\d)\s*[-–—]\s*(?=\d)/g, rangeWord)
+    .replace(/(?<=\d)\s*\+\s*(?=\d)/g, vi ? " cộng " : " plus ")
+    .replace(/(^|[\s,.;!?])\+(?=$|[\s,.;!?])/g, (_, prefix) => `${prefix}${vi ? "cộng" : "plus"}`)
+    .replace(/(^|[\s,.;!?])-(?=$|[\s,.;!?])/g, (_, prefix) => `${prefix}${vi ? "trừ" : "minus"}`)
+    .replace(/:(?=\s*\D|$)/g, ". ");
 };
-
 export const sanitizeTextForSpeech = (text: string) => {
   const speechReadyText = normalizeTextForSpeechReading(withSpeechSentenceBreaks(text));
   const collapsed = speechReadyText
@@ -91,6 +100,7 @@ export const sanitizeTextForSpeech = (text: string) => {
     .replace(/[\u2022\u00B7\u00A6]/g, " ")
     .replace(/&nbsp;|&#160;/gi, " ")
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, " ")
+    .replace(/(?<=\p{L})[-\u2013\u2014](?=\p{L})/gu, " ")
     .replace(/\s*[-\u2013\u2014]\s*/g, ", ")
     .replace(/\s*[\\/]\s*/g, ", ")
     .replace(/[;,]{2,}/g, ", ")
@@ -199,8 +209,8 @@ export const toolRunDisplayName = (run: ToolRunRecord) => {
   ) {
     const mode = readToolString(input, "mode");
     const source = mode || run.tool_name;
-    if (source === "text_to_image") return "text_image";
-    if (source === "image_to_image") return "image_image";
+    if (source === "text_to_image" || source === "text_image") return "text_image";
+    if (source === "image_to_image" || source === "image_image") return "image_image";
     if (source === "avatar_image" || source === "avatar_to_image" || source === "bot_image") return "bot_image";
     if (source === "user_avatar_image" || source === "avatar_user_image" || source === "user_image") return "user_image";
     if (

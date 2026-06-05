@@ -29,32 +29,34 @@ These are the current local test models used by this build. They are not stored 
 
 | Part | Current model/files | Used for |
 | --- | --- | --- |
-| Brain Light | `Gemma 4 E2B Hauhau Q4` | Chat, reasoning, personality, tool use on lighter PCs |
+| Brain Fast | `Gemma 4 E2B Hauhau Q4` | Chat, reasoning, personality, tool use on lighter PCs |
 | Brain Balanced | `Gemma 4 E4B Hauhau Q4` | Default local chat, reasoning, personality, tool use |
-| Brain High | `Gemma 4 E4B Hauhau Q8` | Higher-quality local chat for stronger PCs |
-| Image Studio | `Qwen-Rapid-NSFW-v23_Q4_K.gguf` | Text-to-image and image editing |
-| Image text encoder | `Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf` | Understanding image prompts |
-| Image projector | `Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf` | Multimodal image support |
-| Image VAE | `qwen_image_vae.safetensors` | Image encode/decode |
-| Voice | `omnivoice-base-Q8_0.gguf` | Local character speech |
-| Voice tokenizer | `omnivoice-tokenizer-Q8_0.gguf` | Voice runtime tokenizer |
-| Voice helper | `faster-whisper-tiny` | Voice sample preparation |
+| Brain Ultra | `Gemma 4 E4B Hauhau Q8` | Higher-quality local chat for stronger PCs |
+| Image Studio Fast | `Z-Image Turbo Q4` | Fast local text-to-image at 512px |
+| Image Studio Balanced | `Z-Image Turbo Q6` | Better local text-to-image at 1024px |
+| Image Studio Ultra / reference edit | `Qwen-Rapid-NSFW-v23_Q6_K.gguf` | Text-to-image and image editing |
+| Image text encoder | `Qwen2.5-VL-7B-Instruct.Q6_K.gguf` / `qwen3-4b-abl-q4_0.gguf` | Understanding image prompts |
+| Image projector | `Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf` | Qwen multimodal image support |
+| Image VAE | `qwen_image_vae.safetensors` / `ae.safetensors` | Image encode/decode |
+| Speech | `omnivoice-base-Q8_0.gguf` | Local character speech |
+| Speech tokenizer | `omnivoice-tokenizer-Q8_0.gguf` | Speech runtime tokenizer |
+| Voice Helper | `faster-whisper-tiny` | Voice sample preparation |
 
 Predefined LLM downloads for first startup:
 
-- **Light PC:** `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` Q4 + matching vision projector.
+- **Fast PC:** `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` Q4 + matching vision projector.
 - **Balanced PC:** `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` Q4 + matching vision projector.
-- **High PC:** `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` Q8 + matching vision projector.
+- **Ultra PC:** `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` Q8 + matching vision projector.
 
 ## Expected PC Specs
 
 Galaxy AI Hub can run at different levels depending on the model size.
 
-| Tier | Suggested specs | Expected experience |
+| Preset | Suggested specs | Expected experience |
 | --- | --- | --- |
-| Light | 16 GB RAM, 4-6 GB VRAM or CPU mode | Chat first, voice/image may swap models more often |
+| Fast | 16 GB RAM, 4-6 GB VRAM or CPU mode | Chat first, voice/image may swap models more often |
 | Balanced | 32 GB RAM, 8-12 GB VRAM | Good local chat, voice, and 1024px image generation |
-| High | 64 GB RAM, 12+ GB VRAM | Smoother model switching, larger context, better multitasking |
+| Ultra | 64 GB RAM, 12+ GB VRAM | Smoother model switching, larger context, better multitasking |
 
 The app should always prefer the LLM first. If there is enough VRAM, voice can stay loaded too. If not, the app swaps models only when needed.
 
@@ -65,9 +67,9 @@ The goal is that new users should not need to manually hunt for model files.
 First-start setup:
 
 1. Detect the PC hardware.
-2. Pick a recommended model tier automatically.
+2. Pick a recommended quality preset automatically.
 3. Download the Brain model.
-4. Download the Voice model.
+4. Download the Speech model.
 5. Download the Image Studio model package.
 6. Verify the files.
 7. Generate simple model metadata.
@@ -91,7 +93,7 @@ Create the portable package:
 npm run package:portable
 ```
 
-The portable zip includes the app, starter voice samples, and the small local image runtime. It does not include the large LLM/image/voice model files. Those are downloaded during first startup.
+The portable zip includes the app, starter voice samples, and the small local image runtime. It does not include the large LLM/image/speech model files. Those are downloaded during first startup.
 
 ## Development
 
@@ -125,7 +127,7 @@ The repository does not include heavy or private runtime data:
 
 - LLM models
 - image generation models
-- voice models
+- speech models
 - generated images/audio
 - local settings
 - Google tokens

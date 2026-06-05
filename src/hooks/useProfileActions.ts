@@ -229,12 +229,17 @@ export function useProfileActions(options: UseProfileActionsOptions) {
   const deleteSelectedPersonalityPreset = () => {
     if (options.personalityPresets.length <= 1) return;
     const deletedPersonalityId = options.selectedPersonalityId;
+    const deletedPersonalityName = options.selectedPersonalityPreset?.name || "";
     options.deletePersonalityMemory(deletedPersonalityId).catch((error) =>
       console.error("Personality memory delete error:", error),
     );
     invoke("delete_personality_chat_session", { personalityId: deletedPersonalityId }).catch((error) =>
       console.error("Personality chat session delete error:", error),
     );
+    invoke("delete_character_files", {
+      id: deletedPersonalityId,
+      name: deletedPersonalityName,
+    }).catch((error) => console.error("Character folder delete error:", error));
     options.setPersonalityPresets((prev) => {
       const next = prev.filter((preset) => preset.id !== options.selectedPersonalityId);
       const fallback = next[0] ?? DEFAULT_SETTINGS.personality_presets[0];

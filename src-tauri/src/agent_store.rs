@@ -582,6 +582,14 @@ pub fn list_agent_tool_runs(limit: Option<i64>) -> Result<Vec<AgentToolRunRecord
 }
 
 #[tauri::command]
+pub fn clear_agent_tool_runs() -> Result<bool, String> {
+    let conn = open_db()?;
+    conn.execute("DELETE FROM tool_runs", [])
+        .map_err(|e| format!("Could not clear tool activity: {}", e))?;
+    Ok(true)
+}
+
+#[tauri::command]
 pub fn save_personality_chat_session(
     personality_id: String,
     messages_json: String,

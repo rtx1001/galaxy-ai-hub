@@ -149,14 +149,14 @@ pub(super) fn voice_files(tier: &str) -> Vec<SetupFile> {
         .join("omnivoice.cpp");
     vec![
         setup_file(
-            &format!("Voice base {}", quant_label),
+            &format!("Speech base {}", quant_label),
             "Serveurperso/OmniVoice-GGUF",
             base_file,
             root.join(base_file),
             size_hint,
         ),
         setup_file(
-            &format!("Voice tokenizer {}", quant_label),
+            &format!("Speech tokenizer {}", quant_label),
             "Serveurperso/OmniVoice-GGUF",
             tokenizer_file,
             root.join(tokenizer_file),
@@ -291,17 +291,17 @@ pub(super) fn image_files(tier: &str, has_nvidia_gpu: bool) -> Vec<SetupFile> {
             setup_file(
                 "Qwen Image Edit",
                 "Novice25/Qwen-Image-Edit-Rapid-AIO-GGUF",
-                "v23/Qwen-Rapid-NSFW-v23_Q4_K.gguf",
-                root.join("Qwen-Rapid-NSFW-v23_Q4_K.gguf"),
-                "about 12.2 GB",
+                "v23/Qwen-Rapid-NSFW-v23_Q6_K.gguf",
+                root.join("Qwen-Rapid-NSFW-v23_Q6_K.gguf"),
+                "about 17.0 GB",
             ),
             setup_file(
                 "Image text encoder",
                 "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
-                "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
+                "Qwen2.5-VL-7B-Instruct.Q6_K.gguf",
                 root.join("text_encoders")
-                    .join("Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf"),
-                "about 4.4 GB",
+                    .join("Qwen2.5-VL-7B-Instruct.Q6_K.gguf"),
+                "about 6.0 GB",
             ),
             setup_file(
                 "Image projector",
