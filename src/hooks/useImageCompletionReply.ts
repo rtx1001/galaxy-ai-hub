@@ -1,4 +1,4 @@
-import { PersonalityPreset, DisplayLanguage, extractChatResponseText, stripThinkBlocks } from "../appCore";
+import { PersonalityPreset, DisplayLanguage, cleanAssistantDisplayText, extractChatResponseText, modelAwareReplySampling, stripThinkBlocks } from "../appCore";
 
 const IMAGE_REPLY_TIMEOUT_MS = 25_000;
 
@@ -26,6 +26,7 @@ type UseImageCompletionReplyOptions = {
   repeatLastN: number;
   repeatPenalty: number;
   samplingTemperature: number;
+  selectedModelPath: string;
   selectedPersonalityId: string;
   topK: number;
   topP: number;
@@ -76,6 +77,14 @@ ${options.personality || activePersonality?.prompt || "You are a helpful assista
       }
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), IMAGE_REPLY_TIMEOUT_MS);
+      const replySampling = modelAwareReplySampling({
+        modelPath: options.selectedModelPath,
+        temperature: options.samplingTemperature,
+        topK: options.topK,
+        topP: options.topP,
+        minP: options.minP,
+        repeatPenalty: options.repeatPenalty,
+      });
       const response = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
         method: "POST",
         signal: controller.signal,
@@ -85,12 +94,12 @@ ${options.personality || activePersonality?.prompt || "You are a helpful assista
             { role: "system", content: profilePrompt },
             { role: "user", content: userContent },
           ],
-          temperature: Math.min(0.8, Math.max(0.45, options.samplingTemperature)),
-          top_k: options.topK,
-          top_p: options.topP,
-          min_p: options.minP,
+          temperature: Math.min(1.0, Math.max(0.45, replySampling.temperature)),
+          top_k: replySampling.topK,
+          top_p: replySampling.topP,
+          min_p: replySampling.minP,
           repeat_last_n: options.repeatLastN,
-          repeat_penalty: options.repeatPenalty,
+          repeat_penalty: replySampling.repeatPenalty,
           max_tokens: 64,
           stream: false,
           chat_template_kwargs: {
@@ -104,9 +113,9 @@ ${options.personality || activePersonality?.prompt || "You are a helpful assista
         throw new Error(`Image reply failed with status ${response.status}`);
       }
 
-      const reply = stripThinkBlocks(extractChatResponseText(await response.json()))
+      const reply = cleanAssistantDisplayText(stripThinkBlocks(extractChatResponseText(await response.json()))
         .replace(/\s+/g, " ")
-        .trim();
+        .trim());
       options.appLog(`image completion reply done length=${reply.length}`);
       return reply;
     } catch (error) {

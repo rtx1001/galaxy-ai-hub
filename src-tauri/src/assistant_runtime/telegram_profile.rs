@@ -238,7 +238,10 @@ pub(super) struct StructuredMemoryDocument {
 }
 
 fn compact_memory_line(text: &str, limit: usize) -> String {
-    let clean = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let clean = crate::agent_react::sanitize_model_text(text)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if clean.chars().count() <= limit {
         return clean;
     }
@@ -248,12 +251,36 @@ fn compact_memory_line(text: &str, limit: usize) -> String {
     )
 }
 
+fn memory_line_is_internal_artifact(text: &str) -> bool {
+    let lowered = text.to_lowercase();
+    [
+        "validation error",
+        "tool error",
+        "decision action",
+        "image studio returned",
+        "chat brain returned",
+        "connection to the brain failed",
+        "system status",
+        "model error",
+        "error:",
+        "traceback",
+        "json.exception",
+        "parse error",
+        "tool_call",
+        "<tool",
+        "approval card",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+}
+
 fn normalize_memory_items(items: Vec<String>, limit: usize) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     items
         .into_iter()
         .map(|item| compact_memory_line(item.trim_start_matches(['-', '*', ' ']), 420))
         .filter(|item| !item.is_empty())
+        .filter(|item| !memory_line_is_internal_artifact(item))
         .filter(|item| seen.insert(item.to_lowercase()))
         .rev()
         .take(limit)
@@ -501,6 +528,10 @@ pub(super) fn load_personality_memory(personality_id: &str) -> String {
                 .get("assistant")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
+            if memory_line_is_internal_artifact(user) || memory_line_is_internal_artifact(assistant)
+            {
+                return None;
+            }
             let turn = [
                 (!user.trim().is_empty())
                     .then(|| format!("User: {}", compact_memory_line(user, 260))),
@@ -539,6 +570,11 @@ pub(super) fn update_personality_memory_after_turn(
     let clean_answer = compact_memory_line(answer_text, 1200);
     if clean_user.is_empty() && clean_answer.is_empty() {
         return current_memory.to_string();
+    }
+    if memory_line_is_internal_artifact(&clean_user)
+        || memory_line_is_internal_artifact(&clean_answer)
+    {
+        return serialize_structured_memory(parse_structured_memory(current_memory));
     }
     let now_ms = chrono::Local::now().timestamp_millis();
     let event_value = serde_json::json!({

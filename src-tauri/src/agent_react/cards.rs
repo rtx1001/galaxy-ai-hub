@@ -104,34 +104,35 @@ pub(super) fn format_weather_day_label(value: &str, vi: bool) -> String {
     };
     if vi {
         let weekday = match date.weekday().number_from_monday() {
-            1 => "Thứ Hai",
-            2 => "Thứ Ba",
-            3 => "Thứ Tư",
-            4 => "Thứ Năm",
-            5 => "Thứ Sáu",
-            6 => "Thứ Bảy",
-            _ => "Chủ Nhật",
+            1 => "Th\u{1ee9} Hai",
+            2 => "Th\u{1ee9} Ba",
+            3 => "Th\u{1ee9} T\u{01b0}",
+            4 => "Th\u{1ee9} N\u{0103}m",
+            5 => "Th\u{1ee9} S\u{00e1}u",
+            6 => "Th\u{1ee9} B\u{1ea3}y",
+            _ => "Ch\u{1ee7} Nh\u{1ead}t",
         };
         format!("{} ({})", weekday, date.format("%d/%m"))
     } else {
         date.format("%a %Y-%m-%d").to_string()
     }
 }
-
 pub(super) fn user_asks_weather_rain(text: &str) -> bool {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
     contains_any(&normalized, &["rain", "storm", "umbrella"])
-        || contains_vietnamese_intent(&lowered, &["mưa", "bão", "có mưa"])
+        || contains_any_folded(
+            &lowered,
+            &normalized,
+            &["m\u{01b0}a", "b\u{00e3}o", "c\u{00f3} m\u{01b0}a"],
+        )
 }
-
 pub(super) fn user_asks_weather_weekend(text: &str) -> bool {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
     contains_any(&normalized, &["weekend"])
-        || contains_any_folded(&lowered, &normalized, &["cuối tuần"])
+        || contains_any_folded(&lowered, &normalized, &["cu\u{1ed1}i tu\u{1ea7}n"])
 }
-
 pub(super) fn weather_requested_focus_date(text: &str) -> Option<(NaiveDate, &'static str)> {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);

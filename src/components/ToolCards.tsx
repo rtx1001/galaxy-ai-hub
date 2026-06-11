@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ToolResultCard, ImageProposal, ActionProposal, FilePreviewResult, GoogleCalendarEvent } from "../types";
-import { formatBytes, toolCardStyle, fieldValue, compactDetailsForKind, cleanDisplayPath, localAssetUrl, pauseOtherMediaElements } from "../utils";
+import { formatBytes, toolCardStyle, fieldValue, compactDetailsForKind, cleanDisplayPath, localAssetUrl } from "../utils";
 import { CheckIcon, ChevronDownIcon, CloseIcon, FolderOpenIcon, PlusIcon, TrashIcon } from "./Icons";
 import { ImageModeDropdown, imageModeLabel, normalizeImageMode } from "./ImageModeDropdown";
 import { RegisteredAudio } from "./RegisteredAudio";
+import { RegisteredVideo } from "./RegisteredVideo";
 
 type DisplayLanguage = "en" | "vi";
 
@@ -50,28 +51,30 @@ const displayImageSource = (value?: string | null) => {
   return localAssetUrl(value) || value;
 };
 
-const imagePromptMentionsUserProfile = (prompt: string, userName?: string) => {
-  const lowered = prompt.toLocaleLowerCase();
-  const name = userName?.trim().toLocaleLowerCase() || "";
-  return Boolean(name && lowered.includes(name)) || /\b(the\s+user|selected\s+user|user\s+profile)\b/i.test(prompt);
+const normalizeLocalPathForCompare = (value: string) =>
+  cleanDisplayPath(value)
+    .replace(/\//g, "\\")
+    .replace(/\\+$/g, "")
+    .trim()
+    .toLocaleLowerCase();
+
+const isInsideLinkedWorkspace = (path: string, linkedFolders: string[]) => {
+  const target = normalizeLocalPathForCompare(path);
+  if (!target) return false;
+  return linkedFolders
+    .map((folder) => normalizeLocalPathForCompare(folder))
+    .filter(Boolean)
+    .some((root) => target === root || target.startsWith(`${root}\\`));
 };
 
 const initialReferenceSourcesForMode = ({
   mode,
-  prompt,
   proposalSources,
   chatImageRef,
-  userAvatar,
-  assistantAvatar,
-  userName,
 }: {
   mode: string;
-  prompt: string;
   proposalSources?: string[] | null;
   chatImageRef?: string | null;
-  userAvatar?: string;
-  assistantAvatar?: string;
-  userName?: string;
 }) => {
   const normalizedMode = normalizeImageMode(mode);
   const proposalReferenceSources = normalizedReferenceSources(proposalSources);
@@ -79,10 +82,6 @@ const initialReferenceSourcesForMode = ({
   if (normalizedMode !== "image_image") return [];
   const sources: string[] = [];
   if (displayImageSource(chatImageRef)) sources.push("chat_image");
-  if (userAvatar && imagePromptMentionsUserProfile(prompt, userName)) sources.push("user_avatar");
-  if (assistantAvatar && /\b(the\s+assistant|assistant\s+avatar|bot\s+avatar|current\s+assistant)\b/i.test(prompt)) {
-    sources.push("bot_avatar");
-  }
   return sources;
 };
 
@@ -178,8 +177,9 @@ export function FilePreviewCard({
     const labels = uiText(language);
     const mime = preview.mime_type.toLowerCase();
     const dataUrl = preview.data_url || "";
-    const assetUrl = localAssetUrl(preview.path);
-    const mediaUrl = assetUrl || dataUrl;
+    const isStillLinked = isInsideLinkedWorkspace(preview.path, linkedFolders);
+    const assetUrl = isStillLinked ? localAssetUrl(preview.path) : "";
+    const mediaUrl = assetUrl || (isStillLinked ? dataUrl : "");
     const isAudio = mime.startsWith("audio/");
     const isImage = mime.startsWith("image/");
     return (
@@ -198,7 +198,8 @@ export function FilePreviewCard({
             type="button"
             title={labels.openInExplorer}
             onClick={() => invoke("open_in_explorer", { path: preview.path, folders: linkedFolders }).catch(console.error)}
-            className="shrink-0 flex h-9 w-9 items-center justify-center rounded-xl border border-[#282a2c] bg-[#1e1f20] text-[var(--accent-color)] transition hover:bg-[#282a2c]"
+            disabled={!isStillLinked}
+            className="shrink-0 flex h-9 w-9 items-center justify-center rounded-xl border border-[#282a2c] bg-[#1e1f20] text-[var(--accent-color)] transition hover:bg-[#282a2c] disabled:cursor-not-allowed disabled:opacity-40"
             style={{ boxShadow: "inset 0 0 0 9999px transparent" }}
           >
             <FolderOpenIcon className="h-4 w-4" />
@@ -206,6 +207,11 @@ export function FilePreviewCard({
         </div>
       </div>
       <div className={`${isAudio ? "overflow-visible" : ""} ${isImage ? "p-2.5" : "p-3"}`}>
+        {!isStillLinked && (
+          <div className="rounded-2xl bg-rose-500/10 px-3 py-2 text-sm text-rose-100 ring-1 ring-rose-500/20">
+            This file is outside the current workspace folders.
+          </div>
+        )}
         {isImage && mediaUrl && (
           <div className="overflow-hidden rounded-[18px] bg-[#131314] ring-1 ring-[#282a2c]">
             <img src={mediaUrl} alt={preview.name} className="max-h-[520px] w-full object-contain" />
@@ -215,7 +221,7 @@ export function FilePreviewCard({
           <RegisteredAudio id={`file-preview:${preview.path}`} title={preview.name} src={mediaUrl} className="w-full" />
         )}
         {mime.startsWith("video/") && mediaUrl && (
-          <video src={mediaUrl} controls onPlay={(event) => pauseOtherMediaElements(event.currentTarget)} className="max-h-[520px] w-full rounded-2xl bg-black" />
+          <RegisteredVideo title={preview.name} src={mediaUrl} path={preview.path} linkedFolders={linkedFolders} className="w-full" />
         )}
         {mime === "application/pdf" && mediaUrl && (
           <iframe title={preview.name} src={mediaUrl} className="h-[520px] w-full rounded-2xl bg-[#0f1011]" />
@@ -440,12 +446,8 @@ export function ImageProposalCard({
     const [selectedReferenceSources, setSelectedReferenceSources] = useState<string[]>(() =>
       initialReferenceSourcesForMode({
         mode: proposal.mode || "text_image",
-        prompt: proposal.prompt,
         proposalSources: proposal.reference_sources,
         chatImageRef,
-        userAvatar,
-        assistantAvatar,
-        userName,
       }),
     );
     const [open, setOpen] = useState(true);
@@ -456,12 +458,8 @@ export function ImageProposalCard({
       setSelectedReferenceSources(
         initialReferenceSourcesForMode({
           mode: nextMode,
-          prompt: proposal.prompt,
           proposalSources: proposal.reference_sources,
           chatImageRef,
-          userAvatar,
-          assistantAvatar,
-          userName,
         }),
       );
       setExtraImageRefs([]);
@@ -479,12 +477,8 @@ export function ImageProposalCard({
       setSelectedReferenceSources(
         initialReferenceSourcesForMode({
           mode: nextMode,
-          prompt: draftPrompt,
           proposalSources: proposal.reference_sources,
           chatImageRef,
-          userAvatar,
-          assistantAvatar,
-          userName,
         }),
       );
     };

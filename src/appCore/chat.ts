@@ -44,7 +44,7 @@ export const findRecentChatImageContext = (
     }
     if (!Array.isArray(message.content)) continue;
 
-    const imagePart = message.content.find((part) => part.type === "image_url");
+    const imagePart = [...message.content].reverse().find((part) => part.type === "image_url");
     if (imagePart?.type === "image_url") {
       return {
         role: message.role,
@@ -553,8 +553,8 @@ export const buildBrainMessages = (systemPrompt: string, chatMessages: ChatMessa
   ];
 };
 
-const TOOL_AGENT_HISTORY_MESSAGES = 14;
-const TOOL_AGENT_OLDER_CONTEXT_EXCLUDE_RECENT = 14;
+const TOOL_AGENT_HISTORY_MESSAGES = 30;
+const TOOL_AGENT_OLDER_CONTEXT_EXCLUDE_RECENT = 30;
 const TOOL_AGENT_OLDER_CONTEXT_LIMIT = 3600;
 const TOOL_AGENT_LATEST_TEXT_LIMIT = 6000;
 const TOOL_AGENT_USER_TEXT_LIMIT = 2400;
@@ -566,10 +566,11 @@ export const truncateForToolAgent = (text: string, limit: number) => {
 };
 
 export const compactToolAgentContent = (
-  content: BrainMessage["content"],
+  originalContent: ChatMessage["content"],
   role: ChatMessage["role"],
   isLatest: boolean,
 ): BrainMessage["content"] => {
+  const content = buildAgentMessageContent(originalContent, false);
   const limit = isLatest
     ? TOOL_AGENT_LATEST_TEXT_LIMIT
     : role === "user"
@@ -577,7 +578,38 @@ export const compactToolAgentContent = (
       : TOOL_AGENT_ASSISTANT_TEXT_LIMIT;
 
   if (typeof content === "string") {
-    return truncateForToolAgent(content, limit);
+    const text = truncateForToolAgent(content, limit);
+    if (!Array.isArray(originalContent)) {
+      return text;
+    }
+    const imageMarkers = originalContent.flatMap((part) => {
+      if (part.type === "image_url") {
+        return [{
+          type: "image_url" as const,
+          image_url: {
+            url: "",
+            local_path: part.image_url.local_path,
+          },
+        }];
+      }
+      if (part.type === "file_preview" && part.file_preview.mime_type.toLowerCase().startsWith("image/")) {
+        return [{
+          type: "image_url" as const,
+          image_url: {
+            url: "",
+            local_path: part.file_preview.path,
+          },
+        }];
+      }
+      return [];
+    });
+    if (!imageMarkers.length) {
+      return text;
+    }
+    return [
+      ...(text.trim() ? [{ type: "text" as const, text }] : []),
+      ...imageMarkers,
+    ];
   }
 
   const parts = content
@@ -621,11 +653,12 @@ export const buildToolAgentMessages = (chatMessages: ChatMessage[]): BrainMessag
   }
   recentMessages.forEach((message, index) => {
     const content = compactToolAgentContent(
-      buildAgentMessageContent(message.content, false),
+      message.content,
       message.role,
       index === lastIndex,
     );
-    if (!extractAgentMessageText(content).trim()) return;
+    const hasImageMarker = Array.isArray(content) && content.some((part) => part.type === "image_url");
+    if (!extractAgentMessageText(content).trim() && !hasImageMarker) return;
     compacted.push({
       role: message.role,
       content,

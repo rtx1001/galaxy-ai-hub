@@ -194,6 +194,79 @@ pub(super) fn normalize_chat_messages_for_templates(messages: Vec<Value>) -> Vec
     normalized
 }
 
+fn hex_digit_value(byte: u8) -> Option<u32> {
+    match byte {
+        b'0'..=b'9' => Some((byte - b'0') as u32),
+        b'a'..=b'f' => Some((byte - b'a' + 10) as u32),
+        b'A'..=b'F' => Some((byte - b'A' + 10) as u32),
+        _ => None,
+    }
+}
+
+fn escaped_unicode_at(bytes: &[u8], index: usize) -> Option<u32> {
+    if index + 6 > bytes.len()
+        || bytes.get(index) != Some(&b'\\')
+        || bytes.get(index + 1) != Some(&b'u')
+    {
+        return None;
+    }
+    let mut value = 0;
+    for offset in 2..6 {
+        value = (value << 4) | hex_digit_value(bytes[index + offset])?;
+    }
+    Some(value)
+}
+
+pub(crate) fn sanitize_model_text(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    let mut without_escaped_surrogates = String::with_capacity(text.len());
+    while index < bytes.len() {
+        if let Some(code) = escaped_unicode_at(bytes, index) {
+            if (0xD800..=0xDFFF).contains(&code) {
+                index += 6;
+                if (0xD800..=0xDBFF).contains(&code) {
+                    if let Some(low) = escaped_unicode_at(bytes, index) {
+                        if (0xDC00..=0xDFFF).contains(&low) {
+                            index += 6;
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+
+        let Some(ch) = text[index..].chars().next() else {
+            break;
+        };
+        let code = ch as u32;
+        if matches!(ch, '\n' | '\r' | '\t')
+            || (!ch.is_control()
+                && ch != '\u{FFFD}'
+                && ch != '\u{25A1}'
+                && ch != '\u{25A0}'
+                && !(0x1F000..=0x1FAFF).contains(&code))
+        {
+            without_escaped_surrogates.push(ch);
+        }
+        index += ch.len_utf8();
+    }
+    without_escaped_surrogates
+}
+
+fn sanitize_model_value(value: Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(sanitize_model_text(&text)),
+        Value::Array(items) => Value::Array(items.into_iter().map(sanitize_model_value).collect()),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, sanitize_model_value(value)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
 pub(super) async fn call_chat(
     messages: Vec<Value>,
     tools: Option<Value>,
@@ -207,7 +280,7 @@ pub(super) async fn call_chat(
         .map_err(|e| format!("Could not prepare chat request: {}", e))?;
 
     let mut payload = json!({
-        "messages": normalize_chat_messages_for_templates(messages),
+        "messages": sanitize_model_value(Value::Array(normalize_chat_messages_for_templates(messages))),
         "temperature": sampling.temperature.clamp(0.0, 2.0),
         "top_k": sampling.top_k.min(200),
         "top_p": sampling.top_p.clamp(0.0, 1.0),
@@ -250,4 +323,55 @@ pub(super) async fn call_chat(
         .json::<Value>()
         .await
         .map_err(|e| format!("Could not read chat response: {}", e))
+}
+
+pub(super) async fn call_chat_json(
+    messages: Vec<Value>,
+    sampling: SamplingConfig,
+    max_tokens: u32,
+) -> Result<Value, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| format!("Could not prepare JSON chat request: {}", e))?;
+
+    let payload = json!({
+        "messages": sanitize_model_value(Value::Array(normalize_chat_messages_for_templates(messages))),
+        "temperature": sampling.temperature.clamp(0.0, 2.0),
+        "top_k": sampling.top_k.min(200),
+        "top_p": sampling.top_p.clamp(0.0, 1.0),
+        "min_p": sampling.min_p.clamp(0.0, 1.0),
+        "repeat_last_n": sampling.repeat_last_n.clamp(-1, 4096),
+        "repeat_penalty": sampling.repeat_penalty.clamp(0.8, 2.0),
+        "max_tokens": max_tokens.clamp(64, 4096),
+        "stream": false,
+        "response_format": { "type": "json_object" },
+        "chat_template_kwargs": {
+            "enable_thinking": false,
+            "thinking": false
+        }
+    });
+
+    let response = client
+        .post("http://127.0.0.1:8080/v1/chat/completions")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| {
+            format!(
+                "Connection to the brain failed while sending JSON decision request to http://127.0.0.1:8080/v1/chat/completions: {} ({:?})",
+                e, e
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("The chat brain returned {}. {}", status, body));
+    }
+
+    response
+        .json::<Value>()
+        .await
+        .map_err(|e| format!("Could not read JSON chat response: {}", e))
 }

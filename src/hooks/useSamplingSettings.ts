@@ -1,17 +1,24 @@
-import { useState } from "react";
-import { DEFAULT_SETTINGS } from "../appCore";
+import { useEffect, useState } from "react";
+import { DEFAULT_SETTINGS, modelDefaultSampling } from "../appCore";
 
-export function useSamplingSettings() {
+export function useSamplingSettings({
+  selectedModelPath,
+  thinkingEnabled,
+}: {
+  selectedModelPath?: string;
+  thinkingEnabled?: boolean;
+} = {}) {
+  const initialSampling = modelDefaultSampling(selectedModelPath, thinkingEnabled);
   const [creativity, setCreativity] = useState(DEFAULT_SETTINGS.creativity);
   const [samplingTemperature, setSamplingTemperature] = useState(
-    DEFAULT_SETTINGS.sampling_temperature,
+    initialSampling.temperature,
   );
-  const [topK, setTopK] = useState(DEFAULT_SETTINGS.top_k);
-  const [topP, setTopP] = useState(DEFAULT_SETTINGS.top_p);
-  const [minP, setMinP] = useState(DEFAULT_SETTINGS.min_p);
+  const [topK, setTopK] = useState(initialSampling.topK);
+  const [topP, setTopP] = useState(initialSampling.topP);
+  const [minP, setMinP] = useState(initialSampling.minP);
   const [repeatLastN, setRepeatLastN] = useState(DEFAULT_SETTINGS.repeat_last_n);
   const [repeatPenalty, setRepeatPenalty] = useState(
-    DEFAULT_SETTINGS.repeat_penalty,
+    initialSampling.repeatPenalty,
   );
   const [memorySize, setMemorySize] = useState(DEFAULT_SETTINGS.memory_size);
   const [replyLength, setReplyLength] = useState(DEFAULT_SETTINGS.reply_length);
@@ -19,14 +26,21 @@ export function useSamplingSettings() {
     DEFAULT_SETTINGS.intelligence_quality,
   );
 
-  const resetSamplingDefaults = () => {
-    setSamplingTemperature(DEFAULT_SETTINGS.sampling_temperature);
-    setTopK(DEFAULT_SETTINGS.top_k);
-    setTopP(DEFAULT_SETTINGS.top_p);
-    setMinP(DEFAULT_SETTINGS.min_p);
+  const applyModelDefaults = () => {
+    const nextSampling = modelDefaultSampling(selectedModelPath, thinkingEnabled);
+    setSamplingTemperature(nextSampling.temperature);
+    setTopK(nextSampling.topK);
+    setTopP(nextSampling.topP);
+    setMinP(nextSampling.minP);
     setRepeatLastN(DEFAULT_SETTINGS.repeat_last_n);
-    setRepeatPenalty(DEFAULT_SETTINGS.repeat_penalty);
+    setRepeatPenalty(nextSampling.repeatPenalty);
   };
+
+  useEffect(() => {
+    applyModelDefaults();
+  }, [selectedModelPath]);
+
+  const resetSamplingDefaults = applyModelDefaults;
 
   return {
     creativity,

@@ -314,6 +314,9 @@ function App() {
   } = useImageStudioSettings();
   const [voiceFolder, setVoiceFolder] = useState(DEFAULT_SETTINGS.voice_folder);
   const [selectedVoicePath, setSelectedVoicePath] = useState(DEFAULT_SETTINGS.selected_voice_path);
+  const [modelFolder, setModelFolder] = useState(DEFAULT_SETTINGS.model_folder);
+  const [selectedModelPath, setSelectedModelPath] = useState(DEFAULT_SETTINGS.selected_model_path);
+  const [thinkingEnabled, setThinkingEnabled] = useState(DEFAULT_SETTINGS.thinking_enabled);
   const {
     creativity,
     setCreativity,
@@ -336,7 +339,7 @@ function App() {
     intelligenceQuality,
     setIntelligenceQuality,
     resetSamplingDefaults,
-  } = useSamplingSettings();
+  } = useSamplingSettings({ selectedModelPath, thinkingEnabled });
   const [personality, setPersonality] = useState(DEFAULT_SETTINGS.personality);
   const [personalityAvatar, setPersonalityAvatar] = useState(DEFAULT_SETTINGS.personality_presets[0].avatar ?? "");
   const [personalityPresets, setPersonalityPresets] = useState<PersonalityPreset[]>(DEFAULT_SETTINGS.personality_presets);
@@ -356,7 +359,6 @@ function App() {
     setPersonalityPresets,
     setSelectedVoicePath,
   });
-  const [modelFolder, setModelFolder] = useState(DEFAULT_SETTINGS.model_folder);
   const {
     linkedFolders,
     setLinkedFolders,
@@ -364,7 +366,6 @@ function App() {
     handleRemoveLinkedFolder,
   } = useWorkspaceFolders();
   const [availableModels, setAvailableModels] = useState<ModelLibraryEntry[]>([]);
-  const [selectedModelPath, setSelectedModelPath] = useState(DEFAULT_SETTINGS.selected_model_path);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [hasVision, setHasVision] = useState(false);
   const [activeTaskType, setActiveTaskType] = useState<"none" | "llm" | "voice" | "image">("none");
@@ -425,7 +426,6 @@ function App() {
   const [, setLastTokenSpeed] = useState(0);
   const [, setLastContextTokens] = useState(0);
   const [previewingVoicePath, setPreviewingVoicePath] = useState<string | null>(null);
-  const [thinkingEnabled, setThinkingEnabled] = useState(DEFAULT_SETTINGS.thinking_enabled);
   const isCompactLayout = useCompactLayout({
     setLeftPanelOpen,
     setRightPanelOpen,
@@ -679,6 +679,7 @@ function App() {
     brainStatus,
     ensureAudioPlaybackUnlocked,
     isStreaming,
+    liveConversation,
     lastAutoSpokenAssistantIdRef,
     messages,
     playAudioBase64,
@@ -710,6 +711,7 @@ function App() {
     repeatLastN,
     repeatPenalty,
     samplingTemperature,
+    selectedModelPath,
     selectedPersonalityId,
     topK,
     topP,
@@ -890,6 +892,7 @@ function App() {
     assistantAvatar,
     autoSpeechEligibleAssistantIdsRef,
     clearImage,
+    chatDisplayLanguage,
     composerInputRef,
     generateNaturalImageCompletionReply,
     image,

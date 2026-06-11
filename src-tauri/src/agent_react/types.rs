@@ -96,14 +96,3 @@ pub(super) struct ToolCall {
     #[serde(default)]
     pub arguments: Value,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ToolRoute {
-    MediaPreview,
-    Gmail,
-    Calendar,
-    Weather,
-    FileSearch,
-    WebSearch,
-    GoogleWorkspace,
-}

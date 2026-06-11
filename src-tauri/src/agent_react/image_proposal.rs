@@ -289,20 +289,3 @@ pub(super) fn recent_pending_image_proposal(
         .find(|message| message.role == "assistant")
         .and_then(|message| parse_pending_image_proposal_text(&content_text(&message.content)))
 }
-
-pub(super) fn recent_unresolved_image_creation_context(messages: &[ReactChatMessage]) -> bool {
-    let latest_user_index = messages.iter().rposition(|message| message.role == "user");
-    messages
-        .iter()
-        .enumerate()
-        .rev()
-        .filter(|(index, _)| Some(*index) != latest_user_index)
-        .take(6)
-        .any(|(_, message)| {
-            let text = content_text(&message.content);
-            if text.trim().is_empty() {
-                return false;
-            }
-            parse_pending_image_proposal_text(&text).is_some()
-        })
-}

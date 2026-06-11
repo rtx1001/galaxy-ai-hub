@@ -5,3 +5,4 @@ export * from './appCore/speechTools';
 export * from './appCore/calendarAutomation';
 export * from './appCore/response';
 export * from './appCore/memory';
+export * from './appCore/sampling';

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useRef } from "react";
 import { ChatContentPart, ChatMessage, FilePreviewResult } from "../types";
 import {
   AgentReactResult,
@@ -7,6 +8,7 @@ import {
   SendOptions,
   buildBrainMessages,
   buildRecentImageContextBlock,
+  cleanAssistantDisplayText,
   buildToolAgentMessages,
   createMessageId,
   estimateTokens,
@@ -17,10 +19,13 @@ import {
   findPendingImageProposal,
   formatReactThinking,
   isExplicitApprovalText,
+  modelAwareReplySampling,
+  stripThinkBlocks,
 } from "../appCore";
 import { localAssetUrl } from "../utils";
 
 type UseChatRuntimeOptions = Record<string, any>;
+const IMAGE_PREVIEW_COMMENT_TIMEOUT_MS = 18_000;
 
 const buildOlderConversationMemory = (chatMessages: ChatMessage[]) => {
   const olderMessages = chatMessages.slice(-50, -18);
@@ -103,6 +108,18 @@ const materializeVisionMessageImages = async (
   return nextMessages;
 };
 
+const imagePreviewDataUrl = async (
+  preview: FilePreviewResult,
+  appLog: (message: string) => void,
+): Promise<string> => {
+  if (preview.data_url?.trim()) return preview.data_url;
+  const image = await invoke<LocalImageDataUrl>("read_local_image_data_url", {
+    path: preview.path,
+  });
+  appLog(`image preview perception materialized path=${preview.path}`);
+  return image.data_url;
+};
+
 export function useChatRuntime(options: UseChatRuntimeOptions) {
   const {
     activeChatAbortRef,
@@ -164,6 +181,13 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     userDescription,
     userName,
   } = options;
+  const linkedFoldersRef = useRef<string[]>(Array.isArray(linkedFolders) ? linkedFolders : []);
+
+  useEffect(() => {
+    linkedFoldersRef.current = Array.isArray(linkedFolders)
+      ? linkedFolders.filter((folder: unknown): folder is string => typeof folder === "string" && folder.trim().length > 0)
+      : [];
+  }, [linkedFolders]);
 
   const handleSend = async (sendOptions: SendOptions = {}) => {
     const editTarget = sendOptions.editMessageId
@@ -344,7 +368,20 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     setIsStreaming(true);
     setBrainStatus("Loading");
 
-    const temperature = samplingTemperature;
+    const replySampling = modelAwareReplySampling({
+      modelPath: selectedModelPath,
+      temperature: samplingTemperature,
+      topK,
+      topP,
+      minP,
+      repeatPenalty,
+      thinkingEnabled,
+    });
+    const temperature = replySampling.temperature;
+    const effectiveTopK = replySampling.topK;
+    const effectiveTopP = replySampling.topP;
+    const effectiveMinP = replySampling.minP;
+    const effectiveRepeatPenalty = replySampling.repeatPenalty;
     let generatedText = "";
     let fallbackGeneratedText = "";
     let generatedThinking = "";
@@ -364,22 +401,9 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     const looksLikeBoringSystemFailure = (text: string) =>
       /^\s*(?:\[?Error:|I could not complete that action because|The chat brain returned|Model error:|Connection to the brain failed)/i.test(text);
     const resolveRuntimeLinkedFolders = async () => {
-      if (Array.isArray(linkedFolders) && linkedFolders.length) {
-        return linkedFolders;
-      }
-      try {
-        const stored = await invoke<{ linked_folders?: string[] }>("load_app_settings");
-        const savedFolders = Array.isArray(stored.linked_folders)
-          ? stored.linked_folders.filter((folder) => typeof folder === "string" && folder.trim())
-          : [];
-        if (savedFolders.length) {
-          appLog(`chat workspace fallback loaded ${savedFolders.length} saved folder(s) for this request.`);
-          return savedFolders;
-        }
-      } catch (error) {
-        appLog(`chat workspace fallback failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      return [];
+      const folders = linkedFoldersRef.current;
+      appLog(`chat workspace live folders count=${folders.length}`);
+      return folders;
     };
     const flushStreamedText = (force = false) => {
       if (isRequestStale()) return;
@@ -436,6 +460,88 @@ ${personalityMemory.trim()}`
         : profilePrompt;
       const effectiveRequestMessages = buildBrainMessages(effectiveProfilePrompt, requestMessages, hasVision);
       const toolAgentMessages = buildToolAgentMessages(requestMessages);
+      const appendPreviewVisionComment = async (preview: FilePreviewResult, parentMessageId: string) => {
+        if (!hasVision || !preview.mime_type.toLowerCase().startsWith("image/") || isRequestStale()) {
+          return;
+        }
+        const startedAt = performance.now();
+        try {
+          const dataUrl = await imagePreviewDataUrl(preview, appLog);
+          const controller = new AbortController();
+          const timeoutId = window.setTimeout(() => controller.abort(), IMAGE_PREVIEW_COMMENT_TIMEOUT_MS);
+          const response = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
+            method: "POST",
+            signal: controller.signal,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: [
+                {
+                  role: "system",
+                  content: [
+                    effectiveProfilePrompt,
+                    "Task: The assistant just displayed a real image preview card in chat. Look at the attached image and write one short, natural follow-up comment as the character.",
+                    "Match the current conversation language and relationship tone. Do not mention tools, file paths, prompts, vision, analysis, or metadata. Do not ask a generic follow-up.",
+                  ].join("\n\n"),
+                },
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: `Latest user request: ${promptText || "The user asked to preview this image."}\nPreviewed file name: ${preview.name}`,
+                    },
+                    { type: "image_url", image_url: { url: dataUrl } },
+                  ],
+                },
+              ],
+              temperature: Math.min(1.0, Math.max(0.45, temperature)),
+              top_k: effectiveTopK,
+              top_p: effectiveTopP,
+              min_p: effectiveMinP,
+              repeat_last_n: repeatLastN,
+              repeat_penalty: effectiveRepeatPenalty,
+              max_tokens: 80,
+              stream: false,
+              chat_template_kwargs: {
+                enable_thinking: false,
+                thinking: false,
+              },
+            }),
+          }).finally(() => window.clearTimeout(timeoutId));
+          if (!response.ok || isRequestStale()) {
+            appLog(`image preview perception skipped status=${response.status}`);
+            return;
+          }
+          const comment = cleanAssistantDisplayText(stripThinkBlocks(extractChatResponseText(await response.json()))
+            .replace(/\s+/g, " ")
+            .replace(/[\uFFFD\u25A1\u25A0]/g, "")
+            .trim());
+          if (!comment) return;
+          const now = Date.now();
+          const commentMessage: ChatMessage = {
+            id: createMessageId(),
+            role: "assistant",
+            content: comment,
+            created_at: now,
+            completed_at: now,
+            duration_ms: Math.max(0, Math.round(performance.now() - startedAt)),
+          };
+          setMessages((prev: ChatMessage[]) => {
+            const parentIndex = prev.findIndex((message) => message.id === parentMessageId);
+            if (parentIndex < 0) return [...prev, commentMessage];
+            return [
+              ...prev.slice(0, parentIndex + 1),
+              commentMessage,
+              ...prev.slice(parentIndex + 1),
+            ];
+          });
+          if (liveConversationRef.current) {
+            autoSpeechEligibleAssistantIdsRef.current.add(commentMessage.id);
+          }
+        } catch (error) {
+          appLog(`image preview perception failed error=${error instanceof Error ? error.message : String(error)}`);
+        }
+      };
       const recentImageContextBlock = buildRecentImageContextBlock(
         findRecentChatImageContext(requestMessages, { skipLatestUserImage: !attachedImage }),
       );
@@ -472,11 +578,11 @@ ${personalityMemory.trim()}`
           googleClientId,
           googleClientSecret,
           temperature,
-          topK,
-          topP,
-          minP,
+          topK: effectiveTopK,
+          topP: effectiveTopP,
+          minP: effectiveMinP,
           repeatLastN,
-          repeatPenalty,
+          repeatPenalty: effectiveRepeatPenalty,
           maxTokens: replyLength,
           thinkingEnabled,
           requestElapsedMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
@@ -487,9 +593,9 @@ ${personalityMemory.trim()}`
         if (reactResult.tool_trace?.length) {
           refreshToolRuns().catch((error: unknown) => console.error("Tool activity refresh error:", error));
         }
-        generatedText = reactResult.answer;
+        generatedText = cleanAssistantDisplayText(reactResult.answer);
         if (looksLikeBoringSystemFailure(generatedText)) {
-          generatedText = await naturalizeFailureReply(generatedText);
+          generatedText = cleanAssistantDisplayText(await naturalizeFailureReply(generatedText));
         }
         generatedThinking = thinkingEnabled ? formatReactThinking(reactResult) : "";
         appLog(
@@ -497,7 +603,7 @@ ${personalityMemory.trim()}`
         );
         if (sendOptions.autoApproveActions && reactResult.action_proposal) {
           const rawResult = await executeActionProposal(reactResult.action_proposal);
-          generatedText = await naturalizeSystemResult(promptText, rawResult);
+          generatedText = cleanAssistantDisplayText(await naturalizeSystemResult(promptText, rawResult));
           const finalizedAssistantIds = finalizeAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
             ...last,
             content: generatedText,
@@ -537,6 +643,9 @@ ${personalityMemory.trim()}`
           enrichPreviewPerception(finalizedAssistantIds[0] ?? assistantMessageId, reactResult.file_preview).catch((error: unknown) =>
             console.error("Preview perception enrichment error:", error),
           );
+          appendPreviewVisionComment(reactResult.file_preview, finalizedAssistantIds[0] ?? assistantMessageId).catch((error: unknown) =>
+            console.error("Preview vision comment error:", error),
+          );
         }
         const elapsedSeconds = Math.max(0.1, (performance.now() - generationStartedAt) / 1000);
         setLastTokenSpeed(estimateTokens(generatedText) / elapsedSeconds);
@@ -569,11 +678,11 @@ ${personalityMemory.trim()}`
             googleClientId,
             googleClientSecret,
             temperature,
-            topK,
-            topP,
-            minP,
+            topK: effectiveTopK,
+            topP: effectiveTopP,
+            minP: effectiveMinP,
             repeatLastN,
-            repeatPenalty,
+            repeatPenalty: effectiveRepeatPenalty,
             maxTokens: replyLength,
             thinkingEnabled,
             requestElapsedMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
@@ -595,9 +704,9 @@ ${personalityMemory.trim()}`
         imageReactResult?.cards?.length,
       );
       if (imageReactResult && imageReactHasStructuredResult) {
-        generatedText = imageReactResult.answer;
+        generatedText = cleanAssistantDisplayText(imageReactResult.answer);
         if (looksLikeBoringSystemFailure(generatedText)) {
-          generatedText = await naturalizeFailureReply(generatedText);
+          generatedText = cleanAssistantDisplayText(await naturalizeFailureReply(generatedText));
         }
         generatedThinking = thinkingEnabled ? formatReactThinking(imageReactResult) : "";
         appLog(
@@ -626,6 +735,9 @@ ${personalityMemory.trim()}`
           enrichPreviewPerception(finalizedAssistantIds[0] ?? assistantMessageId, imageReactResult.file_preview).catch((error: unknown) =>
             console.error("Preview perception enrichment error:", error),
           );
+          appendPreviewVisionComment(imageReactResult.file_preview, finalizedAssistantIds[0] ?? assistantMessageId).catch((error: unknown) =>
+            console.error("Preview vision comment error:", error),
+          );
         }
         const elapsedSeconds = Math.max(0.1, (performance.now() - generationStartedAt) / 1000);
         setLastTokenSpeed(estimateTokens(generatedText) / elapsedSeconds);
@@ -647,11 +759,11 @@ ${personalityMemory.trim()}`
       const chatPayload = {
         messages: visionRequestMessages,
         temperature,
-        top_k: topK,
-        top_p: topP,
-        min_p: minP,
+        top_k: effectiveTopK,
+        top_p: effectiveTopP,
+        min_p: effectiveMinP,
         repeat_last_n: repeatLastN,
-        repeat_penalty: repeatPenalty,
+        repeat_penalty: effectiveRepeatPenalty,
         max_tokens: replyLength,
         chat_template_kwargs: {
           enable_thinking: thinkingEnabled && !shouldSkipImageToolPlanning,
@@ -738,11 +850,11 @@ ${personalityMemory.trim()}`
                 },
               ],
               temperature,
-              top_k: topK,
-              top_p: topP,
-              min_p: minP,
+              top_k: effectiveTopK,
+              top_p: effectiveTopP,
+              min_p: effectiveMinP,
               repeat_last_n: repeatLastN,
-              repeat_penalty: repeatPenalty,
+              repeat_penalty: effectiveRepeatPenalty,
               max_tokens: replyLength,
               stream: false,
               chat_template_kwargs: {
@@ -753,10 +865,10 @@ ${personalityMemory.trim()}`
           });
 
           if (answerResponse.ok) {
-            generatedText = extractChatResponseText(await answerResponse.json());
+            generatedText = cleanAssistantDisplayText(extractChatResponseText(await answerResponse.json()));
           }
           if (!generatedText.trim()) {
-            generatedText = fallbackGeneratedText.trim();
+          generatedText = cleanAssistantDisplayText(fallbackGeneratedText.trim());
           }
         } else {
           const retryResponse = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
@@ -771,7 +883,7 @@ ${personalityMemory.trim()}`
           }
 
           const retryData = await retryResponse.json();
-          generatedText = extractChatResponseText(retryData);
+          generatedText = cleanAssistantDisplayText(extractChatResponseText(retryData));
         }
       }
 
@@ -788,7 +900,7 @@ ${personalityMemory.trim()}`
         }));
       }
       if (isRequestStale()) return;
-      generatedText = await handleShellToolRequest(assistantMessageId, generatedText);
+      generatedText = cleanAssistantDisplayText(await handleShellToolRequest(assistantMessageId, generatedText));
       flushStreamedText(true);
       const finalizedAssistantIds = finalizeAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
         ...last,

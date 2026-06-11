@@ -21,27 +21,11 @@ mod system_detect;
 mod weather;
 
 use std::{collections::HashMap, sync::Mutex};
-use tauri::menu::{MenuBuilder, MenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, State};
+use tauri::Manager;
 use tauri::{LogicalSize, Size};
 
-struct TrayMenuState {
-    telegram_toggle: MenuItem<tauri::Wry>,
-    voice_toggle: MenuItem<tauri::Wry>,
-}
-
-const MINIMIZE_TO_TRAY_ENABLED: bool = false;
 const DEFAULT_WINDOW_WIDTH: f64 = 1220.0;
 const DEFAULT_WINDOW_HEIGHT: f64 = 820.0;
-
-fn show_main_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
-}
 
 fn cleanup_runtime_processes(app: &tauri::AppHandle) {
     image_runtime::shutdown_image_server();
@@ -63,31 +47,6 @@ fn apply_startup_window_layout(app: &tauri::AppHandle) {
     }
 }
 
-#[tauri::command]
-fn update_tray_menu_state(
-    state: State<'_, TrayMenuState>,
-    telegram_running: bool,
-    auto_voice: bool,
-) -> Result<(), String> {
-    state
-        .telegram_toggle
-        .set_text(if telegram_running {
-            "Stop Telegram Bot"
-        } else {
-            "Start Telegram Bot"
-        })
-        .map_err(|e| e.to_string())?;
-    state
-        .voice_toggle
-        .set_text(if auto_voice {
-            "Turn Off Auto Voice"
-        } else {
-            "Turn On Auto Voice"
-        })
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -106,80 +65,6 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
             apply_startup_window_layout(&app_handle);
-            if MINIMIZE_TO_TRAY_ENABLED {
-                tauri::async_runtime::spawn({
-                    let app_handle = app_handle.clone();
-                    async move {
-                        loop {
-                            if let Some(window) = app_handle.get_webview_window("main") {
-                                if window.is_minimized().unwrap_or(false) {
-                                    let _ = window.hide();
-                                }
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-                        }
-                    }
-                });
-            }
-            let telegram_toggle = MenuItem::with_id(
-                app,
-                "telegram_toggle",
-                "Start Telegram Bot",
-                true,
-                None::<&str>,
-            )?;
-            let voice_toggle = MenuItem::with_id(
-                app,
-                "auto_voice_toggle",
-                "Turn On Auto Voice",
-                true,
-                None::<&str>,
-            )?;
-            app.manage(TrayMenuState {
-                telegram_toggle: telegram_toggle.clone(),
-                voice_toggle: voice_toggle.clone(),
-            });
-
-            let tray_menu = MenuBuilder::new(app)
-                .text("show", "Show Galaxy Bot")
-                .separator()
-                .item(&telegram_toggle)
-                .item(&voice_toggle)
-                .separator()
-                .text("quit", "Quit")
-                .build()?;
-            let mut tray_builder = TrayIconBuilder::with_id("main").tooltip("Galaxy AI Hub");
-            if let Some(icon) = app.default_window_icon() {
-                tray_builder = tray_builder.icon(icon.clone());
-            }
-            tray_builder
-                .menu(&tray_menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => show_main_window(app),
-                    "telegram_toggle" => {
-                        let _ = app.emit("tray-toggle-telegram", ());
-                    }
-                    "auto_voice_toggle" => {
-                        let _ = app.emit("tray-toggle-auto-voice", ());
-                    }
-                    "quit" => {
-                        cleanup_runtime_processes(app);
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        show_main_window(tray.app_handle());
-                    }
-                })
-                .build(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -221,7 +106,6 @@ pub fn run() {
             config_store::load_app_settings,
             config_store::save_app_settings,
             config_store::list_telegram_guests,
-            update_tray_menu_state,
             file_tools::search_linked_files,
             file_tools::validate_workspace_folders,
             file_tools::list_linked_folder,
@@ -232,6 +116,7 @@ pub fn run() {
             file_tools::move_linked_file,
             file_tools::trash_linked_file,
             file_tools::open_in_explorer,
+            file_tools::open_with_default_app,
             file_tools::read_local_image_data_url,
             file_tools::save_chat_input_image_data_url,
             file_tools::reveal_file_location,

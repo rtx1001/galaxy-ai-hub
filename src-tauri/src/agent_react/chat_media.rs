@@ -241,6 +241,13 @@ pub(super) fn recent_image_context(messages: &[ReactChatMessage]) -> bool {
         .any(|message| content_has_image(&message.content))
 }
 
+pub(super) fn context_block_has_chat_image_reference(context_block: &str) -> bool {
+    let lowered = context_block.to_ascii_lowercase();
+    lowered.contains("recent chat image reference: yes")
+        || lowered.contains("chat_image_available=true")
+        || lowered.contains("latest prior image path:")
+}
+
 pub(super) fn user_wants_vietnamese(text: &str) -> bool {
     let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
@@ -250,7 +257,13 @@ pub(super) fn user_wants_vietnamese(text: &str) -> bool {
     if contains_any_folded(
         &lowered,
         &normalized,
-        &["thời tiết", "thư mục", "sự kiện", "hôm nay", "ngày mai"],
+        &[
+            "th\u{1edd}i ti\u{1ebf}t",
+            "th\u{01b0} m\u{1ee5}c",
+            "s\u{1ef1} ki\u{1ec7}n",
+            "h\u{00f4}m nay",
+            "ng\u{00e0}y mai",
+        ],
     ) {
         return true;
     }
@@ -258,15 +271,29 @@ pub(super) fn user_wants_vietnamese(text: &str) -> bool {
         &lowered,
         &normalized,
         &[
-            "tôi", "bạn", "anh", "em", "không", "lịch", "tệp", "ngày", "tháng", "năm", "mở",
-            "phát", "xem", "đọc", "tìm", "kiếm",
+            "t\u{00f4}i",
+            "b\u{1ea1}n",
+            "anh",
+            "em",
+            "kh\u{00f4}ng",
+            "l\u{1ecb}ch",
+            "t\u{1ec7}p",
+            "ng\u{00e0}y",
+            "th\u{00e1}ng",
+            "n\u{0103}m",
+            "m\u{1edf}",
+            "ph\u{00e1}t",
+            "xem",
+            "\u{0111}\u{1ecdc}",
+            "t\u{00ec}m",
+            "ki\u{1ebf}m",
         ],
     )
 }
 
 pub(super) fn image_approval_answer(vi: bool) -> String {
     if vi {
-        "Em có thể tạo ảnh này. Anh duyệt để em bắt đầu nhé.".to_string()
+        "Em c\u{00f3} th\u{1ec3} t\u{1ea1}o \u{1ea3}nh n\u{00e0}y. Anh duy\u{1ec7}t \u{0111}\u{1ec3} em b\u{1eaf}t \u{0111}\u{1ea7}u nh\u{00e9}.".to_string()
     } else {
         "I can create this image. Approve it when you're ready.".to_string()
     }
@@ -274,10 +301,28 @@ pub(super) fn image_approval_answer(vi: bool) -> String {
 
 pub(super) fn action_approval_answer(vi: bool) -> String {
     if vi {
-        "Em đã chuẩn bị thao tác này và cần anh duyệt trước khi thực hiện.".to_string()
+        "Em \u{0111}\u{00e3} chu\u{1ea9}n b\u{1ecb} thao t\u{00e1}c n\u{00e0}y v\u{00e0} c\u{1ea7}n anh duy\u{1ec7}t tr\u{01b0}\u{1edb}c khi th\u{1ef1}c hi\u{1ec7}n.".to_string()
     } else {
         "I prepared an action that needs your approval before anything changes.".to_string()
     }
+}
+
+pub(super) fn latest_user_text(messages: &[ReactChatMessage]) -> String {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "user")
+        .map(|message| content_text(&message.content))
+        .unwrap_or_default()
+}
+
+pub(super) fn call_user_text(call: &ToolCall) -> String {
+    call.arguments
+        .get("_user_text")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 pub(super) fn random_index(len: usize) -> usize {
@@ -387,11 +432,10 @@ pub(super) fn preview_final_answer(
     user_text: &str,
 ) -> String {
     if user_wants_vietnamese(user_text) {
-        return "Em đã mở file này cho anh.".to_string();
+        return "Em \u{0111}\u{00e3} m\u{1edf} file n\u{00e0}y cho anh.".to_string();
     }
     "Opened this from your workspace.".to_string()
 }
-
 pub(super) fn random_media_scan_limit() -> u32 {
     20_000
 }
@@ -411,11 +455,10 @@ pub(super) fn random_selection_summary_vi(
     selected: &file_tools::FileSearchResult,
 ) -> String {
     format!(
-        "Đã chọn ngẫu nhiên 1 tệp từ {} tệp media phù hợp trong workspace.\nTệp đã chọn: {}\nĐường dẫn: {}",
+        "\u{0110}\u{00e3} ch\u{1ecd}n ng\u{1eab}u nhi\u{00ea}n 1 t\u{1ec7}p t\u{1eeb} {} t\u{1ec7}p media ph\u{00f9} h\u{1ee3}p trong workspace.\nT\u{1ec7}p \u{0111}\u{00e3} ch\u{1ecd}n: {}\n\u{0110}\u{01b0}\u{1edd}ng d\u{1eab}n: {}",
         total, selected.name, selected.path
     )
 }
-
 pub(super) fn random_selection_observation(
     total: usize,
     selected: &file_tools::FileSearchResult,
@@ -424,7 +467,7 @@ pub(super) fn random_selection_observation(
 ) -> String {
     if user_wants_vietnamese(user_text) {
         format!(
-            "{}\nLoại: {}\nDung lượng: {} bytes",
+            "{}\nLo\u{1ea1}i: {}\nDung l\u{01b0}\u{1ee3}ng: {} bytes",
             random_selection_summary_vi(total, selected),
             preview.mime_type,
             preview.size_bytes
@@ -438,24 +481,6 @@ pub(super) fn random_selection_observation(
         )
     }
 }
-
-pub(super) fn latest_user_text(messages: &[ReactChatMessage]) -> String {
-    messages
-        .iter()
-        .rev()
-        .find(|message| message.role == "user")
-        .map(|message| content_text(&message.content))
-        .unwrap_or_default()
-}
-
-pub(super) fn call_user_text(call: &ToolCall) -> String {
-    call.arguments
-        .get("_user_text")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string()
-}
-
 pub(super) fn extract_first_number(text: &str) -> Option<u32> {
     text.split(|ch: char| !ch.is_ascii_digit())
         .find_map(|part| {
@@ -472,160 +497,65 @@ pub(super) fn requested_item_count(text: &str, fallback: u32, max: u32) -> u32 {
 }
 
 pub(super) fn inferred_media_kind(text: &str) -> Option<&'static str> {
-    let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
-    if vietnamese_audio_term(&lowered) {
-        return Some("audio");
-    }
-    if vietnamese_image_term(&lowered) {
-        return Some("image");
-    }
-    if contains_any(&lowered, &["tài liệu", "văn bản"]) {
-        return Some("document");
-    }
-    if contains_any(&lowered, &["ghi chú"]) {
-        return Some("text");
-    }
+
     if contains_any(
         &normalized,
         &["audio", "song", "music", "mp3", "wav", "flac", "m4a"],
-    ) || contains_any_folded(
-        &lowered,
-        &normalized,
-        &["nhạc", "âm thanh", "bài hát", "ca khúc"],
     ) {
         return Some("audio");
     }
-    if contains_any(&normalized, &["video", "movie", "mp4", "mkv", "webm"])
-        || has_word_folded(&lowered, &normalized, &["phim"])
-    {
-        return Some("video");
-    }
+
     if contains_any(
         &normalized,
         &["image", "photo", "picture", "png", "jpg", "jpeg", "webp"],
-    ) || contains_any_folded(&lowered, &normalized, &["hình ảnh"])
-        || has_word_unicode(&lowered, "ảnh")
-        || has_word_unicode(&lowered, "hình")
-        || contains_any(&lowered, &["mở ảnh", "xem ảnh", "mở hình", "xem hình"])
-    {
+    ) {
         return Some("image");
     }
-    if contains_any(&normalized, &["pdf", "document", "docx", "book", "paper"])
-        || contains_any_folded(&lowered, &normalized, &["tài liệu", "văn bản"])
-    {
+
+    if contains_any(&normalized, &["video", "movie", "mp4", "mkv", "mov", "avi"]) {
+        return Some("video");
+    }
+
+    if contains_any(
+        &normalized,
+        &[
+            "pdf",
+            "document",
+            "doc",
+            "docx",
+            "spreadsheet",
+            "sheet",
+            "presentation",
+            "slides",
+            "book",
+            "paper",
+        ],
+    ) {
         return Some("document");
     }
-    if contains_any(&normalized, &["text", "txt", "note", "markdown"])
-        || contains_any_folded(&lowered, &normalized, &["ghi chú"])
-    {
+
+    if contains_any(
+        &normalized,
+        &["txt", "text", "note", "notes", "md", "markdown"],
+    ) {
         return Some("text");
     }
+
     None
 }
-
 pub(super) fn request_wants_preview(text: &str) -> bool {
-    let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
-    if vietnamese_preview_action_term(&lowered) {
-        return true;
-    }
     contains_any(
         &normalized,
         &[
             "open", "play", "show", "preview", "view", "display", "listen",
         ],
-    ) || has_word_folded(&lowered, &normalized, &["mở", "phát", "bật", "xem"])
-        || contains_any_folded(
-            &lowered,
-            &normalized,
-            &[
-                "nghe nhạc",
-                "nghe bài hát",
-                "nghe ca khúc",
-                "cho nghe nhạc",
-                "cho nghe bài",
-            ],
-        )
+    ) || request_names_specific_file(text)
 }
 
-pub(super) fn request_mentions_media(text: &str) -> bool {
-    let lowered = text.to_lowercase();
-    let normalized = normalize_text(text);
-    if vietnamese_media_followup_term(&lowered)
-        || contains_any(&lowered, &["tệp", "thư mục", "ngẫu nhiên", "bất kỳ"])
-    {
-        return true;
-    }
-    inferred_media_kind(text).is_some()
-        || contains_any(
-            &normalized,
-            &[
-                "file",
-                "media",
-                "workspace",
-                "random",
-                "any",
-                "another",
-                "other",
-            ],
-        )
-        || contains_any_folded(
-            &lowered,
-            &normalized,
-            &["tệp", "thư mục", "ngẫu nhiên", "bất kỳ"],
-        )
-        || has_word_folded(&lowered, &normalized, &["khác"])
-}
-
-#[allow(dead_code)]
-pub(super) fn request_wants_another(text: &str) -> bool {
-    let lowered = text.to_lowercase();
-    let normalized = normalize_text(text);
-    if vietnamese_media_followup_term(&lowered) {
-        return true;
-    }
-    contains_any(&normalized, &["another", "other", "different"])
-        || contains_any_folded(&lowered, &normalized, &["khác", "bài khác", "ảnh khác"])
-}
-
-#[cfg(test)]
-pub(super) fn request_is_broad_media_preview(text: &str) -> bool {
-    let lowered = text.to_lowercase();
-    let normalized = normalize_text(text);
-    if vietnamese_media_followup_term(&lowered) || contains_any(&lowered, &["ngẫu nhiên", "bất kỳ"])
-    {
-        return true;
-    }
-    inferred_media_kind(text).is_some()
-        || contains_any(
-            &normalized,
-            &[
-                "random",
-                "any",
-                "anything",
-                "workspace",
-                "media",
-                "another",
-                "other",
-            ],
-        )
-        || contains_any_folded(&lowered, &normalized, &["ngẫu nhiên", "bất kỳ"])
-        || has_word_folded(&lowered, &normalized, &["khác"])
-}
-
-#[cfg(test)]
 pub(super) fn request_names_specific_file(text: &str) -> bool {
-    let lowered = text.to_lowercase();
     let normalized = normalize_text(text);
-    if contains_any(
-        &normalized,
-        &["named", "called", "file named", "file called"],
-    ) || contains_any_folded(&lowered, &normalized, &["tên file", "có tên", "đường dẫn"])
-    {
-        return true;
-    }
-
     normalized.split_whitespace().any(|raw| {
         let token = raw.trim_matches(|ch: char| {
             !(ch.is_ascii_alphanumeric()
@@ -650,6 +580,7 @@ pub(super) fn request_names_specific_file(text: &str) -> bool {
                 | "jpeg"
                 | "jpg"
                 | "json"
+                | "m4a"
                 | "md"
                 | "mkv"
                 | "mov"
@@ -659,11 +590,11 @@ pub(super) fn request_names_specific_file(text: &str) -> bool {
                 | "png"
                 | "rs"
                 | "tsx"
-                | "ts"
                 | "txt"
                 | "wav"
                 | "webm"
                 | "webp"
+                | "xls"
                 | "xlsx"
         )
     })

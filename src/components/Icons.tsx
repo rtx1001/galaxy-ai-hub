@@ -212,6 +212,39 @@ export function StopIcon({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
+export function FullscreenIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+      <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </svg>
+  );
+}
+
+export function Rewind10Icon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M9 7H4V2" />
+      <path d="M4.9 7.1A8 8 0 1 1 4 12" />
+      <path d="M9 13v-3l-1 .6" />
+      <path d="M13 10h1.5a1.5 1.5 0 0 1 0 3H13v-3Z" />
+    </svg>
+  );
+}
+
+export function Forward10Icon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M15 7h5V2" />
+      <path d="M19.1 7.1A8 8 0 1 0 20 12" />
+      <path d="M9 13v-3l-1 .6" />
+      <path d="M13 10h1.5a1.5 1.5 0 0 1 0 3H13v-3Z" />
+    </svg>
+  );
+}
+
 export function CameraIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>

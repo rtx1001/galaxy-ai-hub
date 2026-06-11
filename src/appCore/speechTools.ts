@@ -40,48 +40,48 @@ export const stripSpeechLeadingZero = (value: string) => {
 
 export const normalizeTextForSpeechReading = (text: string) => {
   const vi = textLooksVietnamese(text);
-  const rangeWord = vi ? " đến " : " to ";
+  const rangeWord = vi ? " \u0111\u1ebfn " : " to ";
   return text
     .replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g, (_, day, month, year) =>
-      vi ? `${stripSpeechLeadingZero(day)} tháng ${stripSpeechLeadingZero(month)} năm ${year}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}/${year}`,
+      vi ? `${stripSpeechLeadingZero(day)} th\u00e1ng ${stripSpeechLeadingZero(month)} n\u0103m ${year}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}/${year}`,
     )
     .replace(/\b(\d{1,2})-(\d{1,2})-(\d{2,4})\b/g, (_, day, month, year) =>
-      vi ? `${stripSpeechLeadingZero(day)} tháng ${stripSpeechLeadingZero(month)} năm ${year}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}/${year}`,
+      vi ? `${stripSpeechLeadingZero(day)} th\u00e1ng ${stripSpeechLeadingZero(month)} n\u0103m ${year}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}/${year}`,
     )
     .replace(/\b(\d{1,2})\/(\d{1,2})\b/g, (_, day, month) =>
-      vi ? `${stripSpeechLeadingZero(day)} tháng ${stripSpeechLeadingZero(month)}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}`,
+      vi ? `${stripSpeechLeadingZero(day)} th\u00e1ng ${stripSpeechLeadingZero(month)}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}`,
     )
-    .replace(/(-?\d+(?:[.,]\d+)?)\s*°\s*C\b/gi, (_, value) =>
-      vi ? `${value} độ Cê` : `${value} degrees Celsius`,
+    .replace(/(-?\d+(?:[.,]\d+)?)\s*\u00b0\s*C\b/gi, (_, value) =>
+      vi ? `${value} \u0111\u1ed9 x\u00ea` : `${value} degrees celsius`,
     )
-    .replace(/(-?\d+(?:[.,]\d+)?)\s*°\s*F\b/gi, (_, value) =>
-      vi ? `${value} độ F` : `${value} degrees Fahrenheit`,
+    .replace(/(-?\d+(?:[.,]\d+)?)\s*\u00b0\s*F\b/gi, (_, value) =>
+      vi ? `${value} \u0111\u1ed9 \u00e9p` : `${value} degrees fahrenheit`,
     )
     .replace(/(-?\d+(?:[.,]\d+)?)\s*km\/h\b/gi, (_, value) =>
-      vi ? `${value} ki lô mét trên giờ` : `${value} kilometers per hour`,
+      vi ? `${value} ki l\u00f4 m\u00e9t tr\u00ean gi\u1edd` : `${value} kilometers per hour`,
     )
     .replace(/(-?\d+(?:[.,]\d+)?)\s*km\b/gi, (_, value) =>
-      vi ? `${value} ki lô mét` : `${value} kilometers`,
+      vi ? `${value} ki l\u00f4 m\u00e9t` : `${value} kilometers`,
     )
     .replace(/(-?\d+(?:[.,]\d+)?)\s*mm\b/gi, (_, value) =>
-      vi ? `${value} mi li mét` : `${value} millimeters`,
+      vi ? `${value} mi li m\u00e9t` : `${value} millimeters`,
     )
     .replace(/(-?\d+(?:[.,]\d+)?)\s*cm\b/gi, (_, value) =>
-      vi ? `${value} xen ti mét` : `${value} centimeters`,
+      vi ? `${value} xen ti m\u00e9t` : `${value} centimeters`,
     )
     .replace(/(-?\d+(?:[.,]\d+)?)\s*%/g, (_, value) =>
-      vi ? `${value} phần trăm` : `${value} percent`,
+      vi ? `${value} ph\u1ea7n tr\u0103m` : `${value} percent`,
     )
-    .replace(/\$\s*([\d.,]+)/g, (_, value) => vi ? `${value} đô la` : `${value} dollars`)
-    .replace(/([\d.,]+)\s*(?:USD|usd)\b/g, (_, value) => vi ? `${value} đô la` : `${value} dollars`)
-    .replace(/([\d.,]+)\s*(?:VND|vnd|VNĐ|vnđ|₫)\b/g, (_, value) => vi ? `${value} đồng` : `${value} Vietnamese dong`)
-    .replace(/€\s*([\d.,]+)/g, (_, value) => vi ? `${value} euro` : `${value} euros`)
-    .replace(/£\s*([\d.,]+)/g, (_, value) => vi ? `${value} bảng Anh` : `${value} pounds`)
-    .replace(/(?<=\d)\s*[~∼]\s*(?=\d)/g, rangeWord)
-    .replace(/(?<=\d)\s*[-–—]\s*(?=\d)/g, rangeWord)
-    .replace(/(?<=\d)\s*\+\s*(?=\d)/g, vi ? " cộng " : " plus ")
-    .replace(/(^|[\s,.;!?])\+(?=$|[\s,.;!?])/g, (_, prefix) => `${prefix}${vi ? "cộng" : "plus"}`)
-    .replace(/(^|[\s,.;!?])-(?=$|[\s,.;!?])/g, (_, prefix) => `${prefix}${vi ? "trừ" : "minus"}`)
+    .replace(/\$\s*([\d.,]+)/g, (_, value) => vi ? `${value} \u0111\u00f4 la` : `${value} dollars`)
+    .replace(/([\d.,]+)\s*(?:USD|usd)\b/g, (_, value) => vi ? `${value} \u0111\u00f4 la` : `${value} dollars`)
+    .replace(/([\d.,]+)\s*(?:VND|vnd|VN\u0110|vn\u0111|\u20ab)\b/g, (_, value) => vi ? `${value} \u0111\u1ed3ng` : `${value} vietnamese dong`)
+    .replace(/\u20ac\s*([\d.,]+)/g, (_, value) => vi ? `${value} euro` : `${value} euros`)
+    .replace(/\u00a3\s*([\d.,]+)/g, (_, value) => vi ? `${value} b\u1ea3ng anh` : `${value} pounds`)
+    .replace(/(?<=\d)\s*[~\u223c]\s*(?=\d)/g, rangeWord)
+    .replace(/(?<=\d)\s*[-\u2013\u2014]\s*(?=\d)/g, rangeWord)
+    .replace(/(?<=\d)\s*\+\s*(?=\d)/g, vi ? " c\u1ed9ng " : " plus ")
+    .replace(/(^|[\s,.;!?])\+(?=$|[\s,.;!?])/g, (_, prefix) => `${prefix}${vi ? "c\u1ed9ng" : "plus"}`)
+    .replace(/(^|[\s,.;!?])-(?=$|[\s,.;!?])/g, (_, prefix) => `${prefix}${vi ? "tr\u1eeb" : "minus"}`)
     .replace(/:(?=\s*\D|$)/g, ". ");
 };
 export const sanitizeTextForSpeech = (text: string) => {
@@ -113,7 +113,10 @@ export const sanitizeTextForSpeech = (text: string) => {
     .replace(/\s+/g, " ")
     .trim();
 
-  return (withoutSymbolRuns || speechReadyText.trim()).replace(/\s+/g, " ").trim();
+  return (withoutSymbolRuns || speechReadyText.trim())
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase();
 };
 
 export const formatReactThinking = (result: AgentReactResult) => {

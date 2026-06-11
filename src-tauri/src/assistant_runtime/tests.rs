@@ -61,6 +61,18 @@ fn telegram_reply_prefers_natural_answer_over_tool_cards() {
 }
 
 #[test]
+fn personality_memory_skips_internal_failure_artifacts() {
+    let memory = compact_personality_memory(
+        "",
+        "please try again",
+        "Validation error: decision action was not a tool \\ud83d",
+    );
+    let formatted = format_personality_memory_for_prompt(&memory);
+    assert!(!formatted.contains("Validation error"));
+    assert!(!formatted.contains("\\ud83d"));
+}
+
+#[test]
 fn telegram_message_chunks_are_unicode_safe() {
     let text = format!(
         "{}\n\n{}",

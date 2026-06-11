@@ -129,10 +129,7 @@ fn parse_tool_name_directive(text: &str) -> Option<(String, Value)> {
             let name = mentions[0].to_string();
             crate::assistant_runtime::append_runtime_log(
                 "agent",
-                &format!(
-                    "normalized_planner_tool_call tool={} source=directive",
-                    name
-                ),
+                &format!("normalized_tool_call tool={} source=directive", name),
             );
             return Some((name.clone(), default_tool_arguments(&name)));
         }
@@ -146,10 +143,7 @@ fn parse_tool_name_directive(text: &str) -> Option<(String, Value)> {
         let name = mentions[0].to_string();
         crate::assistant_runtime::append_runtime_log(
             "agent",
-            &format!(
-                "normalized_planner_tool_call tool={} source=bare_name",
-                name
-            ),
+            &format!("normalized_tool_call tool={} source=bare_name", name),
         );
         return Some((name.clone(), default_tool_arguments(&name)));
     }
@@ -541,6 +535,7 @@ fn parse_loose_scalar(raw: &str) -> Value {
     }
 }
 
+#[cfg(test)]
 pub(super) fn first_model_tool_call(
     message: &Value,
     assistant_text: &str,
@@ -586,58 +581,4 @@ pub(super) fn first_model_tool_call(
         .join("\n");
     parse_inline_tool_markup(&reasoning_text)
         .map(|(name, arguments)| (name, arguments, "fallback_id".to_string(), false))
-}
-
-pub(super) fn looks_like_unexecuted_tool_narration(text: &str) -> bool {
-    let lowered = text.to_lowercase();
-    if contains_any(
-        &lowered,
-        &[
-            "file preview shown in this conversation",
-            "previous file preview context",
-            "audio transcript/perception",
-            "video transcript/perception",
-        ],
-    ) {
-        return true;
-    }
-    let mentions_tool = available_tool_names()
-        .into_iter()
-        .any(|tool| lowered.contains(&tool.to_lowercase()));
-    let mentions_markup = lowered.contains("<tool_call")
-        || lowered.contains("<toolcall")
-        || lowered.contains("<|tool_call|>")
-        || lowered.contains("<|tool_call>")
-        || lowered.contains("<|toolcall|>")
-        || lowered.contains("<|toolcall>")
-        || lowered.contains("<tool_code")
-        || lowered.contains("tool_code");
-    let compact = lowered.replace(char::is_whitespace, "");
-    let function_style_call = available_tool_names()
-        .into_iter()
-        .any(|tool| compact.contains(&format!("{}(", tool.to_lowercase())));
-    if !mentions_tool && !mentions_markup {
-        return false;
-    }
-    if mentions_markup || function_style_call {
-        return true;
-    }
-
-    contains_any(
-        &lowered,
-        &[
-            "calling",
-            "called",
-            "i will call",
-            "i'm calling",
-            "i have called",
-            "tool call",
-            "tool result",
-            "image:",
-            "file:",
-            "will be displayed",
-            "queued for approval",
-            "review the prompt",
-        ],
-    )
 }

@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ToolDescriptor {
@@ -9,7 +9,7 @@ pub(super) struct ToolDescriptor {
 pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
     ToolDescriptor {
         name: "get_current_time",
-        purpose: "Read the local date and time.",
+        purpose: "Read the real local date, time, weekday, timezone, and nearby relative dates.",
     },
     ToolDescriptor {
         name: "list_files_in_directory",
@@ -21,7 +21,7 @@ pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "find_workspace_candidates",
-        purpose: "Find real workspace file candidates from broad descriptions, attributes, or multiple filename/path clues before previewing, reading, moving, deleting, or otherwise managing files.",
+        purpose: "Find real workspace file candidates from broad descriptions, attributes, time clues, or partial memory when the exact file is unknown.",
     },
     ToolDescriptor {
         name: "read_file",
@@ -29,19 +29,19 @@ pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "list_media_files",
-        purpose: "List previewable workspace media files by type.",
+        purpose: "List existing workspace media files when the user asks for a list, not when they ask to play/open one item.",
     },
     ToolDescriptor {
         name: "preview_random_media",
-        purpose: "Show one real random workspace media/file card. Use kind for media type, query for filename/style clues, and root_folder when the user names one of the permitted workspace folders.",
+        purpose: "Show one existing workspace media item, especially random music/video/image or a replacement after the user rejects the current media.",
     },
     ToolDescriptor {
         name: "preview_file",
-        purpose: "Show a preview card for a specific workspace file.",
+        purpose: "Show/open one specific existing workspace file, including ordinal follow-ups after candidate results.",
     },
     ToolDescriptor {
         name: "weather_forecast",
-        purpose: "Get real weather forecast for a known city or area.",
+        purpose: "Get real weather forecast for a known city or area, with an optional exact date.",
     },
     ToolDescriptor {
         name: "web_search",
@@ -53,11 +53,11 @@ pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "google_calendar_check",
-        purpose: "Read Google Calendar events for a day or month.",
+        purpose: "Read Google Calendar events or answer whether the user is busy/free/available for a date or month.",
     },
     ToolDescriptor {
         name: "propose_image_generation",
-        purpose: "Create an approval card for text image, chat image reference, assistant avatar, user avatar, or user+assistant avatar image generation.",
+        purpose: "Ask approval to create/edit an image; choose one image mode from text_image, image_image, bot_image, user_image, user_bot_image.",
     },
     ToolDescriptor {
         name: "propose_write_file",
@@ -97,7 +97,7 @@ pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "propose_gmail_send",
-        purpose: "Create an approval card to send an email through Gmail.",
+        purpose: "Ask approval to send or reply to an email, including follow-ups to a previously read email.",
     },
     ToolDescriptor {
         name: "propose_gmail_trash",
@@ -105,7 +105,7 @@ pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "propose_calendar_create",
-        purpose: "Create an approval card for a new Google Calendar event.",
+        purpose: "Ask approval to create a calendar event, reminder, scheduled automation, or recurring future task.",
     },
     ToolDescriptor {
         name: "propose_calendar_delete",
@@ -113,7 +113,7 @@ pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "propose_google_contact_delete",
-        purpose: "Create an approval card to delete a Google contact by verified People API resource name.",
+        purpose: "Ask approval to delete a Google contact after the target is sufficiently identified.",
     },
     ToolDescriptor {
         name: "propose_google_action",
@@ -123,10 +123,6 @@ pub(super) const TOOL_REGISTRY: &[ToolDescriptor] = &[
 
 pub(super) fn available_tool_names() -> Vec<&'static str> {
     TOOL_REGISTRY.iter().map(|tool| tool.name).collect()
-}
-
-pub(super) fn available_tool_names_csv() -> String {
-    available_tool_names().join(", ")
 }
 
 fn tool_descriptor(name: &str) -> Option<&'static ToolDescriptor> {
@@ -147,22 +143,6 @@ pub(super) fn default_tool_arguments(tool: &str) -> Value {
         }
         _ => json!({}),
     }
-}
-
-pub(super) fn tool_knowledge_prompt(route: Option<ToolRoute>) -> String {
-    let mut lines = vec![
-        "Available app tools are fixed knowledge. When deciding whether to use a tool, choose only from this list and use the exact name.".to_string(),
-        "If none of these tools match the user's actual request, do not call a tool; answer normally or ask one short clarification.".to_string(),
-        "Never invent, translate, rename, abbreviate, or repair tool names.".to_string(),
-        "Attached or pasted chat images are already part of the conversation; they are not workspace files. Do not use preview_file, read_file, search_directory, or find_workspace_candidates for attached chat images. Use NO_TOOL for visual Q&A, or propose_image_generation only when the user asks to create/edit an image.".to_string(),
-    ];
-    for descriptor in TOOL_REGISTRY
-        .iter()
-        .filter(|tool| tool_allowed_for_capability(tool.name, route))
-    {
-        lines.push(format!("- {}: {}", descriptor.name, descriptor.purpose));
-    }
-    lines.join("\n")
 }
 
 pub(super) fn image_prompt_argument(call: &ToolCall) -> String {
@@ -223,10 +203,6 @@ fn malformed_argument_key(key: &str) -> bool {
 
 pub(super) const CHAT_ATTACHMENT_WORKSPACE_TOOL_ERROR: &str =
     "Attached chat images are conversation inputs, not workspace files. Output NO_TOOL so the vision chat path can answer, or use propose_image_generation only for image creation/editing.";
-
-pub(super) fn validation_requests_vision_fallback(error: &str) -> bool {
-    error.contains("Attached chat images are conversation inputs")
-}
 
 fn is_chat_attachment_reference(value: &str) -> bool {
     let trimmed = value.trim();
@@ -570,112 +546,4 @@ pub(super) fn google_api_url_allowed(url: &str) -> bool {
             | "gmail.googleapis.com"
             | "chat.googleapis.com"
     )
-}
-
-pub(super) fn tool_schema() -> Value {
-    json!([
-        { "type": "function", "function": { "name": "get_current_time", "description": "Returns local date and time", "parameters": { "type": "object", "properties": {}, "required": [] } } },
-        { "type": "function", "function": { "name": "list_files_in_directory", "description": "Lists folders/files in a permitted workspace folder", "parameters": { "type": "object", "properties": { "path": { "type": "string", "description": "optional permitted folder path" } }, "required": [] } } },
-        { "type": "function", "function": { "name": "search_directory", "description": "Search for matching files in permitted workspace folders when the user gives a concrete file name, exact keyword, or path fragment.", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "file name, exact keyword, or path fragment" } }, "required": ["query"] } } },
-        { "type": "function", "function": { "name": "find_workspace_candidates", "description": "Returns real workspace file candidates for broad descriptions, inferred attributes, or multiple possible filename/path clues. Use this before preview_file/read_file/propose_move_file/propose_delete_file when the user describes a file by attributes instead of an exact name. For abstract attributes, provide several concrete clues likely to appear in file names or folders, such as translated labels, short codes, style/genre words, or romanized variants; do not claim success until a later tool uses a returned real path.", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "short natural description of what to find" }, "clues": { "type": "array", "items": { "type": "string" }, "description": "optional concrete filename/folder/path clue terms inferred from the request, including abbreviations, labels, short codes, or romanized variants when useful" }, "kind": { "type": "string", "description": "audio, video, image, document, text, or any" }, "root_folder": { "type": "string", "description": "optional exact permitted workspace folder path or folder name" }, "limit": { "type": "integer", "description": "optional candidate count, usually 12 to 30" } }, "required": [] } } },
-        { "type": "function", "function": { "name": "read_file", "description": "Returns text content from a permitted workspace file", "parameters": { "type": "object", "properties": { "path": { "type": "string", "description": "file path or file name" } }, "required": ["path"] } } },
-        { "type": "function", "function": { "name": "list_media_files", "description": "Lists previewable media files in workspace. Use root_folder when the user names one of the permitted workspace folders.", "parameters": { "type": "object", "properties": { "kind": { "type": "string", "description": "audio, video, image, document, text, or any" }, "root_folder": { "type": "string", "description": "optional exact permitted workspace folder path or folder name" } }, "required": ["kind"] } } },
-        { "type": "function", "function": { "name": "preview_random_media", "description": "Returns one real random previewable workspace media file as a chat card. Use kind=audio for songs/music. Include query for artist/topic/filename clues. Use root_folder when the user names one of the permitted workspace folders, such as Music.", "parameters": { "type": "object", "properties": { "kind": { "type": "string", "description": "audio, video, image, document, text, or any" }, "query": { "type": "string", "description": "optional filename/path keyword constraint, e.g. jazz, beach, invoice" }, "root_folder": { "type": "string", "description": "optional exact permitted workspace folder path or folder name" } }, "required": ["kind"] } } },
-        { "type": "function", "function": { "name": "preview_file", "description": "Returns a file preview card inside chat when possible", "parameters": { "type": "object", "properties": { "path": { "type": "string", "description": "file path or file name" } }, "required": ["path"] } } },
-        { "type": "function", "function": { "name": "weather_forecast", "description": "Returns a structured weather forecast for a real city using Open-Meteo. Use this for weather, rain, temperature, humidity, wind, and weekend forecast questions instead of generic web search whenever a city is known.", "parameters": { "type": "object", "properties": { "location": { "type": "string", "description": "city or area name, e.g. Ha Noi or Tokyo" }, "days": { "type": "integer", "description": "optional number of forecast days, usually 1 to 10" } }, "required": ["location"] } } },
-        { "type": "function", "function": { "name": "web_search", "description": "Returns fresh web search results from DuckDuckGo", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "search query" } }, "required": ["query"] } } },
-        { "type": "function", "function": { "name": "gmail_recent", "description": "Returns recent Gmail messages", "parameters": { "type": "object", "properties": { "count": { "type": "integer", "description": "optional number requested by user" }, "query": { "type": "string", "description": "optional Gmail search query" } }, "required": [] } } },
-        { "type": "function", "function": { "name": "google_calendar_check", "description": "Returns calendar events for that day or month", "parameters": { "type": "object", "properties": { "date": { "type": "string", "description": "today, tomorrow, YYYY-MM-DD, or YYYY-MM" } }, "required": ["date"] } } },
-        { "type": "function", "function": { "name": "propose_image_generation", "description": "Returns an image creation approval card; never runs shell. The prompt argument must be English-first, translated from the user's language when needed, while preserving names, places, brands, and quoted visible text. Build a creative, context-aware visual prompt instead of merely copying or translating a short user request. Use image_image when using an attached, pasted, or earlier chat image as a visual reference, including when the user should appear with the person/object from that image. Use bot_image only when the user asks for the current assistant profile/avatar to send or make its own image. Use user_image when the user asks to generate/edit from the selected user profile avatar only. Use user_bot_image only when the requested image involves both the selected user avatar and the current assistant profile avatar.", "parameters": { "type": "object", "properties": { "prompt": { "type": "string", "description": "rich English-first visual prompt for the image model, usually 2 to 4 concise sentences including subject, action, setting, style, composition/framing, lighting, mood, and important constraints" }, "mode": { "type": "string", "enum": ["text_image", "image_image", "bot_image", "user_image", "user_bot_image"], "description": "Choose exactly one mode: text_image=no reference; image_image=attached/pasted/prior chat image reference; bot_image=current assistant profile avatar; user_image=selected user profile avatar; user_bot_image=selected user avatar plus current assistant profile avatar." }, "reference_sources": { "type": "array", "items": { "type": "string", "enum": ["chat_image", "user_avatar", "bot_avatar"] }, "description": "Exact visual references to pass. For image_image with a prior/attached image plus the selected user, use [\"chat_image\",\"user_avatar\"]. For image_image plus assistant profile, use [\"chat_image\",\"bot_avatar\"]. For user_bot_image, use [\"user_avatar\",\"bot_avatar\"]. Omit or leave empty for text_image." }, "mask_prompt": { "type": "string", "description": "for image_image only: short English-first visual region/object to edit, such as head, hair, shirt, background, face, hands; omit for whole-image style changes" } }, "required": ["prompt", "mode"] } } },
-        { "type": "function", "function": { "name": "propose_write_file", "description": "Returns approval card for writing a file", "parameters": { "type": "object", "properties": { "relative_path": { "type": "string", "description": "path inside workspace" }, "content": { "type": "string", "description": "file content" }, "root_folder": { "type": "string", "description": "optional exact workspace root" } }, "required": ["relative_path", "content"] } } },
-        { "type": "function", "function": { "name": "propose_move_file", "description": "Returns approval card for moving/renaming a file", "parameters": { "type": "object", "properties": { "source": { "type": "string", "description": "existing file" }, "destination_relative_path": { "type": "string", "description": "new path inside workspace" }, "root_folder": { "type": "string", "description": "optional exact workspace root" } }, "required": ["source", "destination_relative_path"] } } },
-        { "type": "function", "function": { "name": "propose_delete_file", "description": "Returns approval card for moving a file to app trash", "parameters": { "type": "object", "properties": { "source": { "type": "string", "description": "existing file" } }, "required": ["source"] } } },
-        { "type": "function", "function": { "name": "run_powershell", "description": "Returns approval card for a local system action", "parameters": { "type": "object", "properties": { "purpose": { "type": "string", "description": "human reason" }, "command": { "type": "string", "description": "PowerShell command" }, "working_directory": { "type": "string", "description": "optional folder" }, "timeout_seconds": { "type": "integer", "description": "timeout in seconds" } }, "required": ["purpose", "command"] } } },
-        { "type": "function", "function": { "name": "google_drive_search", "description": "Searches Google Drive files and returns verified Drive results with IDs, mime types, and links. Use this first to locate a Google Doc or Google Sheet when the user gives a title instead of an ID. You can also filter by mime_type and sort recent files.", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "optional Drive file name keyword, e.g. budget or meeting notes" }, "mime_type": { "type": "string", "description": "optional Google Drive mime type, e.g. application/vnd.google-apps.spreadsheet" }, "recent": { "type": "boolean", "description": "optional true to sort newest modified files first" }, "page_size": { "type": "integer", "description": "optional number of files to return" } }, "required": [] } } },
-        { "type": "function", "function": { "name": "google_docs_read", "description": "Reads a Google Docs document by document_id using the Docs API and returns the raw document JSON. Use when the user asks to read or inspect a specific Google Doc.", "parameters": { "type": "object", "properties": { "document_id": { "type": "string", "description": "Google Docs document ID" } }, "required": ["document_id"] } } },
-        { "type": "function", "function": { "name": "google_sheets_read", "description": "Reads a Google Sheets spreadsheet by spreadsheet_id. If range is provided, returns cell values for that range. If range is omitted, returns spreadsheet metadata. Use when the user asks to inspect a specific Google Sheet.", "parameters": { "type": "object", "properties": { "spreadsheet_id": { "type": "string", "description": "Google Sheets spreadsheet ID" }, "range": { "type": "string", "description": "optional A1 range like Sheet1!A1:D20" } }, "required": ["spreadsheet_id"] } } },
-        { "type": "function", "function": { "name": "google_contacts_search", "description": "Reads Google Contacts from the user's contact list. If query is provided, searches contacts by name, email, or phone. If query is omitted, returns the first contacts from the list. Use for address book and People API read tasks.", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "optional contact name, email, or phone keyword" }, "page_size": { "type": "integer", "description": "optional number of contacts to return, 1 to 50" } }, "required": [] } } },
-        { "type": "function", "function": { "name": "google_api_read", "description": "Calls a Google REST API GET URL and returns raw JSON. Use for advanced Google read access when no more specific Google tool fits. Only use official googleapis.com URLs.", "parameters": { "type": "object", "properties": { "url": { "type": "string", "description": "full Google REST API URL, e.g. https://www.googleapis.com/drive/v3/files" } }, "required": ["url"] } } },
-        { "type": "function", "function": { "name": "propose_gmail_send", "description": "Returns an approval card to send an email via Gmail on the user's behalf", "parameters": { "type": "object", "properties": { "to": { "type": "string", "description": "recipient email address" }, "subject": { "type": "string", "description": "email subject" }, "body": { "type": "string", "description": "plain text email body" } }, "required": ["to", "subject", "body"] } } },
-        { "type": "function", "function": { "name": "propose_gmail_trash", "description": "Returns an approval card to move a Gmail message to Trash. First use gmail_recent to find the message ID.", "parameters": { "type": "object", "properties": { "id": { "type": "string", "description": "Gmail message ID to trash" }, "reason": { "type": "string", "description": "brief reason shown on the approval card" } }, "required": ["id", "reason"] } } },
-        { "type": "function", "function": { "name": "propose_calendar_create", "description": "Returns an approval card to create a new Google Calendar event", "parameters": { "type": "object", "properties": { "title": { "type": "string", "description": "event title" }, "start": { "type": "string", "description": "ISO 8601 start time, e.g. 2024-06-01T14:00:00" }, "end": { "type": "string", "description": "ISO 8601 end time" }, "description": { "type": "string", "description": "optional event description" }, "location": { "type": "string", "description": "optional location" } }, "required": ["title", "start", "end"] } } },
-        { "type": "function", "function": { "name": "propose_calendar_delete", "description": "Returns an approval card to delete a Google Calendar event. First use google_calendar_check to find the event ID.", "parameters": { "type": "object", "properties": { "id": { "type": "string", "description": "Calendar event ID to delete" }, "title": { "type": "string", "description": "Title of the event being deleted, shown on approval card" } }, "required": ["id", "title"] } } },
-        { "type": "function", "function": { "name": "propose_google_contact_delete", "description": "Returns an approval card to delete a Google contact. First use google_contacts_search and use the exact Resource Name field, e.g. people/c123.", "parameters": { "type": "object", "properties": { "resource_name": { "type": "string", "description": "verified People API resource name from google_contacts_search, e.g. people/c123" }, "name": { "type": "string", "description": "contact display name shown on the approval card" } }, "required": ["resource_name"] } } },
-        { "type": "function", "function": { "name": "propose_google_action", "description": "Returns an approval card for any Google Workspace write or modify action not covered by other tools, including Docs, Sheets, Drive, Contacts, Chat, or Cloud Storage. Use the exact Google REST API URL and JSON payload. Only use official googleapis.com URLs.", "parameters": { "type": "object", "properties": { "action_summary": { "type": "string", "description": "human-readable explanation of what this will do, shown on the approval card" }, "method": { "type": "string", "description": "HTTP method: POST, PUT, PATCH, or DELETE" }, "url": { "type": "string", "description": "full Google REST API URL" }, "payload": { "type": "string", "description": "optional JSON body as a string" } }, "required": ["action_summary", "method", "url"] } } }
-    ])
-}
-
-pub(super) fn tool_allowed_for_capability(tool: &str, route: Option<ToolRoute>) -> bool {
-    match route {
-        Some(ToolRoute::MediaPreview) => {
-            matches!(
-                tool,
-                "preview_random_media"
-                    | "preview_file"
-                    | "list_media_files"
-                    | "find_workspace_candidates"
-            )
-        }
-        Some(ToolRoute::Gmail) => matches!(
-            tool,
-            "gmail_recent" | "propose_gmail_send" | "propose_gmail_trash"
-        ),
-        Some(ToolRoute::Calendar) => matches!(
-            tool,
-            "google_calendar_check" | "propose_calendar_create" | "propose_calendar_delete"
-        ),
-        Some(ToolRoute::Weather) => tool == "weather_forecast",
-        Some(ToolRoute::FileSearch) => matches!(
-            tool,
-            "list_files_in_directory"
-                | "search_directory"
-                | "find_workspace_candidates"
-                | "read_file"
-                | "preview_file"
-                | "list_media_files"
-                | "preview_random_media"
-                | "propose_write_file"
-                | "propose_move_file"
-                | "propose_delete_file"
-        ),
-        Some(ToolRoute::WebSearch) => tool == "web_search",
-        Some(ToolRoute::GoogleWorkspace) => matches!(
-            tool,
-            "google_drive_search"
-                | "google_docs_read"
-                | "google_sheets_read"
-                | "google_contacts_search"
-                | "google_api_read"
-                | "propose_google_action"
-                | "propose_google_contact_delete"
-        ),
-        None => true,
-    }
-}
-
-pub(super) fn filtered_tool_schema(route: Option<ToolRoute>) -> Value {
-    let tools = tool_schema();
-    let Some(array) = tools.as_array() else {
-        return tools;
-    };
-    Value::Array(
-        array
-            .iter()
-            .filter(|tool| {
-                tool.get("function")
-                    .and_then(|function| function.get("name"))
-                    .and_then(Value::as_str)
-                    .is_some_and(|name| tool_allowed_for_capability(name, route))
-            })
-            .cloned()
-            .collect(),
-    )
-}
-
-pub(super) fn tool_names_for_capability(route: Option<ToolRoute>) -> Vec<&'static str> {
-    TOOL_REGISTRY
-        .iter()
-        .map(|tool| tool.name)
-        .filter(|tool| tool_allowed_for_capability(tool, route))
-        .collect()
 }

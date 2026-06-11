@@ -15,6 +15,21 @@ type UseChatMessageMutationsOptions = {
   voiceSetupReady: boolean;
 };
 
+const transcriptWords = (text: string) =>
+  text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+const transcriptLooksUseful = (text: string, preview: FilePreviewResult) => {
+  const words = transcriptWords(text);
+  if (words.length < 8) return false;
+  const uniqueWords = new Set(words.map((word) => word.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""))).size;
+  if (uniqueWords < Math.min(6, words.length)) return false;
+  if (preview.size_bytes > 3 * 1024 * 1024 && words.length < 40) return false;
+  return true;
+};
+
 export function useChatMessageMutations({
   setMessages,
   setCollapsedImageParts,
@@ -114,7 +129,7 @@ export function useChatMessageMutations({
         audioDataUrl: preview.data_url,
       });
       const text = result.text.trim();
-      if (!text) {
+      if (!text || !transcriptLooksUseful(text, preview)) {
         return;
       }
       const perception = `Transcript (${result.language || "unknown"}): ${text}`;

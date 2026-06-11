@@ -1,5 +1,5 @@
 import React from "react";
-import { pauseOtherMediaElements } from "../utils";
+import { loadMediaVolume, MEDIA_VOLUME_EVENT, pauseOtherMediaElements, saveMediaVolume } from "../utils";
 import { useAudioPlaybackRegistry } from "./AudioPlaybackContext";
 import { PauseIcon, PlayIcon, SpeakerIcon, SpeakerMutedIcon } from "./Icons";
 
@@ -27,8 +27,8 @@ export function RegisteredAudio({
   const [duration, setDuration] = React.useState(0);
   const [currentTime, setCurrentTime] = React.useState(0);
   const [isLocalPlaying, setIsLocalPlaying] = React.useState(false);
-  const [volume, setVolume] = React.useState(1);
-  const [isMuted, setIsMuted] = React.useState(false);
+  const [volume, setVolume] = React.useState(() => loadMediaVolume());
+  const [isMuted, setIsMuted] = React.useState(() => loadMediaVolume() <= 0);
   const [showVolume, setShowVolume] = React.useState(false);
   const isCurrentTrack = currentTrack?.id === id;
   const isPlaying = isCurrentTrack && globalIsPlaying && isLocalPlaying;
@@ -37,8 +37,26 @@ export function RegisteredAudio({
     const audioElement = audioRef.current;
     const viewElement = viewRef.current;
     if (!audioElement || !viewElement) return;
+    audioElement.volume = volume;
+    audioElement.muted = volume <= 0;
     return registerTrack({ id, title, audioElement, viewElement });
   }, [id, title, registerTrack]);
+
+  React.useEffect(() => {
+    const onVolumeChange = (event: Event) => {
+      const nextVolume = (event as CustomEvent<{ volume?: number }>).detail?.volume;
+      if (typeof nextVolume !== "number") return;
+      const element = audioRef.current;
+      if (element) {
+        element.volume = nextVolume;
+        element.muted = nextVolume <= 0;
+      }
+      setVolume(nextVolume);
+      setIsMuted(nextVolume <= 0);
+    };
+    window.addEventListener(MEDIA_VOLUME_EVENT, onVolumeChange);
+    return () => window.removeEventListener(MEDIA_VOLUME_EVENT, onVolumeChange);
+  }, []);
 
   const play = () => {
     audioRef.current?.play().catch(console.error);
@@ -57,7 +75,7 @@ export function RegisteredAudio({
   };
 
   const updateVolume = (value: string) => {
-    const nextVolume = Math.min(1, Math.max(0, Number(value)));
+    const nextVolume = saveMediaVolume(Number(value));
     const element = audioRef.current;
     if (!element || !Number.isFinite(nextVolume)) return;
     element.volume = nextVolume;

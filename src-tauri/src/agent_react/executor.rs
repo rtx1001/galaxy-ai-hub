@@ -53,6 +53,38 @@ pub(super) fn calendar_day_range(input: Option<&str>) -> Result<(String, String)
     Ok((start.to_rfc3339(), end.to_rfc3339()))
 }
 
+fn parse_relative_or_iso_date(input: Option<&str>) -> Result<Option<NaiveDate>, String> {
+    let today = Local::now().date_naive();
+    let Some(value) = input.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if value.eq_ignore_ascii_case("today") {
+        return Ok(Some(today));
+    }
+    if value.eq_ignore_ascii_case("tomorrow") {
+        return Ok(Some(today + Duration::days(1)));
+    }
+    if value.eq_ignore_ascii_case("yesterday") {
+        return Ok(Some(today - Duration::days(1)));
+    }
+    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map(Some)
+        .map_err(|_| "Use date as today, tomorrow, yesterday, or YYYY-MM-DD.".to_string())
+}
+
+pub(super) fn forecast_days_needed_for_date(base_days: u32, target_date: Option<NaiveDate>) -> u32 {
+    let Some(target_date) = target_date else {
+        return base_days.clamp(1, 10);
+    };
+    let today = Local::now().date_naive();
+    let offset = target_date.signed_duration_since(today).num_days();
+    if (0..10).contains(&offset) {
+        base_days.max((offset + 1) as u32).clamp(1, 10)
+    } else {
+        base_days.clamp(1, 10)
+    }
+}
+
 fn workspace_folder_name(folder: &str) -> String {
     std::path::Path::new(folder)
         .file_name()
@@ -226,9 +258,18 @@ pub(super) async fn execute_tool_result(
     let result: Result<ToolOutcome, String> = match call.tool.as_str() {
         "get_current_time" => {
             let now: DateTime<Local> = Local::now();
+            let today = now.date_naive();
+            let yesterday = today - Duration::days(1);
+            let tomorrow = today + Duration::days(1);
             let observation = format!(
-                "Time: {} | Unix: {}",
+                "Now: {} | Today: {} ({}) | Tomorrow: {} ({}) | Yesterday: {} ({}) | Unix: {}",
                 now.format("%A, %B %-d, %Y at %-I:%M:%S %p %Z"),
+                today.format("%A, %B %-d, %Y"),
+                today.format("%Y-%m-%d"),
+                tomorrow.format("%A, %B %-d, %Y"),
+                tomorrow.format("%Y-%m-%d"),
+                yesterday.format("%A, %B %-d, %Y"),
+                yesterday.format("%Y-%m-%d"),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map(|value| value.as_secs())
@@ -246,7 +287,26 @@ pub(super) async fn execute_tool_result(
                         .map(|value| value.as_secs().to_string())
                         .unwrap_or_default(),
                 }],
-                items: Vec::new(),
+                items: vec![
+                    ToolResultItem {
+                        title: "Today".to_string(),
+                        subtitle: Some(today.format("%A").to_string()),
+                        details: vec![ToolResultField {
+                            label: "Date".to_string(),
+                            value: today.format("%Y-%m-%d").to_string(),
+                        }],
+                        url: None,
+                    },
+                    ToolResultItem {
+                        title: "Tomorrow".to_string(),
+                        subtitle: Some(tomorrow.format("%A").to_string()),
+                        details: vec![ToolResultField {
+                            label: "Date".to_string(),
+                            value: tomorrow.format("%Y-%m-%d").to_string(),
+                        }],
+                        url: None,
+                    },
+                ],
                 text: None,
             });
             Ok(outcome)
@@ -736,19 +796,33 @@ pub(super) async fn execute_tool_result(
             if location.is_empty() {
                 return Ok(error_outcome("location is required.".to_string()));
             }
-            let days = call
+            let requested_date = parse_relative_or_iso_date(
+                call.arguments
+                    .get("date")
+                    .or_else(|| call.arguments.get("target_date"))
+                    .and_then(Value::as_str),
+            )?;
+            let requested_days = call
                 .arguments
                 .get("days")
                 .and_then(Value::as_u64)
                 .map(|value| value.clamp(1, 10) as u32)
                 .unwrap_or(7);
+            let user_text = call_user_text(call);
+            let focus_from_text = weather_requested_focus_date(&user_text)
+                .map(|(date, label)| (date, label.to_string()));
+            let focus_date = requested_date
+                .map(|date| (date, "requested date".to_string()))
+                .or(focus_from_text);
+            let days = forecast_days_needed_for_date(
+                requested_days,
+                focus_date.as_ref().map(|item| item.0),
+            );
             let forecast = weather::fetch_weather_forecast(location, days).await?;
             let mut observation_lines = vec![format!(
                 "Location: {}, {}",
                 forecast.location.name, forecast.location.country
             )];
-            let user_text = call_user_text(call);
-            let focus_date = weather_requested_focus_date(&user_text);
             let focused_days = if let Some((date, label)) = focus_date {
                 observation_lines.push(format!(
                     "Requested period: {} ({})",

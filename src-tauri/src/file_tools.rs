@@ -410,16 +410,29 @@ pub fn preview_linked_file(
         ));
     }
 
-    let max = max_bytes.unwrap_or(80_000_000).clamp(4_096, 120_000_000) as usize;
-    let bytes = std::fs::read(&path).map_err(|e| format!("Could not read that file: {}", e))?;
-    let truncated = bytes.len() > max;
     let name = path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_string();
 
+    if file_kind == "video" {
+        return Ok(FilePreviewResult {
+            path: display_path(&path),
+            name,
+            extension,
+            mime_type,
+            size_bytes: metadata.len(),
+            data_url: None,
+            text: None,
+            truncated: false,
+        });
+    }
+
     if file_kind == "text" {
+        let max = max_bytes.unwrap_or(80_000_000).clamp(4_096, 120_000_000) as usize;
+        let bytes = std::fs::read(&path).map_err(|e| format!("Could not read that file: {}", e))?;
+        let truncated = bytes.len() > max;
         let text = String::from_utf8_lossy(&bytes[..bytes.len().min(max)]).to_string();
         return Ok(FilePreviewResult {
             path: display_path(&path),
@@ -433,6 +446,9 @@ pub fn preview_linked_file(
         });
     }
 
+    let max = max_bytes.unwrap_or(80_000_000).clamp(4_096, 120_000_000) as usize;
+    let bytes = std::fs::read(&path).map_err(|e| format!("Could not read that file: {}", e))?;
+    let truncated = bytes.len() > max;
     if truncated {
         return Err(format!(
             "That file is too large to embed in chat safely ({} MB). Path: {}",
@@ -654,6 +670,28 @@ mod tests {
     }
 
     #[test]
+    fn video_preview_returns_path_without_embedding_file_bytes() {
+        let root = temp_root("video_preview");
+        fs::create_dir_all(&root).expect("create temp folder");
+        fs::write(root.join("clip.mp4"), b"placeholder video bytes").expect("write video");
+
+        let preview = preview_linked_file(
+            "clip.mp4".to_string(),
+            vec![root.to_string_lossy().to_string()],
+            Some(4096),
+        )
+        .expect("preview video");
+
+        let _ = fs::remove_dir_all(&root);
+
+        assert_eq!(preview.name, "clip.mp4");
+        assert_eq!(preview.mime_type, "video/mp4");
+        assert_eq!(preview.text, None);
+        assert_eq!(preview.data_url, None);
+        assert!(!preview.truncated);
+    }
+
+    #[test]
     fn write_requires_explicit_root_when_multiple_workspaces_are_linked() {
         let first = temp_root("write_first");
         let second = temp_root("write_second");
@@ -752,7 +790,7 @@ pub fn trash_linked_file(source: String, folders: Vec<String>) -> Result<FileAct
 #[tauri::command]
 pub fn open_in_explorer(path: String, folders: Vec<String>) -> Result<(), String> {
     let permitted_path = resolve_existing_permitted_path(&path, &folders)?;
-    let path_text = permitted_path.to_string_lossy().to_string();
+    let path_text = display_path(&permitted_path);
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
@@ -774,6 +812,34 @@ pub fn open_in_explorer(path: String, folders: Vec<String>) -> Result<(), String
             .arg(dir)
             .spawn()
             .map_err(|e| format!("Failed to open file manager: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_with_default_app(path: String, folders: Vec<String>) -> Result<(), String> {
+    let permitted_path = resolve_existing_permitted_path(&path, &folders)?;
+    let path_text = display_path(&permitted_path);
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path_text])
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path_text)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path_text)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
     }
     Ok(())
 }

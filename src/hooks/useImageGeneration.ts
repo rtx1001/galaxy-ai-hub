@@ -1,7 +1,7 @@
 import { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ChatMessage } from "../types";
-import { createMessageId } from "../appCore";
+import { DisplayLanguage, createMessageId, findRecentChatImageContext } from "../appCore";
 import { imageToolDisplayName, normalizeImageMode } from "../components/ImageModeDropdown";
 import { localAssetUrl } from "../utils";
 
@@ -16,6 +16,7 @@ type UseImageGenerationOptions = {
   assistantAvatar: string;
   autoSpeechEligibleAssistantIdsRef: MutableRefObject<Set<string>>;
   clearImage: () => void;
+  chatDisplayLanguage: DisplayLanguage;
   composerInputRef: MutableRefObject<HTMLTextAreaElement | null>;
   generateNaturalImageCompletionReply: (prompt: string, mode: string, imageDataUrl: string) => Promise<string>;
   image: string | null;
@@ -45,12 +46,6 @@ type UseImageGenerationOptions = {
   userName: string;
 };
 
-const imagePromptMentionsUserProfile = (prompt: string, userName: string) => {
-  const lowered = prompt.toLocaleLowerCase();
-  const name = userName.trim().toLocaleLowerCase();
-  return Boolean(name && lowered.includes(name)) || /\b(the\s+user|selected\s+user|user\s+profile)\b/i.test(prompt);
-};
-
 const normalizeReferenceSources = (sources?: string[] | null) =>
   Array.isArray(sources)
     ? sources
@@ -69,6 +64,9 @@ const compactImageRefs = (refs: Array<string | null | undefined>) => {
   });
 };
 
+const imageSendingStatusText = (language: DisplayLanguage) =>
+  language === "vi" ? "\u0110ang g\u1eedi \u1ea3nh..." : "Sending image...";
+
 export function useImageGeneration(options: UseImageGenerationOptions) {
   const handleGenerateImage = async (
     promptOverride?: string,
@@ -82,19 +80,8 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
     if (!prompt || options.isGeneratingImage) {
       return;
     }
-    const latestChatImage = [...options.messages]
-      .reverse()
-      .find((message) =>
-        Array.isArray(message.content) &&
-        message.content.some((part) => part.type === "image_url"),
-      )
-      ?.content;
-    const latestChatImageUrl = Array.isArray(latestChatImage)
-      ? latestChatImage.find((part) => part.type === "image_url")?.image_url.url
-      : null;
-    const latestChatImagePath = Array.isArray(latestChatImage)
-      ? latestChatImage.find((part) => part.type === "image_url")?.image_url.local_path
-      : null;
+    const latestChatImageContext = findRecentChatImageContext(options.messages);
+    const latestChatImagePath = latestChatImageContext?.path ?? null;
     const initImageDataUrls = (() => {
       const referenceSourcesProvided = Array.isArray(referenceSources);
       const selectedReferenceSources = normalizeReferenceSources(referenceSources);
@@ -106,10 +93,9 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
       const shouldUseChatImage =
         normalizedMode === "image_image" &&
         (!referenceSourcesProvided || selectedReferenceSources.includes("chat_image"));
-      const source = options.image || (shouldUseChatImage ? latestChatImagePath || (latestChatImageUrl?.startsWith("data:image/") ? latestChatImageUrl : null) : null);
+      const source = options.image || (shouldUseChatImage ? latestChatImagePath : null);
       const userProfileRef =
-        normalizedMode === "image_image" &&
-        (selectedReferenceSources.includes("user_avatar") || (!referenceSourcesProvided && imagePromptMentionsUserProfile(prompt, options.userName)))
+        normalizedMode === "image_image" && selectedReferenceSources.includes("user_avatar")
           ? options.userAvatar
           : null;
       const botProfileRef =
@@ -141,7 +127,7 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
       {
         id: assistantMessageId,
         role: "assistant",
-        content: "Sending image...",
+        content: imageSendingStatusText(options.chatDisplayLanguage),
         created_at: Date.now(),
       },
     ]);

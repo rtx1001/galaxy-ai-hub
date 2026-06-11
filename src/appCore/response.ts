@@ -84,6 +84,25 @@ export const stripThinkBlocks = (text: string) =>
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
     .trim();
 
+export const cleanAssistantDisplayText = (text: string) =>
+  removeStrayHanGlyphs(text)
+    .replace(/[\uFFFD\u25A1\u25A0\u{1F972}]/gu, "")
+    // Some Windows/WebView setups render emoji/pictographs as square boxes. Keep text natural by dropping them.
+    .replace(/\p{Extended_Pictographic}\uFE0F?/gu, "")
+    .replace(/[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\uFE0F]/gu, "")
+    .replace(/\s+([,.!?;:])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+export const removeStrayHanGlyphs = (text: string) => {
+  const hanMatches = text.match(/\p{Script=Han}/gu) ?? [];
+  if (!hanMatches.length || hanMatches.length > 2) return text;
+  const hasLatin = /\p{Script=Latin}/u.test(text);
+  const hasKanaOrHangul = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
+  if (!hasLatin || hasKanaOrHangul) return text;
+  return text.replace(/\p{Script=Han}/gu, "");
+};
+
 export const detectVoicePreviewText = (sample?: VoiceSample) => {
   const voiceName = `${sample?.name ?? ""} ${sample?.label ?? ""} ${sample?.path ?? ""}`.toLowerCase();
 

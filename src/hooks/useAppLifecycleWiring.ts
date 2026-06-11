@@ -7,7 +7,6 @@ import { useAppBackgroundRefresh } from "./useAppBackgroundRefresh";
 import { useAppSettingsLoad } from "./useAppSettingsLoad";
 import { useDropdownDismiss } from "./useDropdownDismiss";
 import { useMissingTooltips } from "./useMissingTooltips";
-import { useTrayControls } from "./useTrayControls";
 import { NEW_MESSAGE_BOTTOM_ROOM } from "./useConversationScroll";
 
 type UseAppLifecycleWiringOptions = Record<string, any> & {
@@ -93,14 +92,6 @@ export function useAppLifecycleWiring(options: UseAppLifecycleWiringOptions) {
     if (!options.telegramBotToken.trim()) return;
     options.handleStartTelegram().catch((error: unknown) => console.error("Telegram auto-start error:", error));
   }, [options.settingsLoaded, options.telegramBotToken]);
-
-  useTrayControls({
-    settingsLoaded: options.settingsLoaded,
-    telegramRunning: options.telegramRunning,
-    autoVoice: options.liveConversation,
-    onToggleTelegram: () => (options.telegramRunning ? options.handleStopTelegram() : options.handleStartTelegram()),
-    onToggleAutoVoice: () => options.setAutoVoiceMode(!options.liveConversation),
-  });
 
   useEffect(() => {
     if (!options.settingsLoaded || !options.selectedUserProfileId) return;

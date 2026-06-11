@@ -24,6 +24,33 @@ export const localAssetUrl = (path?: string | null) => {
     return "";
   }
 };
+
+export const MEDIA_VOLUME_STORAGE_KEY = "galaxy_media_volume";
+export const MEDIA_VOLUME_EVENT = "galaxy-media-volume-change";
+
+export const clampMediaVolume = (value: number) =>
+  Math.min(1, Math.max(0, Number.isFinite(value) ? value : 1));
+
+export const loadMediaVolume = () => {
+  try {
+    const stored = localStorage.getItem(MEDIA_VOLUME_STORAGE_KEY);
+    if (!stored) return 1;
+    return clampMediaVolume(Number(stored));
+  } catch {
+    return 1;
+  }
+};
+
+export const saveMediaVolume = (value: number) => {
+  const nextVolume = clampMediaVolume(value);
+  try {
+    localStorage.setItem(MEDIA_VOLUME_STORAGE_KEY, String(nextVolume));
+    window.dispatchEvent(new CustomEvent(MEDIA_VOLUME_EVENT, { detail: { volume: nextVolume } }));
+  } catch {
+    // localStorage can be unavailable in restricted environments.
+  }
+  return nextVolume;
+};
 export const renderInlineText = (text: string, keyPrefix: string) => {
       const displayText = cleanDisplayPath(text);
       const parts = displayText.split(INLINE_PATTERN);
