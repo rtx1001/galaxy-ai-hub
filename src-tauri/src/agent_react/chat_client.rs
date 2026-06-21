@@ -251,7 +251,7 @@ pub(crate) fn sanitize_model_text(text: &str) -> String {
         }
         index += ch.len_utf8();
     }
-    without_escaped_surrogates
+    crate::text_encoding::repair_mojibake_text(&without_escaped_surrogates)
 }
 
 fn sanitize_model_value(value: Value) -> Value {

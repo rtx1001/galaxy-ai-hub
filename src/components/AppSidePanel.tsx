@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import { CloseIcon } from "./Icons";
+import { LeftPanelIcon, RightPanelIcon } from "./Icons";
 import { IconButton } from "./UI";
 
 type AppSidePanelProps = {
@@ -23,7 +23,7 @@ export function AppSidePanel({
 }: AppSidePanelProps) {
   const compactPosition = side === "left" ? "left-0" : "right-0";
   const desktopBorder = side === "left" ? "border-r" : "border-l";
-  const closeLabel = side === "left" ? "Close app settings" : "Close model controls";
+  const closeLabel = `Close ${title.toLocaleLowerCase()}`;
 
   return (
     <>
@@ -37,7 +37,7 @@ export function AppSidePanel({
           <div className="flex items-center gap-2">
             {actions}
             <IconButton size="sm" title={closeLabel} onClick={onClose}>
-              <CloseIcon />
+              {side === "left" ? <LeftPanelIcon /> : <RightPanelIcon />}
             </IconButton>
           </div>
         </div>

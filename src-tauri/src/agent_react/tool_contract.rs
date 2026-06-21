@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ToolDescriptor {

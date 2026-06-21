@@ -360,7 +360,7 @@ details[open] > summary .details-chevron {
   box-sizing: border-box;
   color: #e3e3e3;
   background:
-    radial-gradient(circle at 50% 40%, rgba(242, 202, 44, 0.14), transparent 28%),
+    radial-gradient(circle at 50% 40%, var(--startup-accent-soft, var(--accent-soft, rgba(168, 199, 250, 0.18))), transparent 28%),
     linear-gradient(180deg, #131314 0%, #17181a 44%, #101113 100%);
 }
 
@@ -382,8 +382,8 @@ details[open] > summary .details-chevron {
   display: grid;
   place-items: center;
   background: #101113;
-  border: 1px solid rgba(242, 202, 44, 0.28);
-  box-shadow: 0 0 34px rgba(242, 202, 44, 0.16);
+  border: 1px solid var(--startup-accent-glow, var(--accent-soft-strong, rgba(168, 199, 250, 0.24)));
+  box-shadow: 0 0 34px var(--startup-accent-soft, var(--accent-soft, rgba(168, 199, 250, 0.18)));
 }
 
 .startup-logo img {
@@ -393,7 +393,7 @@ details[open] > summary .details-chevron {
 }
 
 .startup-kicker {
-  color: #f2ca2c;
+  color: var(--startup-accent, var(--accent-color, #a8c7fa));
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.24em;
@@ -428,7 +428,7 @@ details[open] > summary .details-chevron {
   inset: 0;
   width: 38%;
   border-radius: inherit;
-  background: linear-gradient(90deg, transparent, #f2ca2c, transparent);
+  background: linear-gradient(90deg, transparent, var(--startup-accent, var(--accent-color, #a8c7fa)), transparent);
   animation: startup-scan 1.25s ease-in-out infinite;
 }
 

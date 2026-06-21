@@ -19,6 +19,8 @@ struct CleanDecision {
     reply: Option<String>,
     #[serde(default)]
     reason: Option<String>,
+    #[serde(default)]
+    evidence: Option<String>,
 }
 
 fn clean_decision_sampling(sampling: SamplingConfig) -> SamplingConfig {
@@ -41,6 +43,8 @@ fn clean_base_messages(
     let system_prompt = [
         read_master_system_prompt(),
         reasoning_style_prompt(thinking_enabled).to_string(),
+        companion_reply_boundary_prompt().to_string(),
+        current_time_context(),
         runtime_prompt.trim().to_string(),
         (!context_block.trim().is_empty())
             .then(|| format!("Runtime context:\n{}", context_block.trim()))
@@ -69,6 +73,27 @@ fn clean_base_messages(
         }
     }
     request_messages
+}
+
+pub(super) fn companion_reply_boundary_prompt() -> &'static str {
+    "For ordinary chat or roleplay, stay present in the conversation instead of advertising app capabilities. Do not end with unsolicited offers to create/edit images, search files, check live data, use tools, or perform actions. Use capabilities only when the latest user directly asks for them or confirms a pending task."
+}
+
+fn current_time_context() -> String {
+    let now: DateTime<Local> = Local::now();
+    let today = now.date_naive();
+    let tomorrow = today + Duration::days(1);
+    let yesterday = today - Duration::days(1);
+    format!(
+        "Current local time context: now is {}. Today is {} ({}). Tomorrow is {} ({}). Yesterday was {} ({}). Use these verified weekday/date pairs for relative-date answers.",
+        now.format("%A, %B %-d, %Y at %-I:%M:%S %p %Z"),
+        today.format("%A, %B %-d, %Y"),
+        today.format("%Y-%m-%d"),
+        tomorrow.format("%A, %B %-d, %Y"),
+        tomorrow.format("%Y-%m-%d"),
+        yesterday.format("%A, %B %-d, %Y"),
+        yesterday.format("%Y-%m-%d")
+    )
 }
 
 fn clean_decision_history(messages: &[ReactChatMessage]) -> Vec<Value> {
@@ -153,8 +178,9 @@ fn clean_decision_messages(
         state.join(", ")
     };
     let mut user_payload = format!(
-        "{}\n\nVerified compact app state: {}\n\nLatest user turn:\n{}\n\nDecide the next app action for the latest user turn from the conversation.",
+        "{}\n\n{}\n\nVerified compact app state: {}\n\nLatest user turn:\n{}\n\nDecide the next app action for the latest user turn from the conversation.",
         clean_tools_text(),
+        current_time_context(),
         state,
         latest
     );
@@ -187,7 +213,8 @@ Required JSON schema:
   "refs": [],
   "arguments": {{}},
   "reply": null,
-  "reason": "short"
+  "reason": "short",
+  "evidence": null
 }
 
 Hard rules:
@@ -201,6 +228,7 @@ Hard rules:
 - If the user asks to create/edit/generate/send a new image, use action approval and tool propose_image_generation.
 - Do not offer or propose image generation proactively. If the latest user is only chatting, complimenting, roleplaying, describing something, or asking for an opinion, use action chat.
 - Only use propose_image_generation when the latest user directly asks to create, edit, draw, render, generate, make, or send a new image, or confirms a pending image request.
+- For propose_image_generation, evidence must be an exact short quote from the latest user turn that directly requests the new/edited image. If no exact direct-request quote exists, use action chat.
 - For approval, reply must be one short natural sentence in the user's current language and relationship tone.
 - Approval reply must not mention mode, reference source, prompt, tool, card, JSON, engine, or file path.
 - Image modes are values, not tools: text_image, image_image, bot_image, user_image, user_bot_image.
@@ -325,6 +353,7 @@ fn decision_to_tool_call(decision: &CleanDecision, latest_text: &str) -> Result<
     }
 
     if tool == "propose_image_generation" {
+        validate_image_generation_evidence(decision, latest_text)?;
         if let Some(mode) = decision
             .mode
             .as_ref()
@@ -344,6 +373,29 @@ fn decision_to_tool_call(decision: &CleanDecision, latest_text: &str) -> Result<
         },
         latest_text,
     ))
+}
+
+fn validate_image_generation_evidence(
+    decision: &CleanDecision,
+    latest_text: &str,
+) -> Result<(), String> {
+    let evidence = decision
+        .evidence
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "propose_image_generation requires evidence: an exact quote from the latest user turn that directly requests image creation or editing. If the user did not directly ask for an image task, use action chat.".to_string()
+        })?;
+    let latest_normalized = latest_text.to_lowercase();
+    let evidence_normalized = evidence.to_lowercase();
+    if !latest_normalized.contains(&evidence_normalized) {
+        return Err(
+            "propose_image_generation evidence must be copied exactly from the latest user turn. If there is no exact direct image-task quote, use action chat."
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 fn short_reply_from_decision(decision: &CleanDecision) -> Option<String> {
@@ -766,6 +818,7 @@ mod tests {
             arguments: json!({ "prompt": "A warm portrait of the assistant on a snowy street." }),
             reply: None,
             reason: None,
+            evidence: Some("send me your picture".to_string()),
         };
         let call = decision_to_tool_call(&decision, "send me your picture").expect("tool call");
         assert_eq!(call.tool, "propose_image_generation");
@@ -773,6 +826,31 @@ mod tests {
             call.arguments.get("mode").and_then(Value::as_str),
             Some("bot_image")
         );
+    }
+
+    #[test]
+    fn image_tool_requires_exact_latest_user_evidence() {
+        let decision = CleanDecision {
+            action: "approval".to_string(),
+            tool: Some("propose_image_generation".to_string()),
+            mode: Some("bot_image".to_string()),
+            refs: vec!["bot_avatar".to_string()],
+            arguments: json!({ "prompt": "A warm portrait of the assistant." }),
+            reply: None,
+            reason: Some(
+                "The user is roleplaying warmly, but did not ask for an image.".to_string(),
+            ),
+            evidence: None,
+        };
+        let error = decision_to_tool_call(&decision, "you look wonderful tonight")
+            .expect_err("image proposals need direct user evidence");
+        assert!(error.contains("requires evidence"));
+
+        let mut mismatched = decision;
+        mismatched.evidence = Some("send me your picture".to_string());
+        let error = decision_to_tool_call(&mismatched, "you look wonderful tonight")
+            .expect_err("evidence must come from latest user turn");
+        assert!(error.contains("copied exactly"));
     }
 
     #[test]

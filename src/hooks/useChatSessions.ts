@@ -2,14 +2,17 @@ import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatMessage, ChatSessions } from "../types";
 import {
+  cleanAssistantDisplayText,
   compactChatSessionForStorage,
   compactSessionFingerprint,
+  parseProfileRefId,
   parseStoredChatSession,
 } from "../appCore";
 
 type UseChatSessionsOptions = {
   settingsLoaded: boolean;
   selectedPersonalityId: string;
+  selectedUserProfileId: string;
   messages: ChatMessage[];
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
   lastMessageCountRef: MutableRefObject<number>;
@@ -20,9 +23,75 @@ type UseChatSessionsOptions = {
   lastComposerInputAtRef: MutableRefObject<number>;
 };
 
+type ChatSessionLoadState = {
+  exists: boolean;
+  messages_json: string;
+};
+
+type ChatPairContext = {
+  userProfileId: string;
+  personalityId: string;
+};
+
+const chatPairSessionIdFor = (leftId: string, rightId: string) => {
+  const left = canonicalProfileId(leftId, "user");
+  const right = canonicalProfileId(rightId, "personality");
+  if (!left || !right) return left || right;
+  if (left === right) return `pair:${left}`;
+  return `pair:${[left, right].sort((a, b) => a.localeCompare(b)).join("::")}`;
+};
+
+const canonicalProfileId = (value: string, fallbackKind: "user" | "personality") => {
+  if (!value) return "";
+  const ref = parseProfileRefId(value, fallbackKind);
+  return `${ref.kind}:${ref.id}`;
+};
+
+const chatPairContextFor = (userProfileId: string, personalityId: string): ChatPairContext => ({
+  userProfileId: canonicalProfileId(userProfileId, "user"),
+  personalityId: canonicalProfileId(personalityId, "personality"),
+});
+
+const speakerIdForRole = (role: ChatMessage["role"], context: ChatPairContext) =>
+  role === "user" ? context.userProfileId : context.personalityId;
+
+const withSpeakerIds = (session: ChatMessage[], context: ChatPairContext) =>
+  session.map((message) => {
+    const fallbackSpeakerId = speakerIdForRole(message.role, context);
+    return {
+      ...message,
+      speaker_id: message.speaker_id
+        ? canonicalProfileId(message.speaker_id, message.role === "user" ? "user" : "personality")
+        : fallbackSpeakerId,
+    };
+  });
+
+const displaySessionForControlledSpeaker = (session: ChatMessage[], context: ChatPairContext) =>
+  withSpeakerIds(session, context).map((message) => ({
+    ...message,
+    role: message.speaker_id === context.userProfileId ? "user" as const : "assistant" as const,
+  }));
+
+const cleanStoredAssistantContent = (content: ChatMessage["content"]): ChatMessage["content"] => {
+  if (typeof content === "string") return cleanAssistantDisplayText(content);
+  return content.map((part) =>
+    part.type === "text"
+      ? { ...part, text: cleanAssistantDisplayText(part.text) }
+      : part,
+  );
+};
+
+const cleanStoredAssistantMessages = (session: ChatMessage[]) =>
+  session.map((message) =>
+    message.role === "assistant"
+      ? { ...message, content: cleanStoredAssistantContent(message.content) }
+      : message,
+  );
+
 export function useChatSessions({
   settingsLoaded,
   selectedPersonalityId,
+  selectedUserProfileId,
   messages,
   setMessages,
   lastMessageCountRef,
@@ -32,49 +101,127 @@ export function useChatSessions({
   sendInFlightRef,
   lastComposerInputAtRef,
 }: UseChatSessionsOptions) {
-  const [chatSessions, setChatSessions] = useState<ChatSessions>({});
+  const [, setChatSessions] = useState<ChatSessions>({});
   const chatSessionsRef = useRef<ChatSessions>({});
   const liveMessagesRef = useRef<ChatMessage[]>(messages);
   const loadedChatSessionIdsRef = useRef<Set<string>>(new Set());
   const sessionShadowRef = useRef<Record<string, string>>({});
   const lastSessionMutationAtRef = useRef<Record<string, number>>({});
+  const activeChatSessionIdRef = useRef("");
+  const lastMessagesObjectRef = useRef<ChatMessage[]>(messages);
+  const persistSessionTimersRef = useRef<Record<string, number>>({});
+  const sessionPairContextsRef = useRef<Record<string, ChatPairContext>>({});
   liveMessagesRef.current = messages;
+
+  const chatSessionIdFor = (personalityId = selectedPersonalityId, userProfileId = selectedUserProfileId) =>
+    chatPairSessionIdFor(userProfileId, personalityId);
+
+  const activeChatSessionId = chatSessionIdFor(selectedPersonalityId, selectedUserProfileId);
+  activeChatSessionIdRef.current = activeChatSessionId;
+  sessionPairContextsRef.current[activeChatSessionId] = chatPairContextFor(selectedUserProfileId, selectedPersonalityId);
+
+  const schedulePersistChatSession = (sessionId: string, session: ChatMessage[], context = sessionPairContextsRef.current[sessionId]) => {
+    if (!settingsLoaded || !sessionId || !loadedChatSessionIdsRef.current.has(sessionId)) return;
+    if (persistSessionTimersRef.current[sessionId]) {
+      window.clearTimeout(persistSessionTimersRef.current[sessionId]);
+    }
+    const sessionForStorage = context ? withSpeakerIds(session, context) : session;
+    const sessionJson = JSON.stringify(compactChatSessionForStorage(sessionForStorage));
+    sessionShadowRef.current[sessionId] = sessionJson;
+    lastSessionMutationAtRef.current[sessionId] = Date.now();
+    persistSessionTimersRef.current[sessionId] = window.setTimeout(() => {
+      delete persistSessionTimersRef.current[sessionId];
+      invoke("save_personality_chat_session", {
+        personalityId: sessionId,
+        messagesJson: sessionJson,
+      }).catch((error) => console.error("Chat session save error:", error));
+    }, 900);
+  };
+
+  const updateChatSessionMessages = (
+    sessionId: string,
+    updater: ChatMessage[] | ((messages: ChatMessage[]) => ChatMessage[]),
+    context = sessionPairContextsRef.current[sessionId],
+  ) => {
+    if (!sessionId) return;
+    if (context) {
+      sessionPairContextsRef.current[sessionId] = context;
+    }
+    const apply = (current: ChatMessage[]) => typeof updater === "function"
+      ? (updater as (messages: ChatMessage[]) => ChatMessage[])(current)
+      : updater;
+    if (activeChatSessionIdRef.current === sessionId) {
+      setMessages((prev) => {
+        const next = context ? withSpeakerIds(apply(prev), context) : apply(prev);
+        const displayNext = context
+          ? displaySessionForControlledSpeaker(next, chatPairContextFor(selectedUserProfileId, selectedPersonalityId))
+          : next;
+        chatSessionsRef.current = { ...chatSessionsRef.current, [sessionId]: displayNext };
+        schedulePersistChatSession(sessionId, next, context);
+        return displayNext;
+      });
+      return;
+    }
+    const current = chatSessionsRef.current[sessionId] ?? [];
+    const next = context ? withSpeakerIds(apply(current), context) : apply(current);
+    chatSessionsRef.current = { ...chatSessionsRef.current, [sessionId]: next };
+    setChatSessions((prev) => ({ ...prev, [sessionId]: next }));
+    schedulePersistChatSession(sessionId, next, context);
+  };
 
   const saveActiveChatSession = (
     personalityId = selectedPersonalityId,
     session = messages,
+    userProfileId = selectedUserProfileId,
   ) => {
-    if (!personalityId) return;
+    const canonicalContext = chatPairContextFor(userProfileId, personalityId);
+    const sessionId = chatSessionIdFor(personalityId, userProfileId);
+    if (!sessionId) return;
+    sessionPairContextsRef.current[sessionId] = canonicalContext;
+    const sessionForStorage = withSpeakerIds(session, canonicalContext);
     chatSessionsRef.current = {
       ...chatSessionsRef.current,
-      [personalityId]: session,
+      [sessionId]: sessionForStorage,
     };
     setChatSessions((prev) =>
-      prev[personalityId] === session ? prev : { ...prev, [personalityId]: session },
+      prev[sessionId] === sessionForStorage ? prev : { ...prev, [sessionId]: sessionForStorage },
     );
   };
 
-  const loadChatSessionForPersonality = (personalityId: string) => {
-    const session = chatSessionsRef.current[personalityId] ?? [];
+  const loadChatSessionForPersonality = (personalityId: string, userProfileId = selectedUserProfileId) => {
+    const canonicalContext = chatPairContextFor(userProfileId, personalityId);
+    const sessionId = chatSessionIdFor(personalityId, userProfileId);
+    sessionPairContextsRef.current[sessionId] = canonicalContext;
+    const session = displaySessionForControlledSpeaker(chatSessionsRef.current[sessionId] ?? [], canonicalContext);
     setMessages(session);
     lastMessageCountRef.current = session.length;
     ensureConversationStartsAtBottom();
   };
 
-  const registerEmptyChatSession = (personalityId: string) => {
+  const registerEmptyChatSession = (personalityId: string, userProfileId = selectedUserProfileId) => {
+    const canonicalContext = chatPairContextFor(userProfileId, personalityId);
+    const sessionId = chatSessionIdFor(personalityId, userProfileId);
     const empty: ChatMessage[] = [];
-    loadedChatSessionIdsRef.current.add(personalityId);
-    chatSessionsRef.current = { ...chatSessionsRef.current, [personalityId]: empty };
-    setChatSessions((prev) => ({ ...prev, [personalityId]: empty }));
-    sessionShadowRef.current[personalityId] = compactSessionFingerprint(empty);
-    lastSessionMutationAtRef.current[personalityId] = Date.now();
+    sessionPairContextsRef.current[sessionId] = canonicalContext;
+    loadedChatSessionIdsRef.current.add(sessionId);
+    chatSessionsRef.current = { ...chatSessionsRef.current, [sessionId]: empty };
+    setChatSessions((prev) => ({ ...prev, [sessionId]: empty }));
+    sessionShadowRef.current[sessionId] = compactSessionFingerprint(empty);
+    lastSessionMutationAtRef.current[sessionId] = Date.now();
   };
 
   const removeChatSession = (personalityId: string) => {
-    const { [personalityId]: _deletedSession, ...remainingSessions } = chatSessionsRef.current;
-    loadedChatSessionIdsRef.current.delete(personalityId);
-    delete sessionShadowRef.current[personalityId];
-    delete lastSessionMutationAtRef.current[personalityId];
+    const suffix = `::${personalityId}`;
+    const remainingSessions = Object.fromEntries(
+      Object.entries(chatSessionsRef.current).filter(([sessionId]) => sessionId !== personalityId && !sessionId.endsWith(suffix)),
+    );
+    for (const sessionId of Object.keys(chatSessionsRef.current)) {
+      if (sessionId === personalityId || sessionId.endsWith(suffix)) {
+        loadedChatSessionIdsRef.current.delete(sessionId);
+        delete sessionShadowRef.current[sessionId];
+        delete lastSessionMutationAtRef.current[sessionId];
+      }
+    }
     chatSessionsRef.current = remainingSessions;
     setChatSessions(remainingSessions);
     return remainingSessions;
@@ -82,86 +229,142 @@ export function useChatSessions({
 
   const clearActiveChatSession = () => {
     setMessages([]);
-    if (selectedPersonalityId) {
+    if (activeChatSessionId) {
       const empty: ChatMessage[] = [];
       chatSessionsRef.current = {
         ...chatSessionsRef.current,
-        [selectedPersonalityId]: empty,
+        [activeChatSessionId]: empty,
       };
-      setChatSessions((prev) => ({ ...prev, [selectedPersonalityId]: empty }));
-      sessionShadowRef.current[selectedPersonalityId] = compactSessionFingerprint(empty);
-      lastSessionMutationAtRef.current[selectedPersonalityId] = Date.now();
+      setChatSessions((prev) => ({ ...prev, [activeChatSessionId]: empty }));
+      sessionShadowRef.current[activeChatSessionId] = compactSessionFingerprint(empty);
+      lastSessionMutationAtRef.current[activeChatSessionId] = Date.now();
+      invoke("delete_pair_chat_sessions", {
+        firstId: selectedUserProfileId,
+        secondId: selectedPersonalityId,
+      })
+        .then(() => invoke("save_personality_chat_session", {
+          personalityId: activeChatSessionId,
+          messagesJson: "[]",
+        }))
+        .catch((error) => console.error("Chat session clear error:", error));
     }
   };
 
   useEffect(() => {
-    chatSessionsRef.current = chatSessions;
-  }, [chatSessions]);
-
-  useEffect(() => {
+    if (!activeChatSessionId) return;
+    if (lastMessagesObjectRef.current === messages) return;
+    lastMessagesObjectRef.current = messages;
+    const context = sessionPairContextsRef.current[activeChatSessionId] ?? chatPairContextFor(selectedUserProfileId, selectedPersonalityId);
+    const session = withSpeakerIds(messages, context);
     setChatSessions((prev) =>
-      prev[selectedPersonalityId] === messages
+      prev[activeChatSessionId] === session
         ? prev
-        : { ...prev, [selectedPersonalityId]: messages },
+        : { ...prev, [activeChatSessionId]: session },
     );
     chatSessionsRef.current = {
       ...chatSessionsRef.current,
-      [selectedPersonalityId]: messages,
+      [activeChatSessionId]: session,
     };
-  }, [messages, selectedPersonalityId]);
+  }, [messages, activeChatSessionId, selectedUserProfileId, selectedPersonalityId]);
 
   useEffect(() => {
-    if (!settingsLoaded || !selectedPersonalityId || loadedChatSessionIdsRef.current.has(selectedPersonalityId)) {
+    if (!settingsLoaded || !activeChatSessionId || loadedChatSessionIdsRef.current.has(activeChatSessionId)) {
       return;
     }
 
     let active = true;
-    invoke<string>("load_personality_chat_session", { personalityId: selectedPersonalityId })
-      .then((raw) => {
+    const context = chatPairContextFor(selectedUserProfileId, selectedPersonalityId);
+    sessionPairContextsRef.current[activeChatSessionId] = context;
+    invoke<ChatSessionLoadState>("load_personality_chat_session_state", { personalityId: activeChatSessionId })
+      .then(async (state) => {
         if (!active) return;
-        const session = parseStoredChatSession(raw);
-        loadedChatSessionIdsRef.current.add(selectedPersonalityId);
-        chatSessionsRef.current = { ...chatSessionsRef.current, [selectedPersonalityId]: session };
-        setChatSessions((prev) => ({ ...prev, [selectedPersonalityId]: session }));
-        setMessages(session);
-        lastMessageCountRef.current = session.length;
-        sessionShadowRef.current[selectedPersonalityId] = compactSessionFingerprint(session);
-        lastSessionMutationAtRef.current[selectedPersonalityId] = Date.now();
+        let session = parseStoredChatSession(state.messages_json);
+        if ((!state.exists || session.length < 1) && activeChatSessionId.includes("::")) {
+          const oldPairKeys = [
+            `${selectedUserProfileId}::${selectedPersonalityId}`,
+            `${selectedPersonalityId}::${selectedUserProfileId}`,
+            `${canonicalProfileId(selectedUserProfileId, "user")}::${canonicalProfileId(selectedPersonalityId, "personality")}`,
+            `${canonicalProfileId(selectedPersonalityId, "personality")}::${canonicalProfileId(selectedUserProfileId, "user")}`,
+          ];
+          try {
+            for (const oldPairKey of oldPairKeys) {
+              const oldPairState = await invoke<ChatSessionLoadState>("load_personality_chat_session_state", {
+                personalityId: oldPairKey,
+              });
+              const oldPairSession = parseStoredChatSession(oldPairState.messages_json);
+              if (oldPairState.exists && oldPairSession.length > 0) {
+                session = oldPairSession;
+                break;
+              }
+            }
+            if (session.length < 1) {
+              const legacyState = await invoke<ChatSessionLoadState>("load_personality_chat_session_state", {
+                personalityId: selectedPersonalityId,
+              });
+              const legacySession = parseStoredChatSession(legacyState.messages_json);
+              if (legacyState.exists && legacySession.length > 0) {
+                session = legacySession;
+              }
+            }
+            if (session.length > 0) {
+              const migrated = withSpeakerIds(session, context);
+              const migratedJson = JSON.stringify(compactChatSessionForStorage(migrated));
+              await invoke("save_personality_chat_session", {
+                personalityId: activeChatSessionId,
+                messagesJson: migratedJson,
+              });
+              session = migrated;
+            }
+          } catch (error) {
+            console.error("Legacy chat session import error:", error);
+          }
+        }
+        session = cleanStoredAssistantMessages(withSpeakerIds(session, context));
+        const displaySession = displaySessionForControlledSpeaker(session, context);
+        loadedChatSessionIdsRef.current.add(activeChatSessionId);
+        chatSessionsRef.current = { ...chatSessionsRef.current, [activeChatSessionId]: displaySession };
+        setChatSessions((prev) => ({ ...prev, [activeChatSessionId]: displaySession }));
+        setMessages(displaySession);
+        lastMessagesObjectRef.current = displaySession;
+        lastMessageCountRef.current = displaySession.length;
+        sessionShadowRef.current[activeChatSessionId] = compactSessionFingerprint(session);
+        lastSessionMutationAtRef.current[activeChatSessionId] = Date.now();
       })
       .catch((error) => {
         console.error("Chat session load error:", error);
-        loadedChatSessionIdsRef.current.add(selectedPersonalityId);
+        loadedChatSessionIdsRef.current.add(activeChatSessionId);
       });
 
     return () => {
       active = false;
     };
-  }, [settingsLoaded, selectedPersonalityId, setMessages, lastMessageCountRef]);
+  }, [settingsLoaded, selectedPersonalityId, selectedUserProfileId, activeChatSessionId, setMessages, lastMessageCountRef]);
 
   useEffect(() => {
     if (!settingsLoaded) return;
     ensureConversationStartsAtBottom();
-  }, [settingsLoaded, selectedPersonalityId, messages.length, ensureConversationStartsAtBottom]);
+  }, [settingsLoaded, activeChatSessionId, messages.length, ensureConversationStartsAtBottom]);
 
   useEffect(() => {
-    if (!settingsLoaded || !selectedPersonalityId || !loadedChatSessionIdsRef.current.has(selectedPersonalityId)) {
+    if (!settingsLoaded || !activeChatSessionId || !loadedChatSessionIdsRef.current.has(activeChatSessionId)) {
       return;
     }
-    const session = compactChatSessionForStorage(messages);
+    const context = sessionPairContextsRef.current[activeChatSessionId] ?? chatPairContextFor(selectedUserProfileId, selectedPersonalityId);
+    const session = compactChatSessionForStorage(withSpeakerIds(messages, context));
     const sessionJson = JSON.stringify(session);
-    sessionShadowRef.current[selectedPersonalityId] = sessionJson;
-    lastSessionMutationAtRef.current[selectedPersonalityId] = Date.now();
+    sessionShadowRef.current[activeChatSessionId] = sessionJson;
+    lastSessionMutationAtRef.current[activeChatSessionId] = Date.now();
     const handle = window.setTimeout(() => {
       invoke("save_personality_chat_session", {
-        personalityId: selectedPersonalityId,
+        personalityId: activeChatSessionId,
         messagesJson: sessionJson,
       }).catch((error) => console.error("Chat session save error:", error));
     }, 900);
     return () => window.clearTimeout(handle);
-  }, [settingsLoaded, selectedPersonalityId, messages]);
+  }, [settingsLoaded, activeChatSessionId, selectedUserProfileId, selectedPersonalityId, messages]);
 
   useEffect(() => {
-    if (!settingsLoaded || !selectedPersonalityId || !loadedChatSessionIdsRef.current.has(selectedPersonalityId)) {
+    if (!settingsLoaded || !activeChatSessionId || !loadedChatSessionIdsRef.current.has(activeChatSessionId)) {
       return;
     }
 
@@ -169,37 +372,40 @@ export function useChatSessions({
     const syncSession = async () => {
       if (sendInFlightRef.current || isStreaming) return;
       if (Date.now() - lastComposerInputAtRef.current < 1200) return;
-      const lastMutation = lastSessionMutationAtRef.current[selectedPersonalityId] ?? 0;
+      const lastMutation = lastSessionMutationAtRef.current[activeChatSessionId] ?? 0;
       if (Date.now() - lastMutation < 1800) return;
       try {
+        const context = sessionPairContextsRef.current[activeChatSessionId] ?? chatPairContextFor(selectedUserProfileId, selectedPersonalityId);
         const raw = await invoke<string>("load_personality_chat_session", {
-          personalityId: selectedPersonalityId,
+          personalityId: activeChatSessionId,
         });
         if (!active) return;
-        const remoteSession = parseStoredChatSession(raw);
+        const remoteSession = cleanStoredAssistantMessages(withSpeakerIds(parseStoredChatSession(raw), context));
         const remoteFingerprint = compactSessionFingerprint(remoteSession);
-        const localSession = liveMessagesRef.current;
+        const localSession = withSpeakerIds(liveMessagesRef.current, context);
         const localFingerprint = compactSessionFingerprint(localSession);
         if (localFingerprint !== remoteFingerprint && localSession.length > remoteSession.length) {
-          sessionShadowRef.current[selectedPersonalityId] = localFingerprint;
+          sessionShadowRef.current[activeChatSessionId] = localFingerprint;
           chatSessionsRef.current = {
             ...chatSessionsRef.current,
-            [selectedPersonalityId]: localSession,
+            [activeChatSessionId]: localSession,
           };
           return;
         }
         const currentFingerprint =
-          sessionShadowRef.current[selectedPersonalityId] ??
-          compactSessionFingerprint(chatSessionsRef.current[selectedPersonalityId] ?? []);
+          sessionShadowRef.current[activeChatSessionId] ??
+          compactSessionFingerprint(chatSessionsRef.current[activeChatSessionId] ?? []);
         if (remoteFingerprint === currentFingerprint) return;
-        sessionShadowRef.current[selectedPersonalityId] = remoteFingerprint;
+        sessionShadowRef.current[activeChatSessionId] = remoteFingerprint;
+        const displayRemoteSession = displaySessionForControlledSpeaker(remoteSession, context);
         chatSessionsRef.current = {
           ...chatSessionsRef.current,
-          [selectedPersonalityId]: remoteSession,
+          [activeChatSessionId]: displayRemoteSession,
         };
-        setChatSessions((prev) => ({ ...prev, [selectedPersonalityId]: remoteSession }));
-        setMessages(remoteSession);
-        lastMessageCountRef.current = remoteSession.length;
+        setChatSessions((prev) => ({ ...prev, [activeChatSessionId]: displayRemoteSession }));
+        setMessages(displayRemoteSession);
+        lastMessagesObjectRef.current = displayRemoteSession;
+        lastMessageCountRef.current = displayRemoteSession.length;
       } catch (error) {
         console.error("Chat session sync error:", error);
       }
@@ -216,6 +422,8 @@ export function useChatSessions({
     };
   }, [
     settingsLoaded,
+    activeChatSessionId,
+    selectedUserProfileId,
     selectedPersonalityId,
     telegramRunning,
     isStreaming,
@@ -231,5 +439,7 @@ export function useChatSessions({
     registerEmptyChatSession,
     removeChatSession,
     clearActiveChatSession,
+    activeChatSessionId,
+    updateChatSessionMessages,
   };
 }

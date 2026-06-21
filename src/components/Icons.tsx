@@ -98,6 +98,19 @@ export function RefreshIcon({ className = "h-5 w-5" }: { className?: string }) {
   );
 }
 
+export function AutoPilotIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M20 7.5a8 8 0 0 0-13.5-2.2" />
+      <path d="M20 3.5v4h-4" />
+      <path d="M4 16.5a8 8 0 0 0 13.5 2.2" />
+      <path d="M4 20.5v-4h4" />
+      <path d="M8.8 15.2 12 7.8l3.2 7.4" />
+      <path d="M10 12.8h4" />
+    </svg>
+  );
+}
+
 export function DownloadIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -149,6 +162,26 @@ export function CloseIcon({ className = "h-5 w-5" }: { className?: string }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <line x1="18" y1="6" x2="6" y2="18" />
       <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+export function LeftPanelIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <path d="M9 4v16" />
+      <path d="M6.5 12h-1.5" />
+    </svg>
+  );
+}
+
+export function RightPanelIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <path d="M15 4v16" />
+      <path d="M19 12h-1.5" />
     </svg>
   );
 }

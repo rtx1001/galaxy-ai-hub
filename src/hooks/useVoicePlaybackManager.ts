@@ -11,10 +11,13 @@ import {
   extractMessageText,
   isGpuFitError,
   sanitizeTextForSpeech,
+  splitTextForSpeechPlayback,
 } from "../appCore";
 
 type ActiveTaskType = "none" | "llm" | "voice" | "image";
 type SpeechQueueItem = { id: string; role: "user" | "assistant"; text: string };
+type SpeechChunkQueueItem = SpeechQueueItem & { chunk: string; chunkIndex: number; chunkCount: number };
+type LastSpeechChunkPlayback = { messageId: string; at: number; requestId: number };
 
 type UseVoicePlaybackManagerOptions = {
   activeTaskTypeRef: MutableRefObject<ActiveTaskType>;
@@ -24,8 +27,9 @@ type UseVoicePlaybackManagerOptions = {
   isStreaming: boolean;
   liveConversation: boolean;
   lastAutoSpokenAssistantIdRef: MutableRefObject<string | null>;
+  lastSpeechChunkPlaybackStartedRef: MutableRefObject<LastSpeechChunkPlayback | null>;
   messages: ChatMessage[];
-  playAudioBase64: (audioBase64: string, mimeType: string) => Promise<void>;
+  playAudioBase64: (audioBase64: string, mimeType: string, onStarted?: () => void) => Promise<void>;
   previewingVoicePath: string | null;
   recordClientToolRun: (
     name: string,
@@ -41,6 +45,7 @@ type UseVoicePlaybackManagerOptions = {
   setBrainStatus: Dispatch<SetStateAction<"Idle" | "Loading" | "Ready" | "Thinking" | "Error">>;
   setComposerNotice: Dispatch<SetStateAction<string>>;
   setPreviewingVoicePath: Dispatch<SetStateAction<string | null>>;
+  speakingMessageIdRef: MutableRefObject<string | null>;
   setSpeakingMessageId: Dispatch<SetStateAction<string | null>>;
   stopActiveAudio: () => void;
   unloadLlmForTask: (taskType: "voice" | "image") => Promise<void>;
@@ -56,6 +61,7 @@ export function useVoicePlaybackManager({
   isStreaming,
   liveConversation,
   lastAutoSpokenAssistantIdRef,
+  lastSpeechChunkPlaybackStartedRef,
   messages,
   playAudioBase64,
   previewingVoicePath,
@@ -67,6 +73,7 @@ export function useVoicePlaybackManager({
   setBrainStatus,
   setComposerNotice,
   setPreviewingVoicePath,
+  speakingMessageIdRef,
   setSpeakingMessageId,
   stopActiveAudio,
   unloadLlmForTask,
@@ -74,8 +81,30 @@ export function useVoicePlaybackManager({
   appLog,
 }: UseVoicePlaybackManagerOptions) {
   const speechCacheRef = useRef<Map<string, AudioSynthesisResult>>(new Map());
+  const speechSequenceDoneRef = useRef<Promise<void>>(Promise.resolve());
+
+  const markSpeakingMessage = (messageId: string) => {
+    speakingMessageIdRef.current = messageId;
+    setSpeakingMessageId(messageId);
+  };
+
+  const clearSpeakingMessageForSequence = (sequenceIds: Set<string>) => {
+    if (!sequenceIds.has(speakingMessageIdRef.current || "")) {
+      return;
+    }
+    speakingMessageIdRef.current = null;
+    setSpeakingMessageId(null);
+  };
 
   const chooseVoiceVramMode = async () => {
+    if (liveConversation) {
+      activeTaskTypeRef.current = "voice";
+      setActiveTaskType("voice");
+      setComposerNotice("Loading voice...");
+      appLog("voice vram live conversation prefers shared mode to keep LLM warm");
+      return "shared" as const;
+    }
+
     const llmIsLoaded =
       activeTaskTypeRef.current === "llm" ||
       brainStatus === "Ready" ||
@@ -214,12 +243,23 @@ export function useVoicePlaybackManager({
     return result;
   };
 
+  const speechChunksForItem = (item: SpeechQueueItem): SpeechChunkQueueItem[] => {
+    const chunks = splitTextForSpeechPlayback(item.text);
+    return chunks.map((chunk, index) => ({
+      ...item,
+      chunk,
+      chunkIndex: index,
+      chunkCount: chunks.length,
+    }));
+  };
+
   const playSpeechAudio = async (
     result: AudioSynthesisResult | null,
     requestId: number,
+    onStarted?: () => void,
   ) => {
     if (!result || requestId !== voicePlaybackRequestRef.current) return;
-    await playAudioBase64(result.audio_base64, result.mime_type);
+    await playAudioBase64(result.audio_base64, result.mime_type, onStarted);
     appLog(`voice synth playback started request=${requestId}`);
   };
 
@@ -229,6 +269,8 @@ export function useVoicePlaybackManager({
     requestId: number,
     manageVram = true,
   ) => {
+    activeTaskTypeRef.current = "voice";
+    setActiveTaskType("voice");
     stopActiveAudio();
     const result = await synthesizeSpeechAudio(text, voiceSamplePath, requestId, manageVram);
     await playSpeechAudio(result, requestId);
@@ -240,24 +282,62 @@ export function useVoicePlaybackManager({
   const playSpeechSequence = async (
     sequence: SpeechQueueItem[],
     requestId: number,
+    options: { interruptCurrent?: boolean } = {},
   ) => {
     if (!sequence.length) return;
-    stopActiveAudio();
-    let nextAudioPromise: Promise<AudioSynthesisResult | null> | null = null;
-    for (let index = 0; index < sequence.length; index += 1) {
-      if (requestId !== voicePlaybackRequestRef.current) return;
-      const item = sequence[index];
-      const currentAudioPromise =
-        nextAudioPromise ??
-        synthesizeSpeechAudio(item.text, voicePathForRole(item.role), requestId);
-      const nextItem = sequence[index + 1];
-      const result = await currentAudioPromise;
-      if (requestId !== voicePlaybackRequestRef.current) return;
-      nextAudioPromise = nextItem
-        ? synthesizeSpeechAudio(nextItem.text, voicePathForRole(nextItem.role), requestId)
-        : null;
-      setSpeakingMessageId(item.id);
-      await playSpeechAudio(result, requestId);
+    const interruptCurrent = options.interruptCurrent !== false;
+    const previousSequenceDone = speechSequenceDoneRef.current;
+    let resolveCurrentSequence: () => void = () => undefined;
+    speechSequenceDoneRef.current = new Promise<void>((resolve) => {
+      resolveCurrentSequence = resolve;
+    });
+    activeTaskTypeRef.current = "voice";
+    setActiveTaskType("voice");
+    try {
+      if (lastSpeechChunkPlaybackStartedRef.current) {
+        const sequenceIds = new Set(sequence.map((item) => item.id));
+        if (sequenceIds.has(lastSpeechChunkPlaybackStartedRef.current.messageId)) {
+          lastSpeechChunkPlaybackStartedRef.current = null;
+        }
+      }
+      if (interruptCurrent) {
+        stopActiveAudio();
+      }
+      const chunks = sequence.flatMap(speechChunksForItem);
+      if (chunks.length) {
+        await invoke("clear_omnivoice_output_cache").catch((error) => {
+          console.warn("Could not clear old OmniVoice debug files:", error);
+        });
+      }
+      let nextAudioPromise: Promise<AudioSynthesisResult | null> | null = null;
+      for (let index = 0; index < chunks.length; index += 1) {
+        if (requestId !== voicePlaybackRequestRef.current) return;
+        const item = chunks[index];
+        const currentAudioPromise =
+          nextAudioPromise ??
+          synthesizeSpeechAudio(item.chunk, voicePathForRole(item.role), requestId, index === 0);
+        const nextItem = chunks[index + 1];
+        const result = await currentAudioPromise;
+        if (requestId !== voicePlaybackRequestRef.current) return;
+        nextAudioPromise = nextItem
+          ? synthesizeSpeechAudio(nextItem.chunk, voicePathForRole(nextItem.role), requestId, false)
+          : null;
+        if (!interruptCurrent && index === 0) {
+          await previousSequenceDone;
+        }
+        if (requestId !== voicePlaybackRequestRef.current) return;
+        markSpeakingMessage(item.id);
+        await playSpeechAudio(result, requestId, !nextItem ? () => {
+          lastSpeechChunkPlaybackStartedRef.current = {
+            messageId: item.id,
+            at: performance.now(),
+            requestId,
+          };
+          appLog(`voice final chunk playback started message=${item.id} request=${requestId}`);
+        } : undefined);
+      }
+    } finally {
+      resolveCurrentSequence();
     }
   };
 
@@ -265,13 +345,16 @@ export function useVoicePlaybackManager({
     messageId: string,
     text: string,
     role: "user" | "assistant",
+    options: { queued?: boolean } = {},
   ) => {
     const firstSpeechText = sanitizeTextForSpeech(text);
     if (!firstSpeechText.trim()) {
       return;
     }
 
-    const requestId = ++voicePlaybackRequestRef.current;
+    const requestId = options.queued
+      ? voicePlaybackRequestRef.current
+      : ++voicePlaybackRequestRef.current;
     const startIndex = liveConversation
       ? messages.findIndex((message) => message.id === messageId)
       : -1;
@@ -290,15 +373,16 @@ export function useVoicePlaybackManager({
               return Boolean(cleaned) && !cleaned.startsWith("error") && cleaned !== "stopped";
             })
         : [{ id: messageId, role, text }];
+    const sequenceIds = new Set(sequence.map((item) => item.id));
     try {
-      await playSpeechSequence(sequence, requestId);
+      await playSpeechSequence(sequence, requestId, { interruptCurrent: !options.queued });
       setComposerNotice("");
     } catch (error) {
       console.error("Speech error:", error);
       setComposerNotice(error instanceof Error ? error.message : String(error));
     } finally {
       if (requestId === voicePlaybackRequestRef.current) {
-        setSpeakingMessageId(null);
+        clearSpeakingMessageForSequence(sequenceIds);
       }
       if (activeTaskTypeRef.current === "voice") {
         activeTaskTypeRef.current = "none";
@@ -310,7 +394,11 @@ export function useVoicePlaybackManager({
     }
   };
 
-  const playAutoSpeechQueue = async (queue: string[], requestId: number) => {
+  const playAutoSpeechQueue = async (
+    queue: string[],
+    requestId: number,
+    options: { queued?: boolean } = {},
+  ) => {
     const sequence = queue
       .map((messageId): SpeechQueueItem | null => {
         const message = messages.find((item) => item.id === messageId && item.role === "assistant");
@@ -334,12 +422,12 @@ export function useVoicePlaybackManager({
 
     for (const item of sequence) {
       if (requestId !== voicePlaybackRequestRef.current) return;
-      autoSpeechEligibleAssistantIdsRef.current.delete(item.id);
       lastAutoSpokenAssistantIdRef.current = item.id;
     }
 
+    const sequenceIds = new Set(sequence.map((item) => item.id));
     try {
-      await playSpeechSequence(sequence, requestId);
+      await playSpeechSequence(sequence, requestId, { interruptCurrent: !options.queued });
     } catch (error) {
       const failedId = sequence.find((item) => item.id === lastAutoSpokenAssistantIdRef.current)?.id ?? sequence[0]?.id ?? "";
       console.error("Live speech error:", error);
@@ -349,8 +437,9 @@ export function useVoicePlaybackManager({
     } finally {
       try {
         if (requestId === voicePlaybackRequestRef.current) {
-          setSpeakingMessageId(null);
+          clearSpeakingMessageForSequence(sequenceIds);
         }
+        sequence.forEach((item) => autoSpeechEligibleAssistantIdsRef.current.delete(item.id));
         if (activeTaskTypeRef.current === "voice") {
           activeTaskTypeRef.current = "none";
           setActiveTaskType("none");

@@ -61,7 +61,7 @@ export function TelegramSection({
               <button
                 type="button"
                 onClick={onTest}
-                className="rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 py-2.5 text-sm font-semibold text-[#e3e3e3] transition hover:bg-[#282a2c]"
+                className="rounded-2xl border border-[#282a2c] bg-[#1e1f20] px-3 py-2.5 text-sm font-semibold text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
               >
                 Test
               </button>

@@ -217,10 +217,6 @@ pub(super) async fn build_telegram_switch_greeting(profile: &TelegramAssistantPr
     }
 }
 
-pub(super) fn personality_memory_kind(personality_id: &str) -> String {
-    format!("personality:{}", personality_id)
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct StructuredMemoryDocument {
     #[serde(default)]
@@ -320,36 +316,6 @@ fn parse_structured_memory(raw: &str) -> StructuredMemoryDocument {
 
 fn serialize_structured_memory(memory: StructuredMemoryDocument) -> String {
     serde_json::to_string(&normalize_structured_memory(memory)).unwrap_or_default()
-}
-
-fn format_memory_section(title: &str, items: &[String]) -> Option<String> {
-    (!items.is_empty()).then(|| {
-        format!(
-            "{}\n{}",
-            title,
-            items
-                .iter()
-                .map(|item| format!("- {}", item))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    })
-}
-
-pub(super) fn format_personality_memory_for_prompt(raw: &str) -> String {
-    let memory = parse_structured_memory(raw);
-    [
-        format_memory_section("Stable user facts", &memory.profile_facts),
-        format_memory_section("User preferences", &memory.preferences),
-        format_memory_section("Relationship and communication style", &memory.relationship),
-        format_memory_section("Projects and recurring topics", &memory.projects),
-        format_memory_section("Open threads to remember", &memory.open_threads),
-        format_memory_section("Recent useful context", &memory.recent_turns),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join("\n\n")
 }
 
 pub(super) fn compact_personality_memory(
@@ -506,62 +472,9 @@ pub(super) fn build_telegram_user_content(text: &str, files: &[TelegramIncomingF
     }
 }
 
-pub(super) fn load_personality_memory(personality_id: &str) -> String {
-    let items = list_local_memory(Some(personality_memory_kind(personality_id)), Some(500))
-        .unwrap_or_default();
-    let summary = items
-        .iter()
-        .find(|item| item.key == "compact_style_memory")
-        .map(|item| item.value.clone())
-        .unwrap_or_default();
-    let mut structured = parse_structured_memory(&summary);
-    let mut event_turns = items
-        .iter()
-        .filter(|item| item.key.starts_with("event:"))
-        .filter_map(|item| {
-            let value = serde_json::from_str::<serde_json::Value>(&item.value).ok()?;
-            let user = value
-                .get("user")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            let assistant = value
-                .get("assistant")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            if memory_line_is_internal_artifact(user) || memory_line_is_internal_artifact(assistant)
-            {
-                return None;
-            }
-            let turn = [
-                (!user.trim().is_empty())
-                    .then(|| format!("User: {}", compact_memory_line(user, 260))),
-                (!assistant.trim().is_empty())
-                    .then(|| format!("Assistant: {}", compact_memory_line(assistant, 260))),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" | ");
-            (!turn.is_empty()).then_some((item.created_at, turn))
-        })
-        .collect::<Vec<_>>();
-    event_turns.sort_by_key(|(created_at, _)| *created_at);
-    for (_, turn) in event_turns
-        .into_iter()
-        .rev()
-        .take(8)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-    {
-        structured.recent_turns.retain(|item| item != &turn);
-        structured.recent_turns.push(turn);
-    }
-    serialize_structured_memory(structured)
-}
-
 pub(super) fn update_personality_memory_after_turn(
     personality_id: &str,
+    personality_name: &str,
     current_memory: &str,
     user_text: &str,
     answer_text: &str,
@@ -574,30 +487,42 @@ pub(super) fn update_personality_memory_after_turn(
     if memory_line_is_internal_artifact(&clean_user)
         || memory_line_is_internal_artifact(&clean_answer)
     {
-        return serialize_structured_memory(parse_structured_memory(current_memory));
+        let next = serialize_structured_memory(parse_structured_memory(current_memory));
+        let _ = character_store::save_character_memory(
+            personality_id.to_string(),
+            personality_name.to_string(),
+            next.clone(),
+        );
+        return next;
     }
-    let now_ms = chrono::Local::now().timestamp_millis();
-    let event_value = serde_json::json!({
-        "user": clean_user,
-        "assistant": clean_answer,
-        "created_at": now_ms
-    })
-    .to_string();
-    let event_key = format!("event:{}:telegram", now_ms);
-    let _ = remember_local_memory(
-        personality_memory_kind(personality_id),
-        event_key,
-        event_value,
-        Some("memory_event_telegram".to_string()),
-        Some(0.86),
+    let next = compact_personality_memory(current_memory, user_text, answer_text);
+    let _ = character_store::save_character_memory(
+        personality_id.to_string(),
+        personality_name.to_string(),
+        next.clone(),
     );
-    compact_personality_memory(current_memory, user_text, answer_text)
+    next
+}
+
+fn meaningful_character_memory(memory: &str) -> Option<String> {
+    let trimmed = memory.trim();
+    if trimmed.is_empty() || trimmed.contains("Nothing important has been remembered yet.") {
+        None
+    } else if trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('-'))
+        .all(|line| line == "- None yet.")
+    {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 pub(super) fn build_personality_runtime_prompt(
     settings: &AppSettings,
     preset: &PersonalityPreset,
-    personality_memory: &str,
     fallback_system_prompt: &str,
 ) -> String {
     let personality_prompt = if preset.prompt.trim().is_empty() {
@@ -634,12 +559,11 @@ pub(super) fn build_personality_runtime_prompt(
         ));
     }
 
-    if !personality_memory.trim().is_empty() {
-        let formatted_memory = format_personality_memory_for_prompt(personality_memory);
-        sections.push(format!(
-            "\nConversation memory:\n{}",
-            formatted_memory.trim()
-        ));
+    let character_memory = character_files
+        .as_ref()
+        .and_then(|files| meaningful_character_memory(&files.memory));
+    if let Some(memory) = character_memory {
+        sections.push(format!("\nCharacter living memory:\n{}", memory));
     }
 
     let active_user = settings
@@ -722,7 +646,6 @@ pub(super) fn load_telegram_assistant_profile(
             avatar: String::new(),
             voice_path: String::new(),
         });
-    let personality_memory = load_personality_memory(&preset.id);
     let personality_history = load_personality_chat_history(&preset.id);
     let character_files = character_store::load_character_files(
         preset.id.clone(),
@@ -776,12 +699,7 @@ pub(super) fn load_telegram_assistant_profile(
         } else {
             None
         },
-        system_prompt: build_personality_runtime_prompt(
-            &settings,
-            &preset,
-            &personality_memory,
-            fallback_system_prompt,
-        ),
+        system_prompt: build_personality_runtime_prompt(&settings, &preset, fallback_system_prompt),
         folders: if settings.linked_folders.is_empty() {
             fallback_folders.to_vec()
         } else {
@@ -797,7 +715,10 @@ pub(super) fn load_telegram_assistant_profile(
         } else {
             settings.google_client_secret.trim().to_string()
         },
-        personality_memory,
+        personality_memory: character_files
+            .as_ref()
+            .and_then(|files| meaningful_character_memory(&files.memory))
+            .unwrap_or_default(),
         thinking_enabled: settings.thinking_enabled,
         sampling: agent_react::SamplingConfig {
             temperature: settings.sampling_temperature,

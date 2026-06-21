@@ -1,4 +1,13 @@
-import { PersonalityPreset, DisplayLanguage, cleanAssistantDisplayText, extractChatResponseText, modelAwareReplySampling, stripThinkBlocks } from "../appCore";
+import {
+  PersonalityPreset,
+  DisplayLanguage,
+  buildConversationIdentityBlock,
+  cleanAssistantDisplayText,
+  extractChatResponseText,
+  hasUnexpectedHanDrift,
+  modelAwareReplySampling,
+  stripThinkBlocks,
+} from "../appCore";
 
 const IMAGE_REPLY_TIMEOUT_MS = 25_000;
 
@@ -43,18 +52,26 @@ export function useImageCompletionReply(options: UseImageCompletionReplyOptions)
     const activePersonality =
       options.personalityPresets.find((preset) => preset.id === options.selectedPersonalityId) ??
       options.personalityPresets[0];
+    const assistantName = activePersonality?.name || "Assistant";
+    const activeUserName = options.userName.trim() || "User";
     const userLanguageHint =
       options.chatDisplayLanguage === "vi"
         ? "Reply in the same Vietnamese tone the user is using."
         : "Reply in the same language and tone the user is using.";
     const profilePrompt = [
+      buildConversationIdentityBlock({
+        assistantName,
+        userName: activeUserName,
+        userDescription: options.userDescription,
+      }),
+      "",
       `Assistant profile:
-Name: ${activePersonality?.name || "Assistant"}
+Name: ${assistantName}
 Instructions:
 ${options.personality || activePersonality?.prompt || "You are a helpful assistant."}`,
       options.characterSoul.trim() ? `\nAdditional character context:\n${options.characterSoul.trim()}` : "",
-      options.userName.trim() || options.userDescription.trim()
-        ? `\nUser profile:\nName: ${options.userName.trim() || "User"}\nAbout user: ${options.userDescription.trim() || ""}`
+      activeUserName || options.userDescription.trim()
+        ? `\nUser profile:\nName: ${activeUserName}\nAbout user: ${options.userDescription.trim() || ""}`
         : "",
       `\nTask: You just finished creating an image for the user. Write one short, natural assistant message for the chat bubble. ${userLanguageHint} Do not mention tools, prompts, files, generation engines, or approval. Do not ask a generic follow-up unless it feels natural. Keep it under 24 words.`,
     ].join("");
@@ -113,9 +130,42 @@ ${options.personality || activePersonality?.prompt || "You are a helpful assista
         throw new Error(`Image reply failed with status ${response.status}`);
       }
 
-      const reply = cleanAssistantDisplayText(stripThinkBlocks(extractChatResponseText(await response.json()))
+      const rawReply = stripThinkBlocks(extractChatResponseText(await response.json()))
         .replace(/\s+/g, " ")
-        .trim());
+        .trim();
+      let reply = cleanAssistantDisplayText(rawReply);
+      if (hasUnexpectedHanDrift(rawReply)) {
+        const repairResponse = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
+          method: "POST",
+          signal: controller.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: "system",
+                content: "Rewrite the message in the current chat language. Translate unexpected foreign-script fragments. Preserve meaning and tone. Output only the repaired message.",
+              },
+              { role: "user", content: rawReply },
+            ],
+            temperature: 0.25,
+            top_k: Math.max(20, Math.min(replySampling.topK || 40, 40)),
+            top_p: Math.min(replySampling.topP || 0.9, 0.9),
+            min_p: replySampling.minP,
+            repeat_last_n: Math.max(options.repeatLastN, 128),
+            repeat_penalty: Math.max(replySampling.repeatPenalty, 1.1),
+            max_tokens: 96,
+            stream: false,
+            chat_template_kwargs: {
+              enable_thinking: false,
+              thinking: false,
+            },
+          }),
+        });
+        if (repairResponse.ok) {
+          const repaired = cleanAssistantDisplayText(extractChatResponseText(await repairResponse.json()));
+          if (repaired && !hasUnexpectedHanDrift(repaired)) reply = repaired;
+        }
+      }
       options.appLog(`image completion reply done length=${reply.length}`);
       return reply;
     } catch (error) {

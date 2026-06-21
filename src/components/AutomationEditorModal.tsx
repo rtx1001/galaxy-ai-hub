@@ -222,10 +222,10 @@ export function AutomationEditorModal({
                           {automationEditorMonthTitle}
                         </button>
                         <div className="flex items-center gap-1">
-                          <button type="button" onClick={() => onAutomationEditorMonthChange((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))} className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[#1e1f20] text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]" title="Previous month">
+                          <button type="button" onClick={() => onAutomationEditorMonthChange((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))} className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[#282a2c] bg-[#1e1f20] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]" title="Previous month">
                             <ChevronUpIcon className="h-4 w-4" />
                           </button>
-                          <button type="button" onClick={() => onAutomationEditorMonthChange((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))} className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[#1e1f20] text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]" title="Next month">
+                          <button type="button" onClick={() => onAutomationEditorMonthChange((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))} className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[#282a2c] bg-[#1e1f20] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]" title="Next month">
                             <ChevronDownIcon className="h-4 w-4" />
                           </button>
                         </div>

@@ -1,8 +1,9 @@
 import brandLogo from "../assets/logo-gah.svg";
+import { startupThemeStyle } from "../appCore";
 
 export function StartupScreen() {
   return (
-    <div className="startup-screen" role="status" aria-live="polite">
+    <div className="startup-screen" role="status" aria-live="polite" style={startupThemeStyle()}>
       <div className="startup-card">
         <div className="startup-logo">
           <img src={brandLogo} alt="" aria-hidden="true" />

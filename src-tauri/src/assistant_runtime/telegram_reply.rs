@@ -234,6 +234,21 @@ pub(super) fn telegram_image_approval_text(vi: bool) -> &'static str {
     }
 }
 
+pub(super) fn default_image_reference_sources_for_mode(mode: &str) -> Vec<String> {
+    match mode {
+        "image_image" | "image_to_image" => vec!["chat_image".to_string()],
+        "avatar_image" | "bot_image" => vec!["bot_avatar".to_string()],
+        "user_avatar_image" | "avatar_user_image" | "user_image" => {
+            vec!["user_avatar".to_string()]
+        }
+        "user_character_image"
+        | "user_and_character_image"
+        | "both_avatars_image"
+        | "user_bot_image" => vec!["user_avatar".to_string(), "bot_avatar".to_string()],
+        _ => Vec::new(),
+    }
+}
+
 pub(super) fn proposal_string(proposal: &ActionProposal, key: &str) -> String {
     proposal
         .arguments
@@ -475,19 +490,10 @@ pub(super) async fn execute_telegram_pending_approval(
                             .ok()
                             .and_then(|guard| guard.last_image_by_chat.get(&chat_id).cloned())
                             .and_then(|path| image_reference_data_url(&path))
-                    });
+                });
                 let mut reference_sources = proposal.reference_sources.clone();
                 if reference_sources.is_empty() {
-                    reference_sources = match proposal.mode.as_str() {
-                        "image_image" | "image_to_image" => vec!["chat_image".to_string()],
-                        "avatar_image" | "bot_image" => vec!["bot_avatar".to_string()],
-                        "user_avatar_image" | "avatar_user_image" | "user_image" => {
-                            vec!["user_avatar".to_string()]
-                        }
-                        "user_character_image" | "user_and_character_image" | "both_avatars_image"
-                        | "user_bot_image" => vec!["user_avatar".to_string(), "bot_avatar".to_string()],
-                        _ => Vec::new(),
-                    };
+                    reference_sources = default_image_reference_sources_for_mode(&proposal.mode);
                 }
                 let mut init_images = Vec::new();
                 for source in reference_sources {

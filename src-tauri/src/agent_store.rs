@@ -17,6 +17,12 @@ pub struct MemoryItem {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ChatSessionLoad {
+    pub exists: bool,
+    pub messages_json: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct AutomationJob {
     pub id: i64,
     pub name: String,
@@ -159,7 +165,8 @@ fn initialize_db(conn: &Connection) -> Result<(), String> {
 }
 
 fn sanitize_required(value: String, label: &str, max_len: usize) -> Result<String, String> {
-    let trimmed = value.trim();
+    let repaired = crate::text_encoding::repair_mojibake_text(&value);
+    let trimmed = repaired.trim();
     if trimmed.is_empty() {
         return Err(format!("{} is required.", label));
     }
@@ -237,10 +244,10 @@ fn validate_schedule(schedule: &str) -> Result<(), String> {
 fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryItem> {
     Ok(MemoryItem {
         id: row.get(0)?,
-        kind: row.get(1)?,
-        key: row.get(2)?,
-        value: row.get(3)?,
-        source: row.get(4)?,
+        kind: crate::text_encoding::repair_mojibake_text(&row.get::<_, String>(1)?),
+        key: crate::text_encoding::repair_mojibake_text(&row.get::<_, String>(2)?),
+        value: crate::text_encoding::repair_mojibake_text(&row.get::<_, String>(3)?),
+        source: crate::text_encoding::repair_mojibake_text(&row.get::<_, String>(4)?),
         confidence: row.get(5)?,
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
@@ -251,9 +258,9 @@ fn row_to_automation(row: &rusqlite::Row<'_>) -> rusqlite::Result<AutomationJob>
     let enabled: i64 = row.get(4)?;
     Ok(AutomationJob {
         id: row.get(0)?,
-        name: row.get(1)?,
-        prompt: row.get(2)?,
-        schedule: row.get(3)?,
+        name: crate::text_encoding::repair_mojibake_text(&row.get::<_, String>(1)?),
+        prompt: crate::text_encoding::repair_mojibake_text(&row.get::<_, String>(2)?),
+        schedule: crate::text_encoding::repair_mojibake_text(&row.get::<_, String>(3)?),
         enabled: enabled != 0,
         next_run_at: row.get(5)?,
         last_run_at: row.get(6)?,
@@ -520,15 +527,17 @@ pub fn mark_automation_job_ran(id: i64) -> Result<AutomationJob, String> {
 #[tauri::command]
 pub fn record_agent_tool_run(run: AgentToolRun) -> Result<i64, String> {
     let conn = open_db()?;
-    let input_json = if run.input_json.len() > 32_000 {
-        format!("{}...[truncated]", &run.input_json[..32_000])
+    let input_json = crate::text_encoding::repair_mojibake_text(&run.input_json);
+    let output_text = crate::text_encoding::repair_mojibake_text(&run.output_text);
+    let input_json = if input_json.len() > 32_000 {
+        format!("{}...[truncated]", &input_json[..32_000])
     } else {
-        run.input_json
+        input_json
     };
-    let output_text = if run.output_text.len() > 32_000 {
-        format!("{}...[truncated]", &run.output_text[..32_000])
+    let output_text = if output_text.len() > 32_000 {
+        format!("{}...[truncated]", &output_text[..32_000])
     } else {
-        run.output_text
+        output_text
     };
     conn.execute(
         r#"
@@ -600,6 +609,7 @@ pub fn save_personality_chat_session(
     if messages_json.len() > MAX_CHAT_SESSION_JSON_BYTES {
         return Err("This chat session is too large to save safely.".to_string());
     }
+    let messages_json = crate::text_encoding::repair_mojibake_text(&messages_json);
     conn.execute(
         r#"
         INSERT INTO personality_chat_sessions (personality_id, messages_json, updated_at)
@@ -625,7 +635,30 @@ pub fn load_personality_chat_session(personality_id: String) -> Result<String, S
     )
     .optional()
     .map_err(|e| format!("Could not load this chat session: {}", e))
-    .map(|value| value.unwrap_or_else(|| "[]".to_string()))
+    .map(|value| {
+        crate::text_encoding::repair_mojibake_text(&value.unwrap_or_else(|| "[]".to_string()))
+    })
+}
+
+#[tauri::command]
+pub fn load_personality_chat_session_state(
+    personality_id: String,
+) -> Result<ChatSessionLoad, String> {
+    let conn = open_db()?;
+    let personality_id = sanitize_required(personality_id, "Personality ID", 160)?;
+    conn.query_row(
+        "SELECT messages_json FROM personality_chat_sessions WHERE personality_id = ?1",
+        params![personality_id],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|e| format!("Could not load this chat session: {}", e))
+    .map(|value| ChatSessionLoad {
+        exists: value.is_some(),
+        messages_json: crate::text_encoding::repair_mojibake_text(
+            &value.unwrap_or_else(|| "[]".to_string()),
+        ),
+    })
 }
 
 #[tauri::command]
@@ -639,4 +672,40 @@ pub fn delete_personality_chat_session(personality_id: String) -> Result<bool, S
         )
         .map_err(|e| format!("Could not delete this chat session: {}", e))?;
     Ok(changed > 0)
+}
+
+#[tauri::command]
+pub fn delete_pair_chat_sessions(first_id: String, second_id: String) -> Result<usize, String> {
+    let conn = open_db()?;
+    let first_id = sanitize_required(first_id, "First profile ID", 160)?;
+    let second_id = sanitize_required(second_id, "Second profile ID", 160)?;
+    let mut stmt = conn
+        .prepare("SELECT personality_id FROM personality_chat_sessions")
+        .map_err(|e| format!("Could not inspect chat sessions: {}", e))?;
+    let ids = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("Could not read chat sessions: {}", e))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| format!("Could not read chat sessions: {}", e))?;
+    let mut changed = 0usize;
+    for id in ids {
+        if (id == first_id || id == second_id) || (id.contains(&first_id) && id.contains(&second_id)) {
+            changed += conn
+                .execute(
+                    "DELETE FROM personality_chat_sessions WHERE personality_id = ?1",
+                    params![id],
+                )
+                .map_err(|e| format!("Could not delete related chat session: {}", e))?;
+        }
+    }
+    Ok(changed)
+}
+
+#[tauri::command]
+pub fn delete_all_personality_chat_sessions() -> Result<usize, String> {
+    let conn = open_db()?;
+    let changed = conn
+        .execute("DELETE FROM personality_chat_sessions", [])
+        .map_err(|e| format!("Could not delete chat sessions: {}", e))?;
+    Ok(changed)
 }

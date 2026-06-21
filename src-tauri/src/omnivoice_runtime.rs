@@ -353,6 +353,53 @@ fn cpp_ref_text_path(output_path: &Path) -> PathBuf {
     output_path.with_extension("ref.txt")
 }
 
+fn cpp_input_text_path(output_path: &Path) -> PathBuf {
+    output_path.with_extension("input.txt")
+}
+
+fn clear_cpp_output_debug_files() -> Result<usize, String> {
+    let output_dir = omnivoice_cpp_output_dir();
+    std::fs::create_dir_all(&output_dir).map_err(|e| {
+        format!(
+            "Could not prepare OmniVoice output cache folder ({}): {}",
+            output_dir.to_string_lossy(),
+            e
+        )
+    })?;
+    let mut removed = 0usize;
+    for entry in std::fs::read_dir(&output_dir).map_err(|e| {
+        format!(
+            "Could not read OmniVoice output cache folder ({}): {}",
+            output_dir.to_string_lossy(),
+            e
+        )
+    })? {
+        let entry = entry.map_err(|e| format!("Could not inspect OmniVoice cache file: {}", e))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let removable = name.starts_with("omnivoice-")
+            && (name.ends_with(".wav")
+                || name.ends_with(".input.txt")
+                || name.ends_with(".ref.txt"));
+        if removable {
+            std::fs::remove_file(&path).map_err(|e| {
+                format!(
+                    "Could not remove old OmniVoice cache file ({}): {}",
+                    path.to_string_lossy(),
+                    e
+                )
+            })?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 fn sidecar_ref_text_path() -> PathBuf {
     omnivoice_cache_dir().join("omnivoice-sidecar-ref.txt")
 }
@@ -372,7 +419,7 @@ fn request_text_for_streaming(text: &str) -> String {
     if trimmed
         .chars()
         .last()
-        .map(|ch| ".!?。！？…".contains(ch))
+        .map(|ch| ".!?????".contains(ch))
         .unwrap_or(false)
     {
         format!("{}\n", trimmed)
@@ -648,6 +695,11 @@ pub async fn stop_omnivoice_engine(
 }
 
 #[tauri::command]
+pub fn clear_omnivoice_output_cache() -> Result<usize, String> {
+    clear_cpp_output_debug_files()
+}
+
+#[tauri::command]
 pub async fn synthesize_speech(
     state: State<'_, OmniVoiceRuntimeState>,
     text: String,
@@ -788,6 +840,9 @@ pub async fn synthesize_speech_with_state(
             .unwrap_or(0)
     ));
     let ref_text_path = cpp_ref_text_path(&output_path);
+    let input_text_path = cpp_input_text_path(&output_path);
+    std::fs::write(&input_text_path, request_text)
+        .map_err(|e| format!("Could not save OmniVoice input text: {}", e))?;
 
     let mut command = Command::new(omnivoice_tts_executable_path());
     command
@@ -859,8 +914,6 @@ pub async fn synthesize_speech_with_state(
         )
     })?;
 
-    let _ = std::fs::remove_file(&output_path);
-    let _ = std::fs::remove_file(&ref_text_path);
     set_ready_status(&state, &choice);
 
     Ok(AudioSynthesisResult {

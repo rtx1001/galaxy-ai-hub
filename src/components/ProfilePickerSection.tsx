@@ -1,4 +1,4 @@
-import { ChevronDownIcon, EditIcon, PlusIcon } from "./Icons";
+import { AutoPilotIcon, ChevronDownIcon, EditIcon, PlusIcon } from "./Icons";
 import { AvatarImage, IconButton } from "./UI";
 
 export type ProfilePickerOption = {
@@ -21,6 +21,8 @@ export function ProfilePickerSection({
   onToggleMenu,
   onSelect,
   onCreate,
+  autoPilotEnabled,
+  onToggleAutoPilot,
 }: {
   title: string;
   selectedId: string;
@@ -35,10 +37,29 @@ export function ProfilePickerSection({
   onToggleMenu: () => void;
   onSelect: (id: string) => void;
   onCreate: () => void;
+  autoPilotEnabled?: boolean;
+  onToggleAutoPilot?: () => void;
 }) {
   return (
     <section className="overflow-visible rounded-[20px] border border-[#282a2c] bg-[#1e1f20] p-2.5 shadow-sm">
-      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">{title}</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">{title}</div>
+        {onToggleAutoPilot && (
+          <button
+            type="button"
+            onClick={onToggleAutoPilot}
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-xl border shadow-sm transition ${
+              autoPilotEnabled
+                ? "border-[#282a2c] bg-[var(--accent-soft)] text-[var(--accent-color)] shadow-[inset_0_0_0_1px_var(--accent-soft-strong)] hover:bg-[var(--accent-soft-strong)]"
+                : "border-[#282a2c] bg-[#1e1f20] text-[#e3e3e3] hover:bg-[#282a2c]"
+            }`}
+            title={autoPilotEnabled ? "Turn off auto-pilot" : "Turn on auto-pilot"}
+            aria-pressed={autoPilotEnabled}
+          >
+            <AutoPilotIcon className="h-4 w-4" />
+          </button>
+        )}
+      </div>
       <div className="mt-2 flex items-center gap-2">
         <div className="relative min-w-0 flex-1" data-dropdown-root>
           <div className="flex h-11 items-center gap-2 overflow-hidden rounded-[16px] border border-[#282a2c] bg-[#131314] p-1 text-sm text-[#e3e3e3] transition focus-within:border-[var(--accent-color)] hover:bg-[#282a2c]">

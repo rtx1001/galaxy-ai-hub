@@ -129,6 +129,8 @@ pub struct AppSettings {
     pub theme_swatch_id: String,
     pub live_conversation: bool,
     #[serde(default)]
+    pub user_auto_pilot: bool,
+    #[serde(default)]
     pub telegram_bot_token: String,
     #[serde(default)]
     pub telegram_owner_id: String,
@@ -193,6 +195,8 @@ pub struct AppSettings {
     pub ui_telegram_open: bool,
     #[serde(default = "default_panel_open")]
     pub ui_google_open: bool,
+    #[serde(default = "default_panel_open", alias = "ui_spotify_open")]
+    pub ui_media_player_open: bool,
     #[serde(default = "default_panel_open")]
     pub ui_tool_activity_open: bool,
     #[serde(default = "default_panel_open")]
@@ -211,6 +215,7 @@ impl Default for AppSettings {
             user_longitude: None,
             theme_swatch_id: default_theme_swatch_id(),
             live_conversation: false,
+            user_auto_pilot: false,
             telegram_bot_token: String::new(),
             telegram_owner_id: String::new(),
             telegram_guests: Vec::new(),
@@ -254,6 +259,7 @@ impl Default for AppSettings {
             ui_automation_open: default_panel_open(),
             ui_telegram_open: default_panel_open(),
             ui_google_open: default_panel_open(),
+            ui_media_player_open: default_panel_open(),
             ui_tool_activity_open: default_panel_open(),
             ui_sampling_open: default_panel_open(),
         }
@@ -416,7 +422,9 @@ pub fn load_app_settings() -> Result<AppSettings, String> {
 
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Could not read app settings: {}", e))?;
-    let settings: AppSettings = serde_json::from_str(content.trim_start_matches('\u{feff}'))
+    let content =
+        crate::text_encoding::repair_mojibake_text(content.trim_start_matches('\u{feff}'));
+    let settings: AppSettings = serde_json::from_str(&content)
         .map_err(|e| format!("Could not parse app settings: {}", e))?;
     Ok(normalize_settings(settings))
 }
@@ -428,6 +436,7 @@ pub fn save_app_settings(settings: AppSettings) -> Result<AppSettings, String> {
     let settings = normalize_settings(settings);
     let content = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("Could not encode app settings: {}", e))?;
+    let content = crate::text_encoding::repair_mojibake_text(&content);
     let path = settings_path();
 
     if let Ok(existing) = std::fs::read_to_string(&path) {

@@ -81,8 +81,6 @@ export function useModelRuntime(options: UseModelRuntimeOptions) {
       return;
     }
 
-    options.stopActiveAudio();
-
     if (
       options.activeTaskTypeRef.current === "llm" ||
       options.brainStatus === "Ready" ||
@@ -409,7 +407,6 @@ export function useModelRuntime(options: UseModelRuntimeOptions) {
     }
 
     if (shouldLoadModel) {
-      options.stopActiveAudio();
       options.setComposerNotice("Loading the chat brain...");
       await invoke("stop_omnivoice_engine").catch(() => undefined);
       await loadModelPath(targetModelPath);

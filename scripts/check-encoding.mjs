@@ -12,6 +12,7 @@ const ignoredDirs = new Set([
   ".vscode",
   "_backups",
   "assistant-runtime",
+  "config",
   "dist",
   "logs",
   "node_modules",
@@ -51,10 +52,20 @@ const textFilesWithoutExtension = new Set([
 
 const mojibakePatterns = [
   { name: "replacement character", regex: new RegExp("\\uFFFD") },
+  { name: "C1 control character", regex: new RegExp("[\\u0080-\\u009F]") },
   { name: "UTF-8 read as Windows-1252", regex: new RegExp("[\\u00C3\\u00C2][\\u0080-\\u017F]") },
+  {
+    name: "visible UTF-8 read as Windows-1252",
+    regex: new RegExp("(?:\\u00C3.|\\u00C2[^\\sA-Za-z]|\\u00E1[\\u00BA\\u00BB]|\\u00C6[^\\s]|\\u00C4[^\\s]|\\u00E2[\\u0080-\\u017F\\u20AC].?|\\u00E3[\\u0080-\\u017F\\u20AC].?|\\u00EF[\\u0080-\\u017F\\u00BC].?)", "u"),
+  },
+  {
+    name: "common visible mojibake sequence",
+    regex: new RegExp("(?:\\u00E2\\u20AC|\\u00E3\\u20AC|\\u00EF\\u00BC|\\u00C3\\u00A0|\\u00C3\\u00A1|\\u00C3\\u00AA|\\u00C3\\u00B4|\\u00C3\\u00BD)", "u"),
+  },
   { name: "Vietnamese/Thai UTF-8 read as Windows-1252", regex: new RegExp("[\\u00C4\\u00C6][\\u0080-\\u017F]") },
   { name: "Vietnamese tone byte fragments", regex: new RegExp("\\u00E1[\\u00BA\\u00BB]") },
   { name: "emoji UTF-8 read as Windows-1252", regex: new RegExp("(?:\\u00F0\\u0178|\\u00E2[\\u0080-\\u017F])") },
+  { name: "lossy Vietnamese replacement", regex: /(?:\?m l\?ch|l\?ch|kh\?ng|h\?m|ng\?y|th\?ng|b\?y gi\?|c\?ng ty)/i },
 ];
 
 function isIgnoredPath(path) {
@@ -107,6 +118,9 @@ for (const file of walk(root)) {
   }
 
   const withoutBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  if (text.charCodeAt(0) === 0xfeff) {
+    failures.push(`${rel}:1:1: UTF-8 BOM is not allowed`);
+  }
   for (const { name, regex } of mojibakePatterns) {
     const match = regex.exec(withoutBom);
     if (!match) {

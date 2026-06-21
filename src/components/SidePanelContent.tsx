@@ -5,6 +5,7 @@ import type {
   GoogleConnectionStatus,
   ModelLibraryEntry,
   PersonalityPreset,
+  MediaPlayerStatus,
   TelegramGuest,
   ThemeSwatch,
   ToolRunRecord,
@@ -17,8 +18,9 @@ import { CalendarSection } from "./CalendarSection";
 import { GoogleSection } from "./GoogleSection";
 import { ImageStudioSection } from "./ImageStudioSection";
 import { ProfileModalLayer } from "./ProfileModalLayer";
-import { ProfilePickerSection } from "./ProfilePickerSection";
+import { ProfilePickerSection, type ProfilePickerOption } from "./ProfilePickerSection";
 import { SamplingSection } from "./SamplingSection";
+import { MediaPlayerSection } from "./MediaPlayerSection";
 import { TelegramSection } from "./TelegramSection";
 import { ToolActivitySection } from "./ToolActivitySection";
 import { WorkspaceSection } from "./WorkspaceSection";
@@ -31,6 +33,7 @@ export function LeftPanelContent({
   userAvatar,
   userName,
   userProfiles,
+  userProfileOptions,
   userProfileMenuOpen,
   calendarOpen,
   automationMonth,
@@ -40,10 +43,6 @@ export function LeftPanelContent({
   selectedAutomationLabel,
   googleCalendarEvents,
   selectedGoogleEvents,
-  automationOpen,
-  activeAutomationCount,
-  automationJobs,
-  recentAutomationJobs,
   workspaceOpen,
   linkedFolders,
   imageStudioOpen,
@@ -68,7 +67,9 @@ export function LeftPanelContent({
   googleClientId,
   googleClientSecret,
   onOpenUserProfile,
+  userAutoPilot,
   onToggleUserMenu,
+  onToggleUserAutoPilot,
   onSelectUserProfile,
   onCreateUserProfile,
   onToggleCalendar,
@@ -76,11 +77,6 @@ export function LeftPanelContent({
   onSelectAutomationDate,
   onSelectGoogleEvent,
   onDeleteGoogleEvent,
-  onToggleAutomation,
-  onAddAutomation,
-  onEditAutomation,
-  onToggleAutomationJob,
-  onDeleteAutomationJob,
   onToggleWorkspace,
   onAddLinkedFolder,
   onRemoveLinkedFolder,
@@ -109,6 +105,7 @@ export function LeftPanelContent({
   userAvatar: string;
   userName: string;
   userProfiles: UserProfilePreset[];
+  userProfileOptions?: ProfilePickerOption[];
   userProfileMenuOpen: boolean;
   calendarOpen: boolean;
   automationMonth: Date;
@@ -118,10 +115,6 @@ export function LeftPanelContent({
   selectedAutomationLabel: string;
   googleCalendarEvents: GoogleCalendarEvent[];
   selectedGoogleEvents: GoogleCalendarEvent[];
-  automationOpen: boolean;
-  activeAutomationCount: number;
-  automationJobs: AutomationJob[];
-  recentAutomationJobs: AutomationJob[];
   workspaceOpen: boolean;
   linkedFolders: string[];
   imageStudioOpen: boolean;
@@ -146,7 +139,9 @@ export function LeftPanelContent({
   googleClientId: string;
   googleClientSecret: string;
   onOpenUserProfile: () => void;
+  userAutoPilot?: boolean;
   onToggleUserMenu: () => void;
+  onToggleUserAutoPilot?: () => void;
   onSelectUserProfile: (id: string) => void;
   onCreateUserProfile: () => void;
   onToggleCalendar: (open: boolean) => void;
@@ -154,11 +149,6 @@ export function LeftPanelContent({
   onSelectAutomationDate: (date: Date) => void;
   onSelectGoogleEvent: (event: GoogleCalendarEvent) => void;
   onDeleteGoogleEvent: (event: GoogleCalendarEvent) => void;
-  onToggleAutomation: (open: boolean) => void;
-  onAddAutomation: () => void;
-  onEditAutomation: (job: AutomationJob) => void;
-  onToggleAutomationJob: (job: AutomationJob) => void;
-  onDeleteAutomationJob: (id: number) => void;
   onToggleWorkspace: (open: boolean) => void;
   onAddLinkedFolder: () => void;
   onRemoveLinkedFolder: (folderPath: string) => void;
@@ -190,11 +180,13 @@ export function LeftPanelContent({
         selectedName={selectedUserName}
         selectedAvatar={userAvatar}
         selectedFallback={userName || "You"}
-        options={userProfiles}
+        options={userProfileOptions ?? userProfiles}
         menuOpen={userProfileMenuOpen}
         createTitle="Create user profile"
         avatarTitle="Edit user profile"
         onAvatarClick={onOpenUserProfile}
+        autoPilotEnabled={userAutoPilot}
+        onToggleAutoPilot={onToggleUserAutoPilot}
         onToggleMenu={onToggleUserMenu}
         onSelect={onSelectUserProfile}
         onCreate={onCreateUserProfile}
@@ -213,18 +205,6 @@ export function LeftPanelContent({
         onSelectDate={onSelectAutomationDate}
         onSelectGoogleEvent={onSelectGoogleEvent}
         onDeleteGoogleEvent={onDeleteGoogleEvent}
-      />
-      <AutomationSection
-        open={automationOpen}
-        activeCount={activeAutomationCount}
-        jobs={automationJobs}
-        recentJobs={recentAutomationJobs}
-        selectedDate={selectedAutomationDate}
-        onToggle={onToggleAutomation}
-        onAdd={onAddAutomation}
-        onEdit={onEditAutomation}
-        onToggleJob={onToggleAutomationJob}
-        onDelete={onDeleteAutomationJob}
       />
       <WorkspaceSection
         open={workspaceOpen}
@@ -290,7 +270,13 @@ export function RightPanelContent({
   selectedPersonalityPreset,
   personalityAvatar,
   personalityPresets,
+  personalityOptions,
   personalityMenuOpen,
+  automationOpen,
+  activeAutomationCount,
+  automationJobs,
+  recentAutomationJobs,
+  selectedAutomationDate,
   brainStatus,
   modelMenuOpen,
   availableModels,
@@ -302,6 +288,7 @@ export function RightPanelContent({
   waveformProcessing,
   clearMemoryOpen,
   clearSessionToo,
+  selectedUserProfileId,
   userProfileOpen,
   userName,
   userAvatar,
@@ -334,10 +321,18 @@ export function RightPanelContent({
   minP,
   repeatLastN,
   repeatPenalty,
+  mediaPlayerBusy,
+  mediaPlayerOpen,
+  mediaPlayerStatus,
   onOpenPersonalityProfile,
   onTogglePersonalityMenu,
   onSelectPersonality,
   onCreatePersonality,
+  onToggleAutomation,
+  onAddAutomation,
+  onEditAutomation,
+  onToggleAutomationJob,
+  onDeleteAutomationJob,
   onChooseModelFolder,
   onToggleModelMenu,
   onSelectModel,
@@ -379,12 +374,23 @@ export function RightPanelContent({
   onMinPChange,
   onRepeatLastNChange,
   onRepeatPenaltyChange,
+  onToggleMediaPlayer,
+  onMediaPlayerPlay,
+  onMediaPlayerPause,
+  onMediaPlayerNext,
+  onMediaPlayerPrevious,
 }: {
   selectedPersonalityId: string;
   selectedPersonalityPreset?: PersonalityPreset;
   personalityAvatar: string;
   personalityPresets: PersonalityPreset[];
+  personalityOptions?: ProfilePickerOption[];
   personalityMenuOpen: boolean;
+  automationOpen: boolean;
+  activeAutomationCount: number;
+  automationJobs: AutomationJob[];
+  recentAutomationJobs: AutomationJob[];
+  selectedAutomationDate: string;
   brainStatus: BrainStatus;
   modelMenuOpen: boolean;
   availableModels: ModelLibraryEntry[];
@@ -396,6 +402,7 @@ export function RightPanelContent({
   waveformProcessing: boolean;
   clearMemoryOpen: boolean;
   clearSessionToo: boolean;
+  selectedUserProfileId: string;
   userProfileOpen: boolean;
   userName: string;
   userAvatar: string;
@@ -428,10 +435,18 @@ export function RightPanelContent({
   minP: number;
   repeatLastN: number;
   repeatPenalty: number;
+  mediaPlayerBusy: boolean;
+  mediaPlayerOpen: boolean;
+  mediaPlayerStatus: MediaPlayerStatus;
   onOpenPersonalityProfile: () => void;
   onTogglePersonalityMenu: () => void;
   onSelectPersonality: (id: string) => void;
   onCreatePersonality: () => void;
+  onToggleAutomation: (open: boolean) => void;
+  onAddAutomation: () => void;
+  onEditAutomation: (job: AutomationJob) => void;
+  onToggleAutomationJob: (job: AutomationJob) => void;
+  onDeleteAutomationJob: (id: number) => void;
   onChooseModelFolder: () => void;
   onToggleModelMenu: () => void;
   onSelectModel: (path: string) => void;
@@ -473,16 +488,21 @@ export function RightPanelContent({
   onMinPChange: (value: number) => void;
   onRepeatLastNChange: (value: number) => void;
   onRepeatPenaltyChange: (value: number) => void;
+  onToggleMediaPlayer: (open: boolean) => void;
+  onMediaPlayerPlay: () => void;
+  onMediaPlayerPause: () => void;
+  onMediaPlayerNext: () => void;
+  onMediaPlayerPrevious: () => void;
 }) {
   return (
     <div className="space-y-3 p-3">
       <ProfilePickerSection
-        title="Personality"
+        title="Assistant"
         selectedId={selectedPersonalityId}
         selectedName={selectedPersonalityPreset?.name ?? "Choose personality"}
         selectedAvatar={selectedPersonalityPreset?.avatar || personalityAvatar}
         selectedFallback={selectedPersonalityPreset?.name || "AI"}
-        options={personalityPresets}
+        options={personalityOptions ?? personalityPresets}
         menuOpen={personalityMenuOpen}
         createTitle="Create assistant profile"
         avatarTitle="Edit character profile"
@@ -505,15 +525,39 @@ export function RightPanelContent({
         onToggleModelMenu={onToggleModelMenu}
         onSelectModel={onSelectModel}
       />
+      <MediaPlayerSection
+        open={mediaPlayerOpen}
+        status={mediaPlayerStatus}
+        busy={mediaPlayerBusy}
+        onToggle={onToggleMediaPlayer}
+        onPlay={onMediaPlayerPlay}
+        onPause={onMediaPlayerPause}
+        onNext={onMediaPlayerNext}
+        onPrevious={onMediaPlayerPrevious}
+      />
+      <AutomationSection
+        open={automationOpen}
+        activeCount={activeAutomationCount}
+        jobs={automationJobs}
+        recentJobs={recentAutomationJobs}
+        selectedDate={selectedAutomationDate}
+        onToggle={onToggleAutomation}
+        onAdd={onAddAutomation}
+        onEdit={onEditAutomation}
+        onToggleJob={onToggleAutomationJob}
+        onDelete={onDeleteAutomationJob}
+      />
       <ProfileModalLayer
         clearMemoryOpen={clearMemoryOpen}
         characterName={selectedPersonalityPreset?.name ?? "This character"}
         clearSessionToo={clearSessionToo}
+        memoryPartnerId={selectedUserProfileId}
+        memoryPartnerName={selectedUserProfile?.name || userName || "User"}
         userProfileOpen={userProfileOpen}
         userName={userName}
         userAvatar={userAvatar}
         userDescription={userDescription}
-        userProfileCount={userProfiles.length}
+        userProfileCount={selectedUserProfile?.id?.startsWith("personality:") ? 1 : userProfiles.length}
         selectedUserProfile={selectedUserProfile}
         selectedUserVoicePath={selectedUserVoicePath}
         selectedUserVoiceSample={selectedUserVoiceSample}
@@ -523,7 +567,7 @@ export function RightPanelContent({
         personalityAvatar={personalityAvatar}
         personalityNameDraft={personalityNameDraft}
         personality={personality}
-        personalityProfileCount={personalityPresets.length}
+        personalityProfileCount={selectedPersonalityId.startsWith("user:") ? 1 : personalityPresets.length}
         memorySize={memorySize}
         replyLength={replyLength}
         minContextSize={minContextSize}

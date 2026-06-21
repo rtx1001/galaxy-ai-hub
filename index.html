@@ -9,11 +9,33 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
     <title>Galaxy AI Hub</title>
+    <script>
+      (() => {
+        const swatches = {
+          blue: ["#a8c7fa", "rgba(168, 199, 250, 0.18)"],
+          green: ["#7bd17a", "rgba(123, 209, 122, 0.18)"],
+          lime: ["#d7db63", "rgba(215, 219, 99, 0.18)"],
+          gold: ["#f0c531", "rgba(240, 197, 49, 0.18)"],
+          orange: ["#f45c3d", "rgba(244, 92, 61, 0.18)"],
+          pink: ["#d45aae", "rgba(212, 90, 174, 0.18)"],
+          purple: ["#a95de6", "rgba(169, 93, 230, 0.18)"],
+        };
+        try {
+          const id = localStorage.getItem("galaxy.themeSwatchId") || "blue";
+          const swatch = swatches[id] || swatches.blue;
+          document.documentElement.style.setProperty("--startup-accent", swatch[0]);
+          document.documentElement.style.setProperty("--startup-accent-soft", swatch[1]);
+          document.documentElement.style.setProperty("--startup-accent-glow", `${swatch[0]}44`);
+        } catch {
+          // Keep the default accent when storage is unavailable.
+        }
+      })();
+    </script>
     <style>
       :root {
-        --startup-accent: #a8c7fa;
-        --startup-accent-soft: rgba(168, 199, 250, 0.18);
-        --startup-accent-glow: rgba(168, 199, 250, 0.24);
+        --startup-accent-fallback: #a8c7fa;
+        --startup-accent-soft-fallback: rgba(168, 199, 250, 0.18);
+        --startup-accent-glow-fallback: rgba(168, 199, 250, 0.24);
       }
 
       html, body {
@@ -31,7 +53,7 @@
       #root {
         min-height: 100vh;
         background:
-          radial-gradient(circle at 50% 40%, var(--startup-accent-soft), transparent 28%),
+          radial-gradient(circle at 50% 40%, var(--startup-accent-soft, var(--startup-accent-soft-fallback)), transparent 28%),
           linear-gradient(180deg, #131314 0%, #17181a 44%, #101113 100%);
       }
 
@@ -61,8 +83,8 @@
         display: grid;
         place-items: center;
         background: #101113;
-        border: 1px solid var(--startup-accent-glow);
-        box-shadow: 0 0 34px var(--startup-accent-soft);
+        border: 1px solid var(--startup-accent-glow, var(--startup-accent-glow-fallback));
+        box-shadow: 0 0 34px var(--startup-accent-soft, var(--startup-accent-soft-fallback));
       }
 
       .startup-logo img {
@@ -72,7 +94,7 @@
       }
 
       .startup-kicker {
-        color: var(--startup-accent);
+        color: var(--startup-accent, var(--startup-accent-fallback));
         font-size: 10px;
         font-weight: 800;
         letter-spacing: 0.24em;
@@ -107,7 +129,7 @@
         inset: 0;
         width: 38%;
         border-radius: inherit;
-        background: linear-gradient(90deg, transparent, var(--startup-accent), transparent);
+        background: linear-gradient(90deg, transparent, var(--startup-accent, var(--startup-accent-fallback)), transparent);
         animation: startup-scan 1.25s ease-in-out infinite;
       }
 
@@ -116,28 +138,6 @@
         to { transform: translateX(270%); }
       }
     </style>
-    <script>
-      (() => {
-        const swatches = {
-          blue: ["#a8c7fa", "rgba(168, 199, 250, 0.18)"],
-          green: ["#7bd17a", "rgba(123, 209, 122, 0.18)"],
-          lime: ["#d7db63", "rgba(215, 219, 99, 0.18)"],
-          gold: ["#f0c531", "rgba(240, 197, 49, 0.18)"],
-          orange: ["#f45c3d", "rgba(244, 92, 61, 0.18)"],
-          pink: ["#d45aae", "rgba(212, 90, 174, 0.18)"],
-          purple: ["#a95de6", "rgba(169, 93, 230, 0.18)"],
-        };
-        try {
-          const id = localStorage.getItem("galaxy.themeSwatchId") || "blue";
-          const swatch = swatches[id] || swatches.blue;
-          document.documentElement.style.setProperty("--startup-accent", swatch[0]);
-          document.documentElement.style.setProperty("--startup-accent-soft", swatch[1]);
-          document.documentElement.style.setProperty("--startup-accent-glow", `${swatch[0]}44`);
-        } catch {
-          // Keep the default accent when storage is unavailable.
-        }
-      })();
-    </script>
   </head>
 
   <body>

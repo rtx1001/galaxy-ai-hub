@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { activateAudioVisualizer, deactivateAudioVisualizer } from "../audioVisualizer";
+import { setInternalMediaPlayback } from "../internalMediaState";
 
 export function useAudioPlayback() {
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
@@ -29,6 +31,8 @@ export function useAudioPlayback() {
     const activeAudio = activeAudioRef.current;
     if (activeAudio) {
       activeAudioRef.current = null;
+      deactivateAudioVisualizer(activeAudio);
+      setInternalMediaPlayback("speech", false);
       activeAudio.pause();
       activeAudio.dispatchEvent(new Event("ended"));
       activeAudio.src = "";
@@ -73,7 +77,7 @@ export function useAudioPlayback() {
   }, []);
 
   const playAudioBase64 = useCallback(
-    async (audioBase64: string, mimeType: string) => {
+    async (audioBase64: string, mimeType: string, onStarted?: () => void) => {
       const binaryString = atob(audioBase64);
       const bytes = Uint8Array.from(binaryString, (char) =>
         char.charCodeAt(0),
@@ -96,19 +100,25 @@ export function useAudioPlayback() {
           };
           audio.onended = () => {
             setIsAudioPlaying(false);
+            setInternalMediaPlayback("speech", false);
             cleanup();
             resolve();
           };
           audio.onerror = () => {
             setIsAudioPlaying(false);
+            setInternalMediaPlayback("speech", false);
             cleanup();
             reject(new Error("Playback failed."));
           };
           try {
             setIsAudioPlaying(true);
+            setInternalMediaPlayback("speech", true);
+            await activateAudioVisualizer(audio);
             await audio.play();
+            onStarted?.();
           } catch (error) {
             setIsAudioPlaying(false);
+            setInternalMediaPlayback("speech", false);
             cleanup();
             reject(
               error instanceof Error
@@ -119,6 +129,8 @@ export function useAudioPlayback() {
         });
       } finally {
         setIsAudioPlaying(false);
+        deactivateAudioVisualizer(activeAudioRef.current);
+        setInternalMediaPlayback("speech", false);
         if (activeAudioRef.current?.src === url) {
           activeAudioRef.current = null;
         }

@@ -15,6 +15,7 @@ type UseAppSettingsSaveOptions = {
   googleClientSecret: string;
   googlePanelOpen: boolean;
   googleRedirectUri: string;
+  mediaPlayerPanelOpen: boolean;
   imageHeight: number;
   imageStudioOpen: boolean;
   imageWidth: number;
@@ -22,6 +23,7 @@ type UseAppSettingsSaveOptions = {
   leftPanelOpen: boolean;
   linkedFolders: string[];
   liveConversation: boolean;
+  userAutoPilot: boolean;
   memorySize: number;
   minP: number;
   modelFolder: string;
@@ -69,6 +71,7 @@ export function useAppSettingsSave({
   googleClientSecret,
   googlePanelOpen,
   googleRedirectUri,
+  mediaPlayerPanelOpen,
   imageHeight,
   imageStudioOpen,
   imageWidth,
@@ -76,6 +79,7 @@ export function useAppSettingsSave({
   leftPanelOpen,
   linkedFolders,
   liveConversation,
+  userAutoPilot,
   memorySize,
   minP,
   modelFolder,
@@ -129,6 +133,7 @@ export function useAppSettingsSave({
       invoke("save_app_settings", {
         settings: {
           live_conversation: liveConversation,
+          user_auto_pilot: userAutoPilot,
           setup_completed: setupCompleted,
           user_name: userName,
           user_avatar: userAvatar,
@@ -174,6 +179,7 @@ export function useAppSettingsSave({
           ui_automation_open: automationOpen,
           ui_telegram_open: telegramPanelOpen,
           ui_google_open: googlePanelOpen,
+          ui_media_player_open: mediaPlayerPanelOpen,
           ui_tool_activity_open: toolRunsOpen,
           ui_sampling_open: samplingOpen,
         } satisfies AppSettings,
@@ -195,6 +201,7 @@ export function useAppSettingsSave({
     userLongitude,
     themeSwatchId,
     liveConversation,
+    userAutoPilot,
     telegramBotToken,
     telegramOwnerId,
     telegramGuests,
@@ -230,6 +237,7 @@ export function useAppSettingsSave({
     automationOpen,
     telegramPanelOpen,
     googlePanelOpen,
+    mediaPlayerPanelOpen,
     toolRunsOpen,
     samplingOpen,
   ]);

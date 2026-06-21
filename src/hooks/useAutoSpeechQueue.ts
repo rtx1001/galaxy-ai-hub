@@ -15,7 +15,7 @@ type UseAutoSpeechQueueOptions = {
   lastAutoSpokenAssistantIdRef: MutableRefObject<string | null>;
   voicePlaybackRequestRef: MutableRefObject<number>;
   ensureAudioPlaybackUnlocked: () => Promise<unknown>;
-  playAutoSpeechQueue: (queue: string[], requestId: number) => Promise<void>;
+  playAutoSpeechQueue: (queue: string[], requestId: number, options?: { queued?: boolean }) => Promise<void>;
 };
 
 export function useAutoSpeechQueue({
@@ -35,11 +35,17 @@ export function useAutoSpeechQueue({
 }: UseAutoSpeechQueueOptions) {
   const ensureAudioPlaybackUnlockedRef = useRef(ensureAudioPlaybackUnlocked);
   const playAutoSpeechQueueRef = useRef(playAutoSpeechQueue);
+  const queueRunningRef = useRef(false);
   ensureAudioPlaybackUnlockedRef.current = ensureAudioPlaybackUnlocked;
   playAutoSpeechQueueRef.current = playAutoSpeechQueue;
 
   useEffect(() => {
-    if (!settingsLoaded || !liveConversation || isStreaming || isGeneratingImage || isTranscribing || speakingMessageId) {
+    if (!settingsLoaded || !liveConversation || isStreaming || isGeneratingImage || isTranscribing || queueRunningRef.current) {
+      return;
+    }
+
+    const speakingMessage = speakingMessageId ? messages.find((message) => message.id === speakingMessageId) : null;
+    if (speakingMessage?.role === "assistant") {
       return;
     }
 
@@ -62,10 +68,16 @@ export function useAutoSpeechQueue({
     }
 
     ensureAudioPlaybackUnlockedRef.current().catch(() => null);
-    const requestId = ++voicePlaybackRequestRef.current;
-    playAutoSpeechQueueRef.current(queue, requestId).catch((error) => {
-      console.error("Live speech queue error:", error);
-    });
+    const queued = speakingMessage?.role === "user";
+    const requestId = queued ? voicePlaybackRequestRef.current : ++voicePlaybackRequestRef.current;
+    queueRunningRef.current = true;
+    playAutoSpeechQueueRef.current(queue, requestId, { queued })
+      .catch((error) => {
+        console.error("Live speech queue error:", error);
+      })
+      .finally(() => {
+        queueRunningRef.current = false;
+      });
   }, [
     settingsLoaded,
     messages,

@@ -133,6 +133,16 @@ fn clean_tool_instruction_prevents_proactive_image_offers() {
     let instruction = super::clean_agent::clean_tool_instruction();
     assert!(instruction.contains("Do not offer or propose image generation proactively"));
     assert!(instruction.contains("only chatting"));
+    assert!(instruction.contains("evidence must be an exact short quote"));
+}
+
+#[test]
+fn companion_reply_boundary_prevents_unsolicited_capability_offers() {
+    let instruction = super::clean_agent::companion_reply_boundary_prompt();
+    assert!(instruction.contains("ordinary chat or roleplay"));
+    assert!(instruction.contains("Do not end with unsolicited offers"));
+    assert!(instruction.contains("create/edit images"));
+    assert!(instruction.contains("Use capabilities only when the latest user directly asks"));
 }
 
 #[test]

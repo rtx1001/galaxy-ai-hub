@@ -13,11 +13,13 @@ mod file_tools;
 mod google_calendar;
 mod image_runtime;
 mod llama_manager;
+mod media_player;
 mod omnivoice_runtime;
 mod process_util;
 mod resource_monitor;
 mod setup_installer;
 mod system_detect;
+mod text_encoding;
 mod weather;
 
 use std::{collections::HashMap, sync::Mutex};
@@ -90,9 +92,26 @@ pub fn run() {
             agent_store::clear_agent_tool_runs,
             agent_store::save_personality_chat_session,
             agent_store::load_personality_chat_session,
+            agent_store::load_personality_chat_session_state,
             agent_store::delete_personality_chat_session,
+            agent_store::delete_pair_chat_sessions,
+            agent_store::delete_all_personality_chat_sessions,
             character_store::load_character_files,
             character_store::save_character_files,
+            character_store::load_character_memory,
+            character_store::save_character_memory,
+            character_store::clear_character_memory,
+            character_store::load_character_relationship_memory,
+            character_store::save_character_relationship_memory,
+            character_store::clear_character_relationship_memory,
+            character_store::load_pair_relationship_memory,
+            character_store::save_pair_relationship_memory,
+            character_store::clear_pair_relationship_memory,
+            character_store::append_pair_chat_transcript,
+            character_store::load_pair_chat_transcript,
+            character_store::clear_pair_chat_transcript,
+            character_store::clear_character_chat_transcripts,
+            character_store::list_pair_chat_transcripts,
             character_store::delete_character_files,
             character_store::migrate_character_folders,
             agent_shell::propose_shell_action,
@@ -131,6 +150,11 @@ pub fn run() {
             google_calendar::trash_google_gmail_message,
             google_calendar::delete_google_contact,
             google_calendar::execute_google_api,
+            media_player::get_media_player_status,
+            media_player::media_player_play,
+            media_player::media_player_pause,
+            media_player::media_player_next,
+            media_player::media_player_previous,
             assistant_runtime::start_voice_setup,
             assistant_runtime::get_voice_setup_status,
             assistant_runtime::default_voice_samples_folder,
@@ -140,6 +164,7 @@ pub fn run() {
             omnivoice_runtime::get_omnivoice_engine_status,
             omnivoice_runtime::estimate_omnivoice_vram_need,
             omnivoice_runtime::stop_omnivoice_engine,
+            omnivoice_runtime::clear_omnivoice_output_cache,
             omnivoice_runtime::get_cached_voice_test_speech,
             omnivoice_runtime::save_voice_test_speech,
             omnivoice_runtime::copy_voice_test_speech,

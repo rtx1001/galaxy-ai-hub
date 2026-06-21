@@ -43,12 +43,12 @@ export function CalendarSection({
       </summary>
       <div className="space-y-2.5 border-t border-[#282a2c] p-3">
         <div className="flex items-center justify-between">
-          <button type="button" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded-xl border border-[#282a2c] bg-[#131314] px-3 py-2 text-sm font-bold text-[#e3e3e3] transition hover:bg-[#282a2c]">{"\u2039"}</button>
+          <button type="button" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded-xl border border-[#282a2c] bg-[#1e1f20] px-3 py-2 text-sm font-bold text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]">{"\u2039"}</button>
           <div className="text-center">
             <div className="font-title text-xl font-bold text-[#e3e3e3]">{monthTitle(month)}</div>
             <div className="text-[11px] text-[#9aa0a6]">{month.getFullYear()}</div>
           </div>
-          <button type="button" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded-xl border border-[#282a2c] bg-[#131314] px-3 py-2 text-sm font-bold text-[#e3e3e3] transition hover:bg-[#282a2c]">{"\u203A"}</button>
+          <button type="button" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded-xl border border-[#282a2c] bg-[#1e1f20] px-3 py-2 text-sm font-bold text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]">{"\u203A"}</button>
         </div>
         <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold uppercase tracking-[0.12em] text-[#9aa0a6]">
           {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (

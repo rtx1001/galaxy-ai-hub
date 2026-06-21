@@ -1,4 +1,5 @@
 import { LeftPanelContent, RightPanelContent } from "../components/SidePanelContent";
+import { profileRefId } from "../appCore";
 
 type UseAppPanelContentsOptions = Record<string, any>;
 
@@ -120,6 +121,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
     setSamplingTemperature,
     setSelectedModelPath,
     setSelectedGoogleEvent,
+    setMediaPlayerPanelOpen,
     setTelegramBotToken,
     setTelegramGuestDraft,
     setTelegramOwnerId,
@@ -142,6 +144,9 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
     theme,
     toolRuns,
     toolRunsOpen,
+    mediaPlayerBusy,
+    mediaPlayerPanelOpen,
+    mediaPlayerStatus,
     toggleAutomationJob,
     topK,
     topP,
@@ -150,6 +155,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
     updateActiveUserVoicePath,
     updateSelectedPersonalityPreset,
     userAvatar,
+    userAutoPilot,
     userAvatarPickerRef,
     userDescription,
     userName,
@@ -162,6 +168,23 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
     workspaceOpen,
   } = options;
 
+  const sharedUserProfileOptions = [
+    ...userProfiles,
+    ...personalityPresets.map((preset: any) => ({
+      id: profileRefId("personality", preset.id),
+      name: preset.name,
+      avatar: preset.avatar,
+    })),
+  ];
+  const sharedPersonalityOptions = [
+    ...personalityPresets,
+    ...userProfiles.map((profile: any) => ({
+      id: profileRefId("user", profile.id),
+      name: profile.name,
+      avatar: profile.avatar,
+    })),
+  ];
+
   const leftPanelContent = (
     <LeftPanelContent
       selectedUserProfileId={selectedUserProfileId}
@@ -169,6 +192,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       userAvatar={userAvatar}
       userName={userName}
       userProfiles={userProfiles}
+      userProfileOptions={sharedUserProfileOptions}
       userProfileMenuOpen={userProfileMenuOpen}
       calendarOpen={calendarOpen}
       automationMonth={automationMonth}
@@ -178,10 +202,6 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       selectedAutomationLabel={selectedAutomationLabel}
       googleCalendarEvents={googleCalendarEvents}
       selectedGoogleEvents={selectedGoogleEvents}
-      automationOpen={automationOpen}
-      activeAutomationCount={activeAutomationCount}
-      automationJobs={automationJobs}
-      recentAutomationJobs={recentAutomationJobs}
       workspaceOpen={workspaceOpen}
       linkedFolders={linkedFolders}
       imageStudioOpen={imageStudioOpen}
@@ -206,6 +226,8 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       googleClientId={googleClientId}
       googleClientSecret={googleClientSecret}
       onOpenUserProfile={openUserProfile}
+      userAutoPilot={userAutoPilot}
+      onToggleUserAutoPilot={() => options.setUserAutoPilot((prev: boolean) => !prev)}
       onToggleUserMenu={() => {
         const next = !userProfileMenuOpen;
         setModelMenuOpen(false);
@@ -221,11 +243,6 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       onSelectAutomationDate={selectAutomationDate}
       onSelectGoogleEvent={setSelectedGoogleEvent}
       onDeleteGoogleEvent={openDeleteGoogleEventConfirm}
-      onToggleAutomation={options.setAutomationOpen}
-      onAddAutomation={() => openAutomationEditor()}
-      onEditAutomation={openAutomationEditor}
-      onToggleAutomationJob={(job) => toggleAutomationJob(job).catch((error: unknown) => console.error("Automation toggle error:", error))}
-      onDeleteAutomationJob={(id) => deleteAutomationJob(id).catch((error: unknown) => console.error("Automation delete error:", error))}
       onToggleWorkspace={setWorkspaceOpen}
       onAddLinkedFolder={() => handleAddLinkedFolder().catch((error: unknown) => console.error(error))}
       onRemoveLinkedFolder={handleRemoveLinkedFolder}
@@ -265,7 +282,13 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       selectedPersonalityPreset={selectedPersonalityPreset}
       personalityAvatar={personalityAvatar}
       personalityPresets={personalityPresets}
+      personalityOptions={sharedPersonalityOptions}
       personalityMenuOpen={personalityMenuOpen}
+      automationOpen={automationOpen}
+      activeAutomationCount={activeAutomationCount}
+      automationJobs={automationJobs}
+      recentAutomationJobs={recentAutomationJobs}
+      selectedAutomationDate={selectedAutomationDate}
       brainStatus={brainStatus}
       modelMenuOpen={modelMenuOpen}
       availableModels={availableModels}
@@ -277,6 +300,7 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       waveformProcessing={waveformProcessing}
       clearMemoryOpen={clearMemoryConfirmOpen}
       clearSessionToo={clearSessionToo}
+      selectedUserProfileId={selectedUserProfileId}
       userProfileOpen={userProfileOpen}
       userName={userName}
       userAvatar={userAvatar}
@@ -309,6 +333,9 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       minP={minP}
       repeatLastN={repeatLastN}
       repeatPenalty={repeatPenalty}
+      mediaPlayerBusy={mediaPlayerBusy}
+      mediaPlayerOpen={mediaPlayerPanelOpen}
+      mediaPlayerStatus={mediaPlayerStatus}
       onOpenPersonalityProfile={openPersonalityProfile}
       onTogglePersonalityMenu={() => {
         const next = !personalityMenuOpen;
@@ -323,6 +350,11 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
         setPersonalityMenuOpen(false);
       }}
       onCreatePersonality={saveCurrentPersonalityPreset}
+      onToggleAutomation={options.setAutomationOpen}
+      onAddAutomation={() => openAutomationEditor()}
+      onEditAutomation={openAutomationEditor}
+      onToggleAutomationJob={(job) => toggleAutomationJob(job).catch((error: unknown) => console.error("Automation toggle error:", error))}
+      onDeleteAutomationJob={(id) => deleteAutomationJob(id).catch((error: unknown) => console.error("Automation delete error:", error))}
       onChooseModelFolder={() => handleChooseModelFolder().catch((error: unknown) => console.error("Folder error:", error))}
       onToggleModelMenu={() => {
         const next = !modelMenuOpen;
@@ -400,6 +432,13 @@ export function useAppPanelContents(options: UseAppPanelContentsOptions) {
       onMinPChange={setMinP}
       onRepeatLastNChange={setRepeatLastN}
       onRepeatPenaltyChange={setRepeatPenalty}
+      onToggleMediaPlayer={setMediaPlayerPanelOpen}
+      onMediaPlayerPlay={() => options.mediaPlayerPlay().catch((error: unknown) => console.error("Media player play error:", error))}
+      onMediaPlayerPause={() => options.mediaPlayerPause().catch((error: unknown) => console.error("Media player pause error:", error))}
+      onMediaPlayerNext={() => options.mediaPlayerNext().catch((error: unknown) => console.error("Media player next error:", error))}
+      onMediaPlayerPrevious={() =>
+        options.mediaPlayerPrevious().catch((error: unknown) => console.error("Media player previous error:", error))
+      }
     />
   );
 

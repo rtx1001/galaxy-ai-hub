@@ -712,8 +712,8 @@ fn nearest_non_space_after(chars: &[char], index: usize) -> Option<char> {
 fn normalize_telegram_speech_symbols(text: &str) -> String {
     let vi = telegram_speech_looks_vietnamese(text);
     let text = normalize_telegram_hyphen_dates(text, vi);
-    let plus = if vi { " cộng " } else { " plus " };
-    let range = if vi { " đến " } else { " to " };
+    let plus = if vi { " c\u{1ed9}ng " } else { " plus " };
+    let range = if vi { " \u{0111}\u{1ebf}n " } else { " to " };
     let chars: Vec<char> = text.chars().collect();
     let mut output = String::with_capacity(text.len());
 
@@ -763,7 +763,7 @@ fn normalize_telegram_hyphen_dates(text: &str, vi: bool) -> String {
             if let Some((day, month, year)) = parse_hyphen_date(core) {
                 let spoken = if vi {
                     format!(
-                        "{} tháng {} năm {}",
+                        "{} th\u{00e1}ng {} n\u{0103}m {}",
                         strip_numeric_leading_zero(day),
                         strip_numeric_leading_zero(month),
                         year
@@ -893,12 +893,192 @@ pub(super) fn telegram_speech_looks_vietnamese(text: &str) -> bool {
 
 pub(super) fn normalize_telegram_speech_reading(text: &str) -> String {
     let vi = telegram_speech_looks_vietnamese(text);
-    text.split_whitespace()
+    let repaired = repair_spaced_speech_decimals(text);
+    let expanded = expand_telegram_speech_acronyms(&repaired, vi);
+    let expanded = expand_telegram_vietnamese_speech_phrases(&expanded, vi);
+    expanded
+        .split_whitespace()
         .map(|token| normalize_telegram_speech_token(token, vi))
         .collect::<Vec<_>>()
         .join(" ")
         .replace('/', ", ")
         .replace('\\', ", ")
+}
+
+fn decimal_unit_context(chars: &[char], digit_start: usize, before_decimal: Option<char>) -> bool {
+    if before_decimal == Some('0') {
+        return true;
+    }
+
+    let mut index = digit_start;
+    while chars
+        .get(index)
+        .copied()
+        .map(|ch| ch.is_ascii_digit())
+        .unwrap_or(false)
+    {
+        index += 1;
+    }
+    while chars
+        .get(index)
+        .copied()
+        .map(|ch| ch.is_whitespace())
+        .unwrap_or(false)
+    {
+        index += 1;
+    }
+
+    match chars.get(index).copied() {
+        Some('%') | Some('$') | Some('\u{20ac}') | Some('\u{00a3}') | Some('\u{20ab}')
+        | Some('\u{00b0}') => true,
+        Some(ch) => {
+            let suffix = chars[index..]
+                .iter()
+                .take(5)
+                .collect::<String>()
+                .to_lowercase();
+            matches!(ch, 'c' | 'C' | 'f' | 'F')
+                || suffix.starts_with("mm")
+                || suffix.starts_with("cm")
+                || suffix.starts_with("km")
+                || suffix.starts_with("kg")
+                || suffix.starts_with("usd")
+                || suffix.starts_with("vnd")
+                || suffix.starts_with("vn\u{0111}")
+        }
+        None => false,
+    }
+}
+
+fn repair_spaced_speech_decimals(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut output = String::with_capacity(text.len());
+    let mut index = 0;
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if matches!(ch, '.' | ',')
+            && output
+                .chars()
+                .rev()
+                .find(|value| !value.is_whitespace())
+                .map(|value| value.is_ascii_digit())
+                .unwrap_or(false)
+        {
+            let mut next_index = index + 1;
+            while chars
+                .get(next_index)
+                .copied()
+                .map(|value| value.is_whitespace())
+                .unwrap_or(false)
+            {
+                next_index += 1;
+            }
+            if chars
+                .get(next_index)
+                .copied()
+                .map(|value| value.is_ascii_digit())
+                .unwrap_or(false)
+            {
+                let before_decimal = output.chars().rev().find(|value| !value.is_whitespace());
+                if decimal_unit_context(&chars, next_index, before_decimal) {
+                    output.push(ch);
+                    index = next_index;
+                    continue;
+                }
+            }
+        }
+
+        output.push(ch);
+        index += 1;
+    }
+
+    output
+}
+
+pub(super) fn expand_telegram_speech_acronyms(text: &str, vi: bool) -> String {
+    const ACRONYMS: &[(&str, &str, &str)] = &[("AI", "A I", "\u{00e2}y ai")];
+    let mut output = text.to_string();
+    for (key, en, vi_text) in ACRONYMS {
+        output = replace_ascii_word(&output, key, if vi { vi_text } else { en });
+    }
+    output
+}
+
+fn replace_ascii_word(text: &str, needle: &str, replacement: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let matches = index + needle_bytes.len() <= bytes.len()
+            && &bytes[index..index + needle_bytes.len()] == needle_bytes
+            && (index == 0 || !bytes[index - 1].is_ascii_alphanumeric())
+            && (index + needle_bytes.len() == bytes.len()
+                || !bytes[index + needle_bytes.len()].is_ascii_alphanumeric());
+        if matches {
+            output.push_str(replacement);
+            index += needle_bytes.len();
+        } else if let Some(ch) = text[index..].chars().next() {
+            output.push(ch);
+            index += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    output
+}
+
+fn speech_number_like(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().any(|ch| ch.is_ascii_digit())
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || matches!(ch, '.' | ',' | '-'))
+}
+
+fn vietnamese_speech_shorthand(value: &str) -> Option<&'static str> {
+    match value {
+        "hqua" => Some("h\u{00f4}m qua"),
+        "hnay" => Some("h\u{00f4}m nay"),
+        "cty" => Some("c\u{00f4}ng ty"),
+        "ko" => Some("kh\u{00f4}ng"),
+        "r" => Some("r\u{1ed3}i"),
+        "j" => Some("g\u{00ec}"),
+        "\u{0111}c" | "dc" => Some("\u{0111}\u{01b0}\u{1ee3}c"),
+        "\u{0111}t" => Some("\u{0111}i\u{1ec7}n tho\u{1ea1}i"),
+        "vs" => Some("v\u{1edb}i"),
+        "ntn" => Some("nh\u{01b0} th\u{1ebf} n\u{00e0}o"),
+        "uhm" => Some("\u{1eeb}m"),
+        "bb" => Some("bai bai"),
+        "tks" | "thx" => Some("c\u{1ea3}m \u{01a1}n"),
+        "ok" | "okay" => Some("\u{00f4} k\u{00ea}"),
+        _ => None,
+    }
+}
+
+fn expand_telegram_vietnamese_speech_phrases(text: &str, vi: bool) -> String {
+    if !vi {
+        return text.to_string();
+    }
+    let mut output = Vec::new();
+    let mut tokens = text.split_whitespace().peekable();
+    while let Some(token) = tokens.next() {
+        let core = token.trim_matches(|ch: char| matches!(ch, ',' | ';' | ':' | '.' | '!' | '?'));
+        if core.eq_ignore_ascii_case("b\u{00e2}y") {
+            if let Some(next) = tokens.peek().copied() {
+                let next_core =
+                    next.trim_matches(|ch: char| matches!(ch, ',' | ';' | ':' | '.' | '!' | '?'));
+                if next_core.eq_ignore_ascii_case("h") {
+                    output.push("b\u{00e2}y gi\u{1edd}".to_string());
+                    tokens.next();
+                    continue;
+                }
+            }
+        }
+        output.push(token.to_string());
+    }
+    output.join(" ")
 }
 
 pub(super) fn normalize_telegram_speech_token(token: &str, vi: bool) -> String {
@@ -908,6 +1088,12 @@ pub(super) fn normalize_telegram_speech_token(token: &str, vi: bool) -> String {
     let core = without_trailing
         .trim_start_matches(|ch: char| matches!(ch, ',' | ';' | ':' | '.' | '!' | '?'));
     let lower = core.to_lowercase();
+
+    if vi {
+        if let Some(spoken) = vietnamese_speech_shorthand(&lower) {
+            return format!("{}{}", spoken, trailing);
+        }
+    }
 
     if let Some((day, month, year)) = parse_slash_date(core) {
         let spoken = if vi {
@@ -964,6 +1150,20 @@ pub(super) fn normalize_telegram_speech_token(token: &str, vi: bool) -> String {
             format!("{} degrees Fahrenheit", value)
         };
         return format!("{}{}", spoken, trailing);
+    }
+    if (lower.ends_with('c') || lower.ends_with('f')) && core.len() > 1 {
+        let unit = lower.chars().last().unwrap_or_default();
+        let value = &core[..core.len() - 1];
+        if speech_number_like(value) {
+            let spoken = match (vi, unit) {
+                (true, 'c') => format!("{} \u{0111}\u{1ed9} C\u{00ea}", value),
+                (true, 'f') => format!("{} \u{0111}\u{1ed9} F", value),
+                (false, 'c') => format!("{} degrees Celsius", value),
+                (false, 'f') => format!("{} degrees Fahrenheit", value),
+                _ => core.to_string(),
+            };
+            return format!("{}{}", spoken, trailing);
+        }
     }
     if let Some(value) = lower.strip_suffix("km/h") {
         let spoken = if vi {

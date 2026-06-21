@@ -1,4 +1,6 @@
 import { ReactNode } from "react";
+import { activateAudioVisualizer, canUseAudioVisualizerForSrc, deactivateAudioVisualizer } from "../audioVisualizer";
+import { setInternalMediaPlayback } from "../internalMediaState";
 import { pauseOtherMediaElements, renderInlineText } from "../utils";
 import { RegisteredAudio } from "./RegisteredAudio";
 
@@ -141,7 +143,26 @@ export function FormattedMessageText({ text, compact = false }: { text: string; 
                 const extension = directMedia[2].toLowerCase();
                 if (["mp4", "webm", "ogg"].includes(extension)) {
                   elements.push(
-                    <video key={`video-${blockIndex}-${elements.length}`} src={mediaUrl} controls onPlay={(event) => pauseOtherMediaElements(event.currentTarget)} className="my-3 max-h-[420px] w-full rounded-3xl bg-[#131314] ring-1 ring-[#282a2c]" />,
+                    <video
+                      key={`video-${blockIndex}-${elements.length}`}
+                      src={mediaUrl}
+                      controls
+                      onPlay={(event) => {
+                        pauseOtherMediaElements(event.currentTarget);
+                        if (canUseAudioVisualizerForSrc(mediaUrl)) {
+                          activateAudioVisualizer(event.currentTarget).catch(() => undefined);
+                        }
+                        setInternalMediaPlayback(`inline-video:${mediaUrl}`, true);
+                      }}
+                      onPause={(event) => {
+                        deactivateAudioVisualizer(event.currentTarget);
+                      }}
+                      onEnded={(event) => {
+                        deactivateAudioVisualizer(event.currentTarget);
+                        setInternalMediaPlayback(`inline-video:${mediaUrl}`, false);
+                      }}
+                      className="my-3 max-h-[420px] w-full rounded-3xl bg-[#131314] ring-1 ring-[#282a2c]"
+                    />,
                   );
                 } else if (["mp3", "wav"].includes(extension)) {
                   elements.push(

@@ -1,4 +1,14 @@
-import { DEFAULT_SETTINGS, ModelLibraryEntry, PersonalityPreset, UserProfilePreset, getDefaultLocalContext, googleEventMatchesDate } from "../appCore";
+import {
+  DEFAULT_SETTINGS,
+  ModelLibraryEntry,
+  PersonalityPreset,
+  UserProfilePreset,
+  getDefaultLocalContext,
+  googleEventMatchesDate,
+  parseProfileRefId,
+  personalityFromUserProfile,
+  userProfileFromPersonality,
+} from "../appCore";
 
 type UseAppDerivedStateOptions = {
   availableModels: ModelLibraryEntry[];
@@ -21,13 +31,30 @@ export function useAppDerivedState(options: UseAppDerivedStateOptions) {
   const currentModelName =
     currentModelEntry?.name || options.selectedModel || (options.selectedModelPath ? "Selected brain" : "No model selected");
   const localContext = getDefaultLocalContext();
+  const selectedUserRef = parseProfileRefId(options.selectedUserProfileId, "user");
+  const userSidePersonality =
+    selectedUserRef.kind === "personality"
+      ? options.personalityPresets.find((preset) => preset.id === selectedUserRef.id)
+      : undefined;
   const selectedUserProfile =
-    options.userProfiles.find((profile) => profile.id === options.selectedUserProfileId) ??
-    options.userProfiles[0] ??
-    DEFAULT_SETTINGS.user_profiles[0];
+    selectedUserRef.kind === "personality"
+      ? userSidePersonality
+        ? userProfileFromPersonality(userSidePersonality)
+        : undefined
+      : options.userProfiles.find((profile) => profile.id === selectedUserRef.id);
+  const selectedPersonalityRef = parseProfileRefId(options.selectedPersonalityId, "personality");
+  const botSideUser =
+    selectedPersonalityRef.kind === "user"
+      ? options.userProfiles.find((profile) => profile.id === selectedPersonalityRef.id)
+      : undefined;
   const selectedPersonalityPreset =
-    options.personalityPresets.find((preset) => preset.id === options.selectedPersonalityId) ??
-    options.personalityPresets[0];
+    selectedPersonalityRef.kind === "user"
+      ? botSideUser
+        ? personalityFromUserProfile(botSideUser)
+        : options.personalityPresets[0]
+      : options.personalityPresets.find((preset) => preset.id === selectedPersonalityRef.id) ??
+        options.personalityPresets[0];
+  const activeUserProfile = selectedUserProfile ?? options.userProfiles[0] ?? DEFAULT_SETTINGS.user_profiles[0];
   const assistantAvatar = selectedPersonalityPreset?.avatar || options.personalityAvatar || "";
   const selectedGoogleEvents = options.googleCalendarEvents.filter((event) =>
     googleEventMatchesDate(event, options.selectedAutomationDate),
@@ -48,6 +75,6 @@ export function useAppDerivedState(options: UseAppDerivedStateOptions) {
     localContext,
     selectedGoogleEvents,
     selectedPersonalityPreset,
-    selectedUserProfile,
+    selectedUserProfile: activeUserProfile,
   };
 }

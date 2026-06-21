@@ -7,8 +7,10 @@ export type ChatContentPart = | { type: "text"; text: string }
 export type ChatMessage = {
       id: string;
       role: "user" | "assistant";
+      speaker_id?: string;
       content: string | ChatContentPart[];
       thinking?: string;
+      pending?: boolean;
       created_at?: number;
       completed_at?: number;
       duration_ms?: number;

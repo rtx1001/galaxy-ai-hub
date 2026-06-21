@@ -118,6 +118,43 @@ pub(super) fn find_last_pause_start(
     last_pause_start
 }
 
+pub(super) fn choose_prepared_voice_sample_end(
+    peaks: &[f32],
+    start_frame: usize,
+    total_frames: usize,
+    sample_rate: u32,
+    silence_threshold: f32,
+) -> usize {
+    let sample_rate_frames = sample_rate.max(1) as usize;
+    let min_trim_frames = sample_rate_frames.saturating_mul(6);
+    let fallback_frames = sample_rate_frames.saturating_mul(8);
+    let max_pause_search_frames = sample_rate_frames.saturating_mul(12);
+
+    let remaining_frames = total_frames.saturating_sub(start_frame);
+    if remaining_frames <= fallback_frames {
+        return total_frames;
+    }
+
+    let fallback_end = total_frames.min(start_frame.saturating_add(fallback_frames));
+    let search_start = total_frames.min(start_frame.saturating_add(min_trim_frames));
+    let search_end = total_frames.min(start_frame.saturating_add(max_pause_search_frames));
+    if search_end <= search_start {
+        return fallback_end;
+    }
+
+    let pause_frames = (sample_rate_frames / 16).max(1);
+    let tail_frames = (sample_rate_frames / 20).max(1);
+    find_last_pause_start(
+        peaks,
+        search_start,
+        search_end,
+        silence_threshold,
+        pause_frames,
+    )
+    .map(|pause_start| pause_start.saturating_add(tail_frames).min(total_frames))
+    .unwrap_or(fallback_end)
+}
+
 pub(super) fn apply_fade(samples: &mut [f32], fade_in_frames: usize, fade_out_frames: usize) {
     if samples.is_empty() {
         return;
@@ -207,6 +244,46 @@ pub(super) fn write_pcm16_mono_wav(
     std::fs::write(path, bytes).map_err(|e| format!("Could not write prepared voice sample: {}", e))
 }
 
+pub(super) fn inspect_wav_voice_sample(path: &Path) -> Option<(f32, u32, u16)> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.get(0..4) != Some(b"RIFF") || bytes.get(8..12) != Some(b"WAVE") {
+        return None;
+    }
+
+    let mut offset = 12usize;
+    let mut format: Option<WavFormat> = None;
+    let mut data_bytes: Option<usize> = None;
+
+    while offset + 8 <= bytes.len() {
+        let chunk_id = bytes.get(offset..offset + 4).unwrap_or_default();
+        let chunk_size = read_u32_le(&bytes, offset + 4).unwrap_or(0) as usize;
+        let chunk_start = offset + 8;
+        let chunk_end = chunk_start.saturating_add(chunk_size).min(bytes.len());
+
+        if chunk_id == b"fmt " && chunk_end >= chunk_start + 16 {
+            format = Some(WavFormat {
+                audio_format: read_u16_le(&bytes, chunk_start).unwrap_or(0),
+                channels: read_u16_le(&bytes, chunk_start + 2).unwrap_or(0),
+                sample_rate: read_u32_le(&bytes, chunk_start + 4).unwrap_or(0),
+                block_align: read_u16_le(&bytes, chunk_start + 12).unwrap_or(0),
+                bits_per_sample: read_u16_le(&bytes, chunk_start + 14).unwrap_or(0),
+            });
+        } else if chunk_id == b"data" {
+            data_bytes = Some(chunk_end.saturating_sub(chunk_start));
+        }
+
+        offset = chunk_start + chunk_size + (chunk_size % 2);
+    }
+
+    let format = format?;
+    if format.sample_rate == 0 || format.block_align == 0 || format.channels == 0 {
+        return None;
+    }
+    let total_frames = data_bytes? / format.block_align as usize;
+    let duration_seconds = total_frames as f32 / format.sample_rate as f32;
+    Some((duration_seconds, format.sample_rate, format.channels))
+}
+
 pub(super) fn prepare_wav_voice_sample(
     input_path: &Path,
     output_path: &Path,
@@ -276,35 +353,13 @@ pub(super) fn prepare_wav_voice_sample(
         .ok_or_else(|| "The WAV voice sample appears to contain only silence.".to_string())?;
     let pre_roll_frames = (format.sample_rate / 10) as usize;
     let start_frame = first_voice_frame.saturating_sub(pre_roll_frames);
-    let max_frames = (format.sample_rate as usize).saturating_mul(8);
-    let hard_end_frame = total_frames.min(start_frame.saturating_add(max_frames));
-    let mut end_frame = hard_end_frame;
-
-    while end_frame > start_frame {
-        let frame = end_frame - 1;
-        let peak = peaks.get(frame).copied().unwrap_or(0.0);
-        if peak > silence_threshold {
-            break;
-        }
-        end_frame -= 1;
-    }
-
-    let min_phrase_frames = (format.sample_rate / 2) as usize;
-    let pause_frames = (format.sample_rate / 8) as usize;
-    let tail_frames = (format.sample_rate / 20) as usize;
-    if let Some(pause_start) = find_last_pause_start(
+    let end_frame = choose_prepared_voice_sample_end(
         &peaks,
-        start_frame
-            .saturating_add(min_phrase_frames)
-            .min(hard_end_frame),
-        hard_end_frame,
+        start_frame,
+        total_frames,
+        format.sample_rate,
         silence_threshold,
-        pause_frames,
-    ) {
-        end_frame = pause_start.saturating_add(tail_frames).min(hard_end_frame);
-    } else {
-        end_frame = end_frame.saturating_add(tail_frames).min(hard_end_frame);
-    }
+    );
 
     if end_frame <= start_frame || end_frame - start_frame < (format.sample_rate / 3) as usize {
         return Err("The prepared voice sample would be too short.".to_string());
@@ -316,8 +371,8 @@ pub(super) fn prepare_wav_voice_sample(
         format.sample_rate,
         PREPARED_VOICE_SAMPLE_RATE,
     );
-    let fade_in_frames = (format.sample_rate / 100).max(1) as usize;
-    let fade_out_frames = (format.sample_rate / 50).max(1) as usize;
+    let fade_in_frames = (format.sample_rate / 200).max(1) as usize;
+    let fade_out_frames = (format.sample_rate / 100).max(1) as usize;
     let fade_in_frames = ((fade_in_frames as u64 * PREPARED_VOICE_SAMPLE_RATE as u64)
         / format.sample_rate.max(1) as u64)
         .max(1) as usize;

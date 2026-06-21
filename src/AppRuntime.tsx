@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ChatMessage, ModelLoadStatus } from "./types";
 import { AppShell } from "./components/AppShell";
@@ -11,6 +11,7 @@ import { useAudioPlayback } from "./hooks/useAudioPlayback";
 import { useImageAttachments } from "./hooks/useImageAttachments";
 import { useAutomations } from "./hooks/useAutomations";
 import { useGoogleCalendar } from "./hooks/useGoogleCalendar";
+import { useMediaPlayerController } from "./hooks/useMediaPlayerController";
 import { useSetupFlow } from "./hooks/useSetupFlow";
 import { useSamplingSettings } from "./hooks/useSamplingSettings";
 import { usePanelState } from "./hooks/usePanelState";
@@ -57,12 +58,58 @@ import {
   UserProfilePreset,
   detectDisplayLanguage,
   extractChoiceText,
+  extractChatResponseText,
   extractMessageText,
   extractTextValue,
+  estimateTokens,
+  hasUnexpectedHanDrift,
+  cleanAssistantDisplayText,
+  createMessageId,
 } from "./appCore";
 
 const MIN_CHAT_CONTEXT_SIZE = 8192;
+const AUTOPILOT_MIN_TOKENS = 180;
+const AUTOPILOT_MAX_TOKENS = 720;
+const AUTOPILOT_HISTORY_MESSAGES = 12;
+const AUTOPILOT_HISTORY_CHARS = 420;
 const SUPPRESSED_TEXT_FIELD_TITLE_ATTR = "data-suppressed-text-field-title";
+
+const randomAutoPilotMaxTokens = () =>
+  Math.floor(AUTOPILOT_MIN_TOKENS + Math.random() * (AUTOPILOT_MAX_TOKENS - AUTOPILOT_MIN_TOKENS + 1));
+
+const normalizeAutoPilotRepeatText = (value: string) =>
+  value
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const textSimilarity = (left: string, right: string) => {
+  const leftWords = normalizeAutoPilotRepeatText(left).split(" ").filter(Boolean);
+  const rightWords = normalizeAutoPilotRepeatText(right).split(" ").filter(Boolean);
+  if (leftWords.length < 4 || rightWords.length < 4) return 0;
+  const leftSet = new Set(leftWords);
+  const rightSet = new Set(rightWords);
+  let overlap = 0;
+  for (const word of leftSet) {
+    if (rightSet.has(word)) overlap += 1;
+  }
+  return overlap / Math.max(1, Math.min(leftSet.size, rightSet.size));
+};
+
+const isTooSimilarToRecentSpeakerText = (candidate: string, recentTexts: string[]) => {
+  const cleanCandidate = normalizeAutoPilotRepeatText(candidate);
+  if (!cleanCandidate) return false;
+  return recentTexts.some((recent) => {
+    const cleanRecent = normalizeAutoPilotRepeatText(recent);
+    if (!cleanRecent) return false;
+    if (cleanCandidate === cleanRecent) return true;
+    if (cleanCandidate.length > 80 && cleanRecent.length > 80) {
+      if (cleanCandidate.includes(cleanRecent) || cleanRecent.includes(cleanCandidate)) return true;
+    }
+    return textSimilarity(cleanCandidate, cleanRecent) >= 0.72;
+  });
+};
 
 function restoreSuppressedTextFieldTitles() {
   document.querySelectorAll(`[${SUPPRESSED_TEXT_FIELD_TITLE_ATTR}]`).forEach((element) => {
@@ -159,6 +206,8 @@ function App() {
     setTelegramPanelOpen,
     googlePanelOpen,
     setGooglePanelOpen,
+    mediaPlayerPanelOpen,
+    setMediaPlayerPanelOpen,
     samplingOpen,
     setSamplingOpen,
     leftPanelOpen,
@@ -259,6 +308,7 @@ function App() {
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
   const [collapsedImageParts, setCollapsedImageParts] = useState<Record<string, boolean>>({});
   const [liveConversation, setLiveConversation] = useState(DEFAULT_SETTINGS.live_conversation);
+  const [userAutoPilot, setUserAutoPilot] = useState(DEFAULT_SETTINGS.user_auto_pilot);
   const [telegramBotToken, setTelegramBotToken] = useState(DEFAULT_SETTINGS.telegram_bot_token);
   const [telegramOwnerId, setTelegramOwnerId] = useState(DEFAULT_SETTINGS.telegram_owner_id);
   const [telegramStatus, setTelegramStatus] = useState("");
@@ -301,6 +351,17 @@ function App() {
     initialClientId: DEFAULT_SETTINGS.google_client_id,
     initialClientSecret: DEFAULT_SETTINGS.google_client_secret,
     initialRedirectUri: DEFAULT_SETTINGS.google_redirect_uri,
+  });
+  const {
+    mediaPlayerStatus,
+    mediaPlayerBusy,
+    refreshMediaPlayerStatus,
+    mediaPlayerPlay,
+    mediaPlayerPause,
+    mediaPlayerNext,
+    mediaPlayerPrevious,
+  } = useMediaPlayerController({
+    settingsLoaded,
   });
   const {
     imageWidth,
@@ -437,12 +498,23 @@ function App() {
   const lastUiInteractionAtRef = useRef(0);
   const voicePlaybackRequestRef = useRef(0);
   const lastAutoSpokenAssistantIdRef = useRef<string | null>(null);
+  const lastSpeechChunkPlaybackStartedRef = useRef<{ messageId: string; at: number; requestId: number } | null>(null);
   const autoSpeechEligibleAssistantIdsRef = useRef<Set<string>>(new Set());
   const liveConversationRef = useRef(liveConversation);
   const sendInFlightRef = useRef(false);
   const activeChatAbortRef = useRef<AbortController | null>(null);
   const activeChatRequestRef = useRef(0);
   const activeTaskTypeRef = useRef(activeTaskType);
+  const isAudioPlayingRef = useRef(isAudioPlaying);
+  const speakingMessageIdRef = useRef<string | null>(speakingMessageId);
+  const userAutoPilotRef = useRef(userAutoPilot);
+  const userAutoPilotDraftingRef = useRef(false);
+  const userAutoPilotSpeechSettledAtRef = useRef(performance.now());
+  const deferredAutoPilotMemoryTurnsRef = useRef<Array<{ userText: string; assistantText: string }>>([]);
+  const memoryIdleFlushTimerRef = useRef<number | null>(null);
+  const memoryIdleFlushRunningRef = useRef(false);
+  const transcriptActiveSessionIdRef = useRef("");
+  const transcriptLoggedMessageIdsRef = useRef<Set<string>>(new Set());
   const modelLoadPromiseRef = useRef<Promise<void> | null>(null);
   const modelLoadTargetRef = useRef("");
   const automationRunKeysRef = useRef<Set<string>>(new Set());
@@ -482,6 +554,9 @@ function App() {
   } = usePersonalityMemory({
     settingsLoaded,
     selectedPersonalityId,
+    selectedPersonalityName: selectedPersonalityPreset?.name || "Assistant",
+    selectedMemoryPartnerId: selectedUserProfileId,
+    selectedMemoryPartnerName: selectedUserProfile?.name || userName || "User",
     telegramRunning,
     isStreaming,
     clearSessionToo,
@@ -512,6 +587,35 @@ function App() {
     activeTaskTypeRef.current = activeTaskType;
   }, [activeTaskType]);
 
+  useEffect(() => {
+    isAudioPlayingRef.current = isAudioPlaying;
+  }, [isAudioPlaying]);
+
+  useEffect(() => {
+    speakingMessageIdRef.current = speakingMessageId;
+  }, [speakingMessageId]);
+
+  const queueAutoPilotMemoryTurn = (userText: string, assistantText: string) => {
+    const cleanUser = userText.trim();
+    const cleanAssistant = assistantText.trim();
+    if (!cleanUser && !cleanAssistant) return;
+    deferredAutoPilotMemoryTurnsRef.current = [
+      ...deferredAutoPilotMemoryTurnsRef.current,
+      { userText: cleanUser.slice(0, 900), assistantText: cleanAssistant.slice(0, 900) },
+    ].slice(-8);
+  };
+
+  useEffect(() => () => {
+    if (memoryIdleFlushTimerRef.current) {
+      window.clearTimeout(memoryIdleFlushTimerRef.current);
+      memoryIdleFlushTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    userAutoPilotRef.current = userAutoPilot;
+  }, [userAutoPilot]);
+
   const preferredChatGpuLayers = systemInfo?.has_nvidia_gpu ? 999 : 0;
   const reducedTaskGpuLayers = systemInfo?.has_nvidia_gpu
     ? Math.min(
@@ -540,7 +644,7 @@ function App() {
   } = useConversationScroll({
     markUiInteraction,
     messagesLength: messages.length,
-    selectedPersonalityId,
+    selectedPersonalityId: `${selectedUserProfileId}::${selectedPersonalityId}`,
   });
   const {
     saveActiveChatSession,
@@ -548,9 +652,12 @@ function App() {
     registerEmptyChatSession,
     removeChatSession,
     clearActiveChatSession,
+    activeChatSessionId,
+    updateChatSessionMessages,
   } = useChatSessions({
     settingsLoaded,
     selectedPersonalityId,
+    selectedUserProfileId,
     messages,
     setMessages,
     lastMessageCountRef,
@@ -585,6 +692,49 @@ function App() {
       // Logging must never affect chat or voice playback.
     });
   };
+
+  useEffect(() => {
+    if (!settingsLoaded || !activeChatSessionId) return;
+    if (transcriptActiveSessionIdRef.current !== activeChatSessionId) {
+      transcriptActiveSessionIdRef.current = activeChatSessionId;
+      transcriptLoggedMessageIdsRef.current = new Set(
+        messages
+          .filter((message) => !message.pending && extractMessageText(message.content).trim())
+          .map((message) => message.id),
+      );
+      return;
+    }
+    const userProfileName = selectedUserProfile?.name || userName || "User";
+    const assistantName = selectedPersonalityPreset?.name || "Assistant";
+    for (const message of messages) {
+      if (message.pending || transcriptLoggedMessageIdsRef.current.has(message.id)) continue;
+      const rawText = extractMessageText(message.content).replace(/\s+/g, " ").trim();
+      const text = message.role === "assistant" ? cleanAssistantDisplayText(rawText) : rawText;
+      if (!text) continue;
+      transcriptLoggedMessageIdsRef.current.add(message.id);
+      const speakerName = message.role === "user" ? userProfileName : assistantName;
+      invoke("append_pair_chat_transcript", {
+        firstId: selectedUserProfileId,
+        firstName: userProfileName,
+        secondId: selectedPersonalityId,
+        secondName: assistantName,
+        speakerName,
+        createdAt: new Date(message.created_at || message.completed_at || Date.now()).toISOString(),
+        text,
+      }).catch((error: unknown) => {
+        appLog(`chat transcript append failed ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
+  }, [
+    activeChatSessionId,
+    messages,
+    selectedPersonalityId,
+    selectedPersonalityPreset?.name,
+    selectedUserProfile?.name,
+    selectedUserProfileId,
+    settingsLoaded,
+    userName,
+  ]);
 
   const processSseEvent = (eventChunk: string) => {
     let visibleText = "";
@@ -669,6 +819,65 @@ function App() {
     voiceSetupStatus,
   });
 
+  useEffect(() => {
+    const clearMemoryIdleTimer = () => {
+      if (memoryIdleFlushTimerRef.current) {
+        window.clearTimeout(memoryIdleFlushTimerRef.current);
+        memoryIdleFlushTimerRef.current = null;
+      }
+    };
+    const memoryCanFlush =
+      !userAutoPilot &&
+      !isStreaming &&
+      !isGeneratingImage &&
+      !isApproving &&
+      !isTranscribing &&
+      !isAudioPlaying &&
+      !speakingMessageId &&
+      !sendInFlightRef.current &&
+      activeTaskType === "none" &&
+      brainStatus !== "Thinking" &&
+      brainStatus !== "Loading";
+    if (!memoryCanFlush) {
+      clearMemoryIdleTimer();
+      return;
+    }
+    if (memoryIdleFlushRunningRef.current || memoryIdleFlushTimerRef.current) return;
+    if (!deferredAutoPilotMemoryTurnsRef.current.length) return;
+    memoryIdleFlushTimerRef.current = window.setTimeout(() => {
+      memoryIdleFlushTimerRef.current = null;
+      if (userAutoPilotRef.current || memoryIdleFlushRunningRef.current) return;
+      const turns = deferredAutoPilotMemoryTurnsRef.current.splice(0);
+      if (!turns.length) return;
+      memoryIdleFlushRunningRef.current = true;
+      const combinedUserText = turns.map((turn, index) => `Turn ${index + 1}: ${turn.userText}`).join("\n");
+      const combinedAssistantText = turns.map((turn, index) => `Turn ${index + 1}: ${turn.assistantText}`).join("\n");
+      try {
+        Promise.resolve(updatePersonalityMemoryAfterTurn(combinedUserText, combinedAssistantText))
+          .catch((error: unknown) => {
+            appLog(`auto-pilot idle memory update failed ${error instanceof Error ? error.message : String(error)}`);
+          })
+          .finally(() => {
+            memoryIdleFlushRunningRef.current = false;
+          });
+      } catch (error) {
+        memoryIdleFlushRunningRef.current = false;
+        appLog(`auto-pilot idle memory update failed ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }, 2500);
+  }, [
+    activeTaskType,
+    brainStatus,
+    isApproving,
+    isAudioPlaying,
+    isGeneratingImage,
+    isStreaming,
+    isTranscribing,
+    speakingMessageId,
+    updatePersonalityMemoryAfterTurn,
+    userAutoPilot,
+  ]);
+
   const {
     playAutoSpeechQueue,
     previewVoiceSample,
@@ -681,6 +890,7 @@ function App() {
     isStreaming,
     liveConversation,
     lastAutoSpokenAssistantIdRef,
+    lastSpeechChunkPlaybackStartedRef,
     messages,
     playAudioBase64,
     previewingVoicePath,
@@ -692,6 +902,7 @@ function App() {
     setBrainStatus,
     setComposerNotice,
     setPreviewingVoicePath,
+    speakingMessageIdRef,
     setSpeakingMessageId,
     stopActiveAudio,
     unloadLlmForTask,
@@ -890,6 +1101,7 @@ function App() {
   const { handleGenerateImage } = useImageGeneration({
     appLog,
     assistantAvatar,
+    assistantId: selectedPersonalityId,
     autoSpeechEligibleAssistantIdsRef,
     clearImage,
     chatDisplayLanguage,
@@ -915,6 +1127,49 @@ function App() {
     userAvatar,
     userName,
   });
+
+  const waitForConversationAudioIdle = async () => {
+    const waitStartedAt = performance.now();
+    while (
+      performance.now() - waitStartedAt < 120_000 &&
+      (
+        speakingMessageIdRef.current ||
+        isAudioPlayingRef.current ||
+        activeTaskTypeRef.current === "voice"
+      )
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+    }
+    return Math.round(performance.now() - waitStartedAt);
+  };
+
+  const waitForMessageSpeechStart = async (messageId: string) => {
+    const waitStartedAt = performance.now();
+    while (
+      performance.now() - waitStartedAt < 25_000 &&
+      (
+        speakingMessageIdRef.current !== messageId ||
+        !isAudioPlayingRef.current
+      )
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+    }
+    return Math.round(performance.now() - waitStartedAt);
+  };
+
+  const waitForFinalSpeechChunkStart = async (messageId: string) => {
+    const waitStartedAt = performance.now();
+    while (
+      performance.now() - waitStartedAt < 45_000 &&
+      !(
+        lastSpeechChunkPlaybackStartedRef.current &&
+        lastSpeechChunkPlaybackStartedRef.current.messageId === messageId
+      )
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+    }
+    return Math.round(performance.now() - waitStartedAt);
+  };
 
   const { handleSend } = useChatRuntime({
     activeChatAbortRef,
@@ -959,6 +1214,7 @@ function App() {
     selectedModelPath,
     selectedPersonalityId,
     selectedUserProfile,
+    selectedUserProfileId,
     sendInFlightRef,
     setBrainStatus,
     setComposerNotice,
@@ -975,7 +1231,428 @@ function App() {
     updatePersonalityMemoryAfterTurn,
     userDescription,
     userName,
+    activeChatSessionId,
+    updateChatSessionMessages,
+    waitForConversationAudioIdle,
+    waitForMessageSpeechStart,
+    waitForFinalSpeechChunkStart,
   });
+
+  useEffect(() => {
+    if (speakingMessageId || isAudioPlaying || activeTaskType === "voice") {
+      return;
+    }
+    userAutoPilotSpeechSettledAtRef.current = performance.now();
+  }, [activeTaskType, isAudioPlaying, speakingMessageId]);
+
+  useEffect(() => {
+    if (!userAutoPilot || !settingsLoaded || firstStartupSetupNeeded) return;
+    if (userAutoPilotDraftingRef.current || sendInFlightRef.current) return;
+    if (isStreaming || isGeneratingImage || isApproving || isTranscribing) return;
+    if (input.trim() || image) return;
+
+    const visibleMessages = messages.filter((message) => extractMessageText(message.content).trim() || Array.isArray(message.content));
+    const latest = visibleMessages[visibleMessages.length - 1];
+    if (latest && latest.role !== "assistant") return;
+
+    const speechStartedForLatest = Boolean(
+      latest &&
+      speakingMessageIdRef.current === latest.id &&
+      isAudioPlayingRef.current,
+    );
+    const latestStillNeedsSpeech = latest ? autoSpeechEligibleAssistantIdsRef.current.has(latest.id) : false;
+    if (latestStillNeedsSpeech && !speechStartedForLatest) return;
+    if (
+      activeTaskTypeRef.current !== "none" &&
+      activeTaskTypeRef.current !== "llm" &&
+      activeTaskTypeRef.current !== "voice"
+    ) return;
+
+    let cancelled = false;
+    userAutoPilotDraftingRef.current = true;
+    const speechSettleDelayMs = latest ? 0 : liveConversation ? 900 : 500;
+    const elapsedSinceSpeechSettled = performance.now() - userAutoPilotSpeechSettledAtRef.current;
+    const speechSettleWaitMs = Math.max(0, speechSettleDelayMs - elapsedSinceSpeechSettled);
+    const baseDelayMs = visibleMessages.length === 0 ? 900 : latestStillNeedsSpeech ? 80 : 650;
+    let timerStarted = false;
+    const timer = window.setTimeout(async () => {
+      timerStarted = true;
+      const pendingUserMessageId = createMessageId();
+      let removePendingAssistantBubble: (() => void) | null = null;
+      const requestPairContext = {
+        userProfileId: selectedUserProfileId,
+        personalityId: selectedPersonalityId,
+      };
+      const updateAutoPilotMessages = (updater: ChatMessage[] | ((messages: ChatMessage[]) => ChatMessage[])) => {
+        if (typeof updateChatSessionMessages === "function" && activeChatSessionId) {
+          updateChatSessionMessages(activeChatSessionId, updater, requestPairContext);
+        } else {
+          setMessages(updater as any);
+        }
+      };
+      const removePendingUserBubble = () => {
+        updateAutoPilotMessages((prev: ChatMessage[]) => prev.filter((message) => !(message.id === pendingUserMessageId && message.pending)));
+      };
+      try {
+        updateAutoPilotMessages((prev: ChatMessage[]) => {
+          if (prev.some((message) => message.id === pendingUserMessageId)) return prev;
+          return [
+            ...prev,
+            {
+              id: pendingUserMessageId,
+              role: "user",
+              speaker_id: selectedUserProfileId,
+              content: "",
+              pending: true,
+              created_at: Date.now(),
+            },
+          ];
+        });
+        if (latest && latestStillNeedsSpeech) {
+          const waitedForFinalMs = await waitForFinalSpeechChunkStart(latest.id);
+          if (waitedForFinalMs > 250) {
+            appLog(`auto-pilot waited for final speech chunk message=${latest.id} ms=${waitedForFinalMs}`);
+          }
+        }
+        if (cancelled || !userAutoPilotRef.current) {
+          removePendingUserBubble();
+          return;
+        }
+        const ready = await ensureChatModelReady();
+        if (!ready || cancelled || !userAutoPilotRef.current) {
+          removePendingUserBubble();
+          return;
+        }
+
+        setBrainStatus("Thinking");
+        const userProfileName = selectedUserProfile?.name || userName || "User";
+        const userProfileDescription = selectedUserProfile?.description || userDescription || "";
+        const assistantProfile = selectedPersonalityPreset;
+        const assistantName = assistantProfile?.name || "Assistant";
+        const assistantDescription = personality || assistantProfile?.prompt || "";
+        const recentHistory = visibleMessages.slice(-AUTOPILOT_HISTORY_MESSAGES).map((message) => {
+          const text = extractMessageText(message.content).replace(/\s+/g, " ").trim();
+          if (!text) return "";
+          const speaker = message.role === "user" ? userProfileName : assistantName;
+          return `${speaker}: ${text.slice(0, AUTOPILOT_HISTORY_CHARS)}`;
+        }).filter(Boolean).join("\n");
+        const instruction = [
+          `You are writing the next chat message as ${userProfileName}.`,
+          userProfileDescription ? `Profile for ${userProfileName}: ${userProfileDescription}` : "",
+          `You are talking to ${assistantName}.`,
+          assistantDescription ? `Profile for ${assistantName}: ${assistantDescription}` : "",
+          "Write only one short next message that this character would naturally send.",
+          "Keep it conversational, context-aware, and human. No labels, no analysis, no tool calls.",
+          "Vary the length naturally. Usually keep it short; sometimes write a fuller reply if the moment needs it.",
+          "Do not repeat or lightly rephrase this character's recent messages. Move the conversation forward.",
+          "Match the current conversation language and relationship style.",
+          visibleMessages.length === 0
+            ? `This is a blank new conversation. Start with a natural greeting toward ${assistantName}.`
+            : `Continue from the latest message by ${assistantName}.`,
+        ].filter(Boolean).join("\n");
+        const userDraftMaxTokens = randomAutoPilotMaxTokens();
+        const userRecentTexts = visibleMessages
+          .filter((message) => message.role === "user")
+          .slice(-4)
+          .map((message) => extractMessageText(message.content))
+          .filter(Boolean);
+        const repairAutoPilotMixedScriptDrift = async (rawText: string) => {
+          const trimmed = rawText.trim();
+          if (!trimmed) return "";
+          if (!hasUnexpectedHanDrift(trimmed)) return cleanAssistantDisplayText(trimmed);
+          try {
+            const response = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messages: [
+                  {
+                    role: "system",
+                    content: [
+                      "Repair a mixed-script model drift in one chat message.",
+                      "Rewrite the message in the main language of the conversation.",
+                      "Translate any unexpected foreign-script fragments into that language.",
+                      "Preserve meaning, tone, names, relationship style, and intensity.",
+                      "Do not add new events, facts, explanations, labels, or analysis.",
+                      "Output only the repaired message.",
+                    ].join("\n"),
+                  },
+                  {
+                    role: "user",
+                    content: [
+                      recentHistory ? `Recent conversation:\n${recentHistory}` : "",
+                      `Message to repair:\n${trimmed}`,
+                    ].filter(Boolean).join("\n\n"),
+                  },
+                ],
+                temperature: 0.25,
+                top_k: Math.max(20, Math.min(topK || 40, 40)),
+                top_p: Math.min(topP || 0.9, 0.9),
+                min_p: minP,
+                repeat_last_n: Math.max(repeatLastN, 128),
+                repeat_penalty: Math.max(repeatPenalty, 1.1),
+                max_tokens: Math.min(Math.max(160, estimateTokens(trimmed) + 80), Math.max(180, replyLength)),
+                stream: false,
+                chat_template_kwargs: {
+                  enable_thinking: false,
+                  thinking: false,
+                },
+              }),
+            });
+            if (!response.ok) return cleanAssistantDisplayText(trimmed);
+            const repaired = cleanAssistantDisplayText(extractChatResponseText(await response.json()));
+            if (repaired && !hasUnexpectedHanDrift(repaired)) {
+              appLog("auto-pilot repaired mixed-script drift in draft");
+              return repaired;
+            }
+          } catch (error) {
+            appLog(`auto-pilot mixed-script repair failed ${error instanceof Error ? error.message : String(error)}`);
+          }
+          return cleanAssistantDisplayText(trimmed);
+        };
+        const requestUserDraft = async (avoidRepeat: boolean) => {
+          const messagesForDraft = [
+            { role: "system", content: avoidRepeat ? `${instruction}\nThe previous draft was too similar to a recent message. Write a clearly different next message while staying in character.` : instruction },
+            ...(recentHistory ? [{ role: "user", content: `Conversation so far:\n${recentHistory}` }] : []),
+            { role: "user", content: `Write ${userProfileName}'s next message now.` },
+          ];
+          const response = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: messagesForDraft,
+              temperature: Math.max(0.62, Math.min(1.0, (samplingTemperature || 0.7) + (avoidRepeat ? 0.08 : 0))),
+              top_k: topK,
+              top_p: topP,
+              min_p: minP,
+              repeat_last_n: Math.max(repeatLastN, avoidRepeat ? 256 : 128),
+              repeat_penalty: Math.max(repeatPenalty, avoidRepeat ? 1.16 : 1.1),
+              max_tokens: Math.min(userDraftMaxTokens, Math.max(64, replyLength)),
+              stop: [
+                `\n${userProfileName}:`,
+                `\n${assistantName}:`,
+                "<|im_end|>",
+                "<end_of_turn>",
+              ],
+              stream: false,
+              chat_template_kwargs: {
+                enable_thinking: false,
+                thinking: false,
+              },
+            }),
+          });
+          if (!response.ok) {
+            throw new Error(`Auto-pilot draft failed with status ${response.status}`);
+          }
+          return repairAutoPilotMixedScriptDrift(extractChatResponseText(await response.json()));
+        };
+        let text = await requestUserDraft(false);
+        if (isTooSimilarToRecentSpeakerText(text, userRecentTexts)) {
+          appLog("auto-pilot user draft repeated recent wording; retrying once");
+          text = await requestUserDraft(true);
+        }
+        if (cancelled || !userAutoPilotRef.current) {
+          removePendingUserBubble();
+          return;
+        }
+        if (!text) throw new Error("Auto-pilot draft was empty.");
+        appLog(`auto-pilot draft ready chars=${text.length}`);
+        updateAutoPilotMessages((prev: ChatMessage[]) =>
+          prev.map((message) =>
+            message.id === pendingUserMessageId
+              ? {
+                  ...message,
+                  content: text,
+                  pending: false,
+                  created_at: Date.now(),
+                }
+              : message,
+          ),
+        );
+        if (cancelled || !userAutoPilotRef.current) return;
+        let userSpeechPromise: Promise<void> | null = null;
+        if (liveConversation && selectedUserProfile?.auto_speech !== false && text.trim()) {
+          userSpeechPromise = speakMessageText(pendingUserMessageId, text, "user", { queued: true });
+          void userSpeechPromise.catch((error: unknown) => {
+            console.error("Auto-pilot user speech error:", error);
+          });
+          const waitedForStartMs = await waitForMessageSpeechStart(pendingUserMessageId);
+          if (waitedForStartMs > 250) {
+            appLog(`auto-pilot waited for user speech start message=${pendingUserMessageId} ms=${waitedForStartMs}`);
+          }
+          const waitedForUserFinalMs = await waitForFinalSpeechChunkStart(pendingUserMessageId);
+          if (waitedForUserFinalMs > 250) {
+            appLog(`auto-pilot waited for user final speech chunk message=${pendingUserMessageId} ms=${waitedForUserFinalMs}`);
+          }
+          void userSpeechPromise.catch(() => undefined);
+        }
+        if (cancelled || !userAutoPilotRef.current) return;
+
+        const pendingAssistantMessageId = createMessageId();
+        const assistantStartedAt = performance.now();
+        updateAutoPilotMessages((prev: ChatMessage[]) => {
+          if (prev.some((message) => message.id === pendingAssistantMessageId)) return prev;
+          return [
+            ...prev,
+            {
+              id: pendingAssistantMessageId,
+              role: "assistant",
+              speaker_id: selectedPersonalityId,
+              content: "",
+              pending: true,
+              created_at: Date.now(),
+            },
+          ];
+        });
+        removePendingAssistantBubble = () => {
+          updateAutoPilotMessages((prev: ChatMessage[]) => prev.filter((message) => message.id !== pendingAssistantMessageId));
+        };
+        const assistantReady = await ensureChatModelReady();
+        if (!assistantReady || cancelled || !userAutoPilotRef.current) {
+          removePendingAssistantBubble();
+          return;
+        }
+        setBrainStatus("Thinking");
+        const conversationAfterUser: ChatMessage[] = [
+          ...visibleMessages,
+          {
+            id: pendingUserMessageId,
+            role: "user",
+            speaker_id: selectedUserProfileId,
+            content: text,
+            created_at: Date.now(),
+          },
+        ];
+        const assistantHistory = conversationAfterUser.slice(-AUTOPILOT_HISTORY_MESSAGES).map((message) => {
+          const messageText = extractMessageText(message.content).replace(/\s+/g, " ").trim();
+          if (!messageText) return "";
+          const speaker = message.role === "user" ? userProfileName : assistantName;
+          return `${speaker}: ${messageText.slice(0, AUTOPILOT_HISTORY_CHARS)}`;
+        }).filter(Boolean).join("\n");
+        const assistantInstruction = [
+          `You are writing the next chat message as ${assistantName}.`,
+          assistantDescription ? `Profile for ${assistantName}: ${assistantDescription}` : "",
+          `You are talking to ${userProfileName}.`,
+          userProfileDescription ? `Profile for ${userProfileName}: ${userProfileDescription}` : "",
+          "Write only one short next message that this character would naturally send.",
+          "Keep it conversational, context-aware, and human. No labels, no analysis, no tool calls.",
+          "Vary the length naturally. Usually keep it short; sometimes write a fuller reply if the moment needs it.",
+          "Do not repeat or lightly rephrase this character's recent messages. Move the conversation forward.",
+          "Match the current conversation language and relationship style.",
+          `Continue from the latest message by ${userProfileName}.`,
+        ].filter(Boolean).join("\n");
+        const assistantDraftMaxTokens = randomAutoPilotMaxTokens();
+        const assistantRecentTexts = conversationAfterUser
+          .filter((message) => message.role === "assistant")
+          .slice(-4)
+          .map((message) => extractMessageText(message.content))
+          .filter(Boolean);
+        const requestAssistantDraft = async (avoidRepeat: boolean) => {
+          const messagesForDraft = [
+            { role: "system", content: avoidRepeat ? `${assistantInstruction}\nThe previous draft was too similar to a recent message. Write a clearly different next message while staying in character.` : assistantInstruction },
+              ...(assistantHistory ? [{ role: "user", content: `Conversation so far:\n${assistantHistory}` }] : []),
+              { role: "user", content: `Write ${assistantName}'s next message now.` },
+          ];
+          const assistantResponse = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: messagesForDraft,
+              temperature: Math.max(0.62, Math.min(1.0, (samplingTemperature || 0.7) + (avoidRepeat ? 0.08 : 0))),
+              top_k: topK,
+              top_p: topP,
+              min_p: minP,
+              repeat_last_n: Math.max(repeatLastN, avoidRepeat ? 256 : 128),
+              repeat_penalty: Math.max(repeatPenalty, avoidRepeat ? 1.16 : 1.1),
+              max_tokens: Math.min(assistantDraftMaxTokens, Math.max(64, replyLength)),
+              stop: [
+                `\n${assistantName}:`,
+                `\n${userProfileName}:`,
+                "<|im_end|>",
+                "<end_of_turn>",
+              ],
+              stream: false,
+              chat_template_kwargs: {
+                enable_thinking: false,
+                thinking: false,
+              },
+            }),
+          });
+          if (!assistantResponse.ok) {
+            throw new Error(`Auto-pilot assistant draft failed with status ${assistantResponse.status}`);
+          }
+          return repairAutoPilotMixedScriptDrift(extractChatResponseText(await assistantResponse.json()));
+        };
+        let assistantText = await requestAssistantDraft(false);
+        if (isTooSimilarToRecentSpeakerText(assistantText, assistantRecentTexts)) {
+          appLog("auto-pilot assistant draft repeated recent wording; retrying once");
+          assistantText = await requestAssistantDraft(true);
+        }
+        if (cancelled || !userAutoPilotRef.current) {
+          removePendingAssistantBubble();
+          return;
+        }
+        if (!assistantText) throw new Error("Auto-pilot assistant draft was empty.");
+        appLog(`auto-pilot assistant draft ready chars=${assistantText.length}`);
+        const completedAt = Date.now();
+        updateAutoPilotMessages((prev: ChatMessage[]) =>
+          prev.map((message) =>
+            message.id === pendingAssistantMessageId
+              ? {
+                  ...message,
+                  content: assistantText,
+                  pending: false,
+                  completed_at: completedAt,
+                  duration_ms: Math.max(0, Math.round(performance.now() - assistantStartedAt)),
+                }
+              : message,
+          ),
+        );
+        queueAutoPilotMemoryTurn(text, assistantText);
+        if (liveConversation) {
+          autoSpeechEligibleAssistantIdsRef.current.add(pendingAssistantMessageId);
+        }
+      } catch (error) {
+        removePendingUserBubble();
+        removePendingAssistantBubble?.();
+        console.error("Auto-pilot error:", error);
+        appLog(`auto-pilot error=${error instanceof Error ? error.message : String(error)}`);
+        setComposerNotice("Auto-pilot paused because it could not draft a reply.");
+      } finally {
+        userAutoPilotDraftingRef.current = false;
+        if (!sendInFlightRef.current && !isStreaming) {
+          setBrainStatus("Ready");
+        }
+      }
+    }, baseDelayMs + speechSettleWaitMs);
+
+    return () => {
+      if (!timerStarted) {
+        cancelled = true;
+      }
+      window.clearTimeout(timer);
+      if (!timerStarted) {
+        userAutoPilotDraftingRef.current = false;
+      }
+    };
+  }, [
+    activeChatSessionId,
+    activeTaskType,
+    firstStartupSetupNeeded,
+    image,
+    input,
+    isApproving,
+    isGeneratingImage,
+    isStreaming,
+    isTranscribing,
+    isAudioPlaying,
+    selectedPersonalityId,
+    selectedUserProfileId,
+    settingsLoaded,
+    speakingMessageId,
+    userAutoPilot,
+    liveConversation,
+  ]);
   const { stopActiveResponse } = useChatStop({
     activeChatAbortRef,
     activeChatRequestRef,
@@ -1107,6 +1784,7 @@ function App() {
     linkedFolders,
     liveConversation,
     liveConversationRef,
+    userAutoPilot,
     loadModelPath,
     memorySize,
     messages,
@@ -1145,6 +1823,7 @@ function App() {
     setGoogleClientSecret,
     setGooglePanelOpen,
     setGoogleRedirectUri,
+    setMediaPlayerPanelOpen,
     setImageHeight,
     setImageStudioOpen,
     setImageWidth,
@@ -1152,6 +1831,7 @@ function App() {
     setLeftPanelOpen,
     setLinkedFolders,
     setLiveConversation,
+    setUserAutoPilot,
     setMemorySize,
     setMessages,
     setMinP,
@@ -1202,6 +1882,7 @@ function App() {
     settingsReadyForSave,
     setupCompleted,
     speakingMessageId,
+    mediaPlayerPanelOpen,
     telegramAutoStartAttemptedRef,
     telegramBotToken,
     telegramGuests,
@@ -1401,6 +2082,7 @@ function App() {
     setSelectedGoogleEvent,
     setSelectedModelPath,
     setSelectedVoicePath,
+    setMediaPlayerPanelOpen,
     setTelegramBotToken,
     setTelegramGuestDraft,
     setTelegramOwnerId,
@@ -1409,6 +2091,7 @@ function App() {
     setToolRunsOpen,
     setTopK,
     setTopP,
+    setUserAutoPilot,
     setUserDescription,
     setUserName,
     setUserProfileMenuOpen,
@@ -1425,6 +2108,14 @@ function App() {
     theme: selectedThemeSwatch,
     toolRuns,
     toolRunsOpen,
+    mediaPlayerBusy,
+    mediaPlayerPanelOpen,
+    mediaPlayerStatus,
+    refreshMediaPlayerStatus,
+    mediaPlayerPlay,
+    mediaPlayerPause,
+    mediaPlayerNext,
+    mediaPlayerPrevious,
     toggleAutomationJob,
     topK,
     topP,
@@ -1433,6 +2124,7 @@ function App() {
     updateActiveUserVoicePath,
     updateSelectedPersonalityPreset,
     userAvatar,
+    userAutoPilot,
     userAvatarPickerRef,
     userDescription,
     userName,

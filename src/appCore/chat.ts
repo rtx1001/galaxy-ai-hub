@@ -6,7 +6,7 @@ export const createMessageId = () =>
   `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-export const SPEECH_CACHE_LIMIT = 12;
+export const SPEECH_CACHE_LIMIT = 48;
 const MAX_BRAIN_HISTORY_MESSAGES = 18;
 
 const timestampFromMessageId = (id: string) => {
@@ -423,6 +423,7 @@ export const compactChatSessionForStorage = (chatMessages: ChatMessage[]) =>
     .map((message) => ({
       id: message.id,
       role: message.role,
+      speaker_id: message.speaker_id,
       content: compactContentForStorage(message.content),
       thinking: message.thinking?.slice(0, 6_000),
       created_at: message.created_at,
@@ -528,6 +529,7 @@ export const parseStoredChatSession = (raw: string): ChatMessage[] => {
         return {
           id: message.id,
           role: message.role,
+          speaker_id: typeof message.speaker_id === "string" ? message.speaker_id : undefined,
           content,
           thinking: typeof message.thinking === "string" ? message.thinking : undefined,
           created_at: typeof message.created_at === "number" ? message.created_at : timestampFromMessageId(message.id),

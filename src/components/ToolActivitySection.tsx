@@ -1,6 +1,5 @@
 import { ToolRunRecord, formatToolDuration, formatToolRunTime, toolRunBrief, toolRunDisplayName } from "../appCore";
 import { ChevronDownIcon, EraserIcon } from "./Icons";
-import { IconButton } from "./UI";
 
 export function ToolActivitySection({
   open,
@@ -19,19 +18,24 @@ export function ToolActivitySection({
       open={open}
       onToggle={(event) => onToggle(event.currentTarget.open)}
     >
-      <summary className="grid h-12 cursor-pointer list-none grid-cols-[minmax(0,1fr)_16px] items-center gap-2 px-3 [&::-webkit-details-marker]:hidden">
+      <summary className="grid h-12 cursor-pointer list-none grid-cols-[minmax(0,1fr)_32px_16px] items-center gap-2 px-3 [&::-webkit-details-marker]:hidden">
         <div className="text-xs font-bold uppercase tracking-[0.22em] text-[#c4c7c5]">Tool Activity</div>
+        <button
+          type="button"
+          title="Clear recent calls"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onClear();
+          }}
+          disabled={!toolRuns.length}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[#282a2c] bg-[#1e1f20] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <EraserIcon className="h-4 w-4" />
+        </button>
         <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[#c4c7c5] transition ${open ? "rotate-180" : ""}`} />
       </summary>
       <div className="border-t border-[#282a2c] p-3">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="text-xs font-bold uppercase tracking-[0.14em] text-[#c4c7c5]">
-            {toolRuns.length ? `${Math.min(toolRuns.length, 10)} recent calls` : "No calls yet"}
-          </div>
-          <IconButton title="Clear recent calls" onClick={onClear} size="sm" disabled={!toolRuns.length}>
-            <EraserIcon className="h-4 w-4" />
-          </IconButton>
-        </div>
         <div className="rounded-2xl bg-[#131314] p-2 ring-1 ring-[#282a2c]">
           <div className="panel-scroll max-h-[228px] space-y-1.5 overflow-y-auto">
             {toolRuns.length === 0 ? (

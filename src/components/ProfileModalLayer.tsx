@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { createPortal } from "react-dom";
 import type { PersonalityPreset, UserProfilePreset, VoiceSample } from "../appCore";
 import {
   CharacterProfileModal,
@@ -11,6 +12,8 @@ export function ProfileModalLayer({
   clearMemoryOpen,
   characterName,
   clearSessionToo,
+  memoryPartnerId,
+  memoryPartnerName,
   userProfileOpen,
   userName,
   userAvatar,
@@ -69,6 +72,8 @@ export function ProfileModalLayer({
   clearMemoryOpen: boolean;
   characterName: string;
   clearSessionToo: boolean;
+  memoryPartnerId: string;
+  memoryPartnerName: string;
   userProfileOpen: boolean;
   userName: string;
   userAvatar: string;
@@ -124,7 +129,7 @@ export function ProfileModalLayer({
   onConfirmDeletePersonality: () => void;
   onCancelDeletePersonality: () => void;
 }) {
-  return (
+  const layer = (
     <>
       <ClearMemoryConfirmModal
         open={clearMemoryOpen}
@@ -173,6 +178,8 @@ export function ProfileModalLayer({
         fallbackAvatar={personalityAvatar}
         nameDraft={personalityNameDraft}
         personality={personality}
+        memoryPartnerId={memoryPartnerId}
+        memoryPartnerName={memoryPartnerName}
         profileCount={personalityProfileCount}
         memorySize={memorySize}
         replyLength={replyLength}
@@ -207,4 +214,9 @@ export function ProfileModalLayer({
       />
     </>
   );
+
+  if (typeof document === "undefined") {
+    return layer;
+  }
+  return createPortal(layer, document.body);
 }

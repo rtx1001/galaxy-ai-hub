@@ -5,7 +5,7 @@ import type {
   CharacterSettings,
   PersonalityPreset,
 } from "../appCore";
-import { syncSoulCoreIdentity } from "../appCore";
+import { parseProfileRefId, syncSoulCoreIdentity } from "../appCore";
 
 type UseCharacterFilesOptions = {
   settingsLoaded: boolean;
@@ -36,8 +36,10 @@ export function useCharacterFiles({
   const saveActiveCharacterFiles = async (
     override?: Partial<CharacterSettings> & { name?: string; soul?: string },
   ) => {
+    const selectedRef = parseProfileRefId(selectedPersonalityId, "personality");
+    if (selectedRef.kind !== "personality") return null;
     const activePersonality =
-      personalityPresets.find((preset) => preset.id === selectedPersonalityId) ?? personalityPresets[0];
+      personalityPresets.find((preset) => preset.id === selectedRef.id);
     if (!activePersonality) return null;
     const nextName = override?.name ?? activePersonality.name;
     const nextPrompt = override?.prompt ?? personality;
@@ -62,8 +64,14 @@ export function useCharacterFiles({
 
   useEffect(() => {
     if (!settingsLoaded || !selectedPersonalityId) return;
+    const selectedRef = parseProfileRefId(selectedPersonalityId, "personality");
+    if (selectedRef.kind !== "personality") {
+      setCharacterSoul("");
+      setCharacterFolder("");
+      return;
+    }
     const activePersonality =
-      personalityPresets.find((preset) => preset.id === selectedPersonalityId) ?? personalityPresets[0];
+      personalityPresets.find((preset) => preset.id === selectedRef.id);
     if (!activePersonality) return;
 
     let cancelled = false;
@@ -78,9 +86,7 @@ export function useCharacterFiles({
         if (cancelled) return;
         setCharacterSoul(files.soul);
         setCharacterFolder(files.folder);
-        if (files.settings.voice_path) {
-          setSelectedVoicePath(files.settings.voice_path);
-        }
+        setSelectedVoicePath(files.settings.voice_path || activePersonality.voice_path || "");
         setPersonalityPresets((prev) =>
           prev.map((preset) =>
             preset.id === activePersonality.id
@@ -106,7 +112,8 @@ export function useCharacterFiles({
   }, [settingsLoaded, selectedPersonalityId, personalityPresets.length]);
 
   useEffect(() => {
-    if (!settingsLoaded || !settingsReadyForSave || !selectedPersonalityId || !characterSoul.trim()) return;
+    const selectedRef = parseProfileRefId(selectedPersonalityId, "personality");
+    if (!settingsLoaded || !settingsReadyForSave || selectedRef.kind !== "personality" || !selectedPersonalityId || !characterSoul.trim()) return;
     const handle = window.setTimeout(() => {
       saveActiveCharacterFiles().catch((error) => console.error("Character files save error:", error));
     }, 900);

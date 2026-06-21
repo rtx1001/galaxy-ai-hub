@@ -787,6 +787,9 @@ pub(super) async fn execute_tool_result(
             })
         }
         "weather_forecast" => {
+            let now: DateTime<Local> = Local::now();
+            let today = now.date_naive();
+            let tomorrow = today + Duration::days(1);
             let location = call
                 .arguments
                 .get("location")
@@ -823,10 +826,18 @@ pub(super) async fn execute_tool_result(
                 "Location: {}, {}",
                 forecast.location.name, forecast.location.country
             )];
+            observation_lines.push(format!(
+                "Verified local date context: today is {} ({}); tomorrow is {} ({}). Do not infer or change these weekdays.",
+                today.format("%A, %B %-d, %Y"),
+                today.format("%Y-%m-%d"),
+                tomorrow.format("%A, %B %-d, %Y"),
+                tomorrow.format("%Y-%m-%d")
+            ));
             let focused_days = if let Some((date, label)) = focus_date {
                 observation_lines.push(format!(
-                    "Requested period: {} ({})",
+                    "Requested period: {} = {} ({})",
                     label,
+                    date.format("%A, %B %-d, %Y"),
                     date.format("%Y-%m-%d")
                 ));
                 let matching = forecast
@@ -853,9 +864,12 @@ pub(super) async fn execute_tool_result(
                     .precipitation_probability_max
                     .map(|value| format!("{}%", value))
                     .unwrap_or_else(|| "n/a".to_string());
+                let date_label = parse_card_date(&day.date)
+                    .map(|date| format!("{} ({})", date.format("%A"), day.date))
+                    .unwrap_or_else(|| day.date.clone());
                 observation_lines.push(format!(
                     "{} | {} | high {:.0}C | low {:.0}C | rain {} | {:.1} mm | wind {:.0} km/h",
-                    day.date,
+                    date_label,
                     day.summary,
                     day.temperature_max_c,
                     day.temperature_min_c,

@@ -1,4 +1,4 @@
-import { PersonalityPreset } from "../appCore";
+import { PersonalityPreset, buildConversationIdentityBlock } from "../appCore";
 
 type UseRuntimePromptBuildersOptions = {
   characterFolder: string;
@@ -36,9 +36,17 @@ export function useRuntimePromptBuilders(options: UseRuntimePromptBuildersOption
   const buildAssistantRuntimePrompt = () => {
     const activePersonality =
       options.personalityPresets.find((preset) => preset.id === options.selectedPersonalityId) ?? options.personalityPresets[0];
+    const assistantName = activePersonality?.name || "Assistant";
+    const activeUserName = options.userName.trim() || "User";
     return [
+      buildConversationIdentityBlock({
+        assistantName,
+        userName: activeUserName,
+        userDescription: options.userDescription,
+      }),
+      "",
       `Assistant profile:
-Name: ${activePersonality?.name || "Assistant"}
+Name: ${assistantName}
 Instructions:
 ${options.personality || activePersonality?.prompt || "Helpful assistant."}
 `,
@@ -48,8 +56,8 @@ ${options.personality || activePersonality?.prompt || "Helpful assistant."}
 ${options.personalityMemory.trim()}
 `
         : "",
-      options.userName.trim() || options.userDescription.trim()
-        ? `\nUser profile:\nName: ${options.userName.trim() || "User"}\nAbout user: ${options.userDescription.trim() || "No extra details."}`
+      activeUserName || options.userDescription.trim()
+        ? `\nUser profile:\nName: ${activeUserName}\nAbout user: ${options.userDescription.trim() || "No extra details."}`
         : "",
       options.linkedFolders.length
         ? `\nPermitted workspace folders:\n${options.linkedFolders.join("\n")}`

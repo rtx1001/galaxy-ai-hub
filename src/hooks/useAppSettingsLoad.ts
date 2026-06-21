@@ -7,6 +7,9 @@ import {
   TelegramGuest,
   ThemeSwatch,
   UserProfilePreset,
+  parseProfileRefId,
+  personalityFromUserProfile,
+  userProfileFromPersonality,
 } from "../appCore";
 import { clampNumber } from "../utils";
 
@@ -19,6 +22,7 @@ type UseAppSettingsLoadOptions = {
   setGoogleClientSecret: Dispatch<SetStateAction<string>>;
   setGooglePanelOpen: Dispatch<SetStateAction<boolean>>;
   setGoogleRedirectUri: Dispatch<SetStateAction<string>>;
+  setMediaPlayerPanelOpen: Dispatch<SetStateAction<boolean>>;
   setImageHeight: Dispatch<SetStateAction<number>>;
   setImageStudioOpen: Dispatch<SetStateAction<boolean>>;
   setImageWidth: Dispatch<SetStateAction<number>>;
@@ -26,6 +30,7 @@ type UseAppSettingsLoadOptions = {
   setLeftPanelOpen: Dispatch<SetStateAction<boolean>>;
   setLinkedFolders: Dispatch<SetStateAction<string[]>>;
   setLiveConversation: Dispatch<SetStateAction<boolean>>;
+  setUserAutoPilot: Dispatch<SetStateAction<boolean>>;
   setMemorySize: Dispatch<SetStateAction<number>>;
   setMinP: Dispatch<SetStateAction<number>>;
   setModelFolder: Dispatch<SetStateAction<string>>;
@@ -79,6 +84,7 @@ export function useAppSettingsLoad({
   setGoogleClientSecret,
   setGooglePanelOpen,
   setGoogleRedirectUri,
+  setMediaPlayerPanelOpen,
   setImageHeight,
   setImageStudioOpen,
   setImageWidth,
@@ -86,6 +92,7 @@ export function useAppSettingsLoad({
   setLeftPanelOpen,
   setLinkedFolders,
   setLiveConversation,
+  setUserAutoPilot,
   setMemorySize,
   setMinP,
   setModelFolder,
@@ -178,12 +185,17 @@ export function useAppSettingsLoad({
         if (!active) return;
 
         const nextUserProfileId = stored.selected_user_profile_id || normalizedUserProfiles[0]?.id || DEFAULT_SETTINGS.selected_user_profile_id;
+        const nextUserRef = parseProfileRefId(nextUserProfileId, "user");
         const activeUserProfile =
-          normalizedUserProfiles.find((profile) => profile.id === nextUserProfileId) ??
-          normalizedUserProfiles[0] ??
-          DEFAULT_SETTINGS.user_profiles[0];
+          nextUserRef.kind === "personality"
+            ? normalizedPresets.find((preset) => preset.id === nextUserRef.id)
+              ? userProfileFromPersonality(normalizedPresets.find((preset) => preset.id === nextUserRef.id)!)
+              : normalizedUserProfiles[0] ?? DEFAULT_SETTINGS.user_profiles[0]
+            : normalizedUserProfiles.find((profile) => profile.id === nextUserRef.id) ??
+              normalizedUserProfiles[0] ??
+              DEFAULT_SETTINGS.user_profiles[0];
         setUserProfiles(normalizedUserProfiles);
-        setSelectedUserProfileId(activeUserProfile.id);
+        setSelectedUserProfileId(nextUserProfileId);
         setUserName(activeUserProfile.name || DEFAULT_SETTINGS.user_name);
         setUserAvatar(activeUserProfile.avatar || nextUserAvatar);
         setUserDescription(activeUserProfile.description || "");
@@ -196,6 +208,7 @@ export function useAppSettingsLoad({
             : DEFAULT_SETTINGS.theme_swatch_id,
         );
         setLiveConversation(stored.live_conversation);
+        setUserAutoPilot(Boolean(stored.user_auto_pilot));
         setTelegramBotToken(stored.telegram_bot_token || "");
         setTelegramOwnerId(stored.telegram_owner_id || "");
         setTelegramGuests(Array.isArray(stored.telegram_guests) ? stored.telegram_guests : []);
@@ -220,10 +233,17 @@ export function useAppSettingsLoad({
         setPersonality(stored.personality || DEFAULT_SETTINGS.personality);
         setPersonalityPresets(normalizedPresets);
         const nextPersonalityId = stored.selected_personality_id || DEFAULT_SETTINGS.selected_personality_id;
+        const nextPersonalityRef = parseProfileRefId(nextPersonalityId, "personality");
+        const activePersonalityPreset =
+          nextPersonalityRef.kind === "user"
+            ? normalizedUserProfiles.find((profile) => profile.id === nextPersonalityRef.id)
+              ? personalityFromUserProfile(normalizedUserProfiles.find((profile) => profile.id === nextPersonalityRef.id)!)
+              : normalizedPresets[0]
+            : normalizedPresets.find((preset) => preset.id === nextPersonalityRef.id) ?? normalizedPresets[0];
         setSelectedPersonalityId(nextPersonalityId);
-        setPersonalityNameDraft(normalizedPresets.find((preset) => preset.id === nextPersonalityId)?.name || "Assistant");
+        setPersonalityNameDraft(activePersonalityPreset?.name || "Assistant");
         setPersonalityAvatar(
-          normalizedPresets.find((preset) => preset.id === nextPersonalityId)?.avatar || "",
+          activePersonalityPreset?.avatar || "",
         );
         setModelFolder(stored.model_folder || "");
         setLinkedFolders(stored.linked_folders || []);
@@ -236,6 +256,7 @@ export function useAppSettingsLoad({
         setAutomationOpen(stored.ui_automation_open ?? DEFAULT_SETTINGS.ui_automation_open);
         setTelegramPanelOpen(stored.ui_telegram_open ?? DEFAULT_SETTINGS.ui_telegram_open);
         setGooglePanelOpen(stored.ui_google_open ?? DEFAULT_SETTINGS.ui_google_open);
+        setMediaPlayerPanelOpen(stored.ui_media_player_open ?? DEFAULT_SETTINGS.ui_media_player_open);
         setToolRunsOpen(stored.ui_tool_activity_open ?? DEFAULT_SETTINGS.ui_tool_activity_open);
         setSamplingOpen(stored.ui_sampling_open ?? DEFAULT_SETTINGS.ui_sampling_open);
         invoke("migrate_character_folders").catch((error) =>

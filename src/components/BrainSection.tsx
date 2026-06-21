@@ -41,7 +41,7 @@ export function BrainSection({
           type="button"
           title="Choose GGUF models folder"
           onClick={onChooseModelFolder}
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#282a2c] bg-[#1e1f20] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c]"
         >
           <FolderIcon className="h-4.5 w-4.5" />
         </button>
@@ -90,7 +90,7 @@ export function BrainSection({
           </div>
         )}
       </div>
-      <div className="mt-3 overflow-hidden rounded-2xl border border-[#282a2c] bg-[#131314] p-3">
+      <div className="mt-3">
         <HeartbeatMonitor
           accent={theme.accent}
           soft={theme.soft}

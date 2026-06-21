@@ -5,6 +5,10 @@ import {
   PersonalityPreset,
   UserProfilePreset,
   createMessageId,
+  parseProfileRefId,
+  personalityFromUserProfile,
+  profileRefId,
+  userProfileFromPersonality,
 } from "../appCore";
 import { ChatMessage } from "../types";
 
@@ -21,13 +25,13 @@ type CharacterFilePayload = {
 type UseProfileActionsOptions = {
   characterSoul: string;
   clearImage: () => void;
-  deletePersonalityMemory: (personalityId: string) => Promise<void>;
-  loadChatSessionForPersonality: (personalityId: string) => void;
+  deletePersonalityMemory: (personalityId: string, personalityName?: string) => Promise<void>;
+  loadChatSessionForPersonality: (personalityId: string, userProfileId?: string) => void;
   personality: string;
   personalityAvatar: string;
   personalityNameDraft: string;
   personalityPresets: PersonalityPreset[];
-  registerEmptyChatSession: (personalityId: string) => void;
+  registerEmptyChatSession: (personalityId: string, userProfileId?: string) => void;
   removeChatSession: (personalityId: string) => ChatSessions;
   saveActiveCharacterFiles: (payload: CharacterFilePayload) => Promise<unknown>;
   saveActiveChatSession: () => void;
@@ -88,11 +92,65 @@ const applyUserProfile = (
   setters.setUserLongitude(typeof profile.longitude === "number" && Number.isFinite(profile.longitude) ? profile.longitude : null);
 };
 
+const sameProfileEntity = (
+  first: ReturnType<typeof parseProfileRefId>,
+  second: ReturnType<typeof parseProfileRefId>,
+) => first.kind === second.kind && first.id === second.id;
+
 export function useProfileActions(options: UseProfileActionsOptions) {
+  const resolvePersonalityPreset = (presetId: string) => {
+    const ref = parseProfileRefId(presetId, "personality");
+    return ref.kind === "user"
+      ? options.userProfiles.find((item) => item.id === ref.id)
+        ? personalityFromUserProfile(options.userProfiles.find((item) => item.id === ref.id)!)
+        : undefined
+      : options.personalityPresets.find((item) => item.id === ref.id);
+  };
+
+  const resolveUserProfile = (profileId: string) => {
+    const ref = parseProfileRefId(profileId, "user");
+    return ref.kind === "personality"
+      ? options.personalityPresets.find((item) => item.id === ref.id)
+        ? userProfileFromPersonality(options.personalityPresets.find((item) => item.id === ref.id)!)
+        : undefined
+      : options.userProfiles.find((item) => item.id === ref.id);
+  };
+
+  const rightPanelIdFromRef = (ref: ReturnType<typeof parseProfileRefId>) =>
+    ref.kind === "user" ? profileRefId("user", ref.id) : ref.id;
+
+  const leftPanelIdFromRef = (ref: ReturnType<typeof parseProfileRefId>) =>
+    ref.kind === "personality" ? profileRefId("personality", ref.id) : ref.id;
+
+  const applyPersonalityPreset = (preset: PersonalityPreset) => {
+    options.setSelectedPersonalityId(preset.id);
+    options.setPersonalityNameDraft(preset.name || "Assistant");
+    options.setPersonality(preset.prompt);
+    options.setPersonalityAvatar(preset.avatar || "");
+    options.setSelectedVoicePath(preset.voice_path || "");
+  };
+
   const updateActiveUserProfile = (patch: Partial<UserProfilePreset>) => {
+    const selectedRef = parseProfileRefId(options.selectedUserProfileId, "user");
+    if (selectedRef.kind === "personality") {
+      options.setPersonalityPresets((prev) =>
+        prev.map((preset) =>
+          preset.id === selectedRef.id
+            ? {
+                ...preset,
+                name: patch.name ?? preset.name,
+                prompt: patch.description ?? preset.prompt,
+                avatar: patch.avatar ?? preset.avatar,
+                voice_path: patch.voice_path ?? preset.voice_path,
+              }
+            : preset,
+        ),
+      );
+      return;
+    }
     options.setUserProfiles((prev) =>
       prev.map((profile) =>
-        profile.id === options.selectedUserProfileId ? { ...profile, ...patch } : profile,
+        profile.id === selectedRef.id ? { ...profile, ...patch } : profile,
       ),
     );
   };
@@ -102,26 +160,49 @@ export function useProfileActions(options: UseProfileActionsOptions) {
   };
 
   const selectPersonalityPreset = (presetId: string) => {
-    const preset = options.personalityPresets.find((item) => item.id === presetId);
+    const ref = parseProfileRefId(presetId, "personality");
+    const preset = resolvePersonalityPreset(presetId);
     if (!preset) return;
     options.saveActiveChatSession();
-    options.setSelectedPersonalityId(preset.id);
-    options.setPersonalityNameDraft(preset.name || "Assistant");
-    options.setPersonality(preset.prompt);
-    options.setPersonalityAvatar(preset.avatar || "");
-    if (preset.voice_path) {
-      options.setSelectedVoicePath(preset.voice_path);
+    const activeUserRef = parseProfileRefId(options.selectedUserProfileId, "user");
+    const activeAssistantRef = parseProfileRefId(options.selectedPersonalityId, "personality");
+    let nextUserId = options.selectedUserProfileId;
+    if (sameProfileEntity(ref, activeUserRef)) {
+      const swappedUserId = leftPanelIdFromRef(activeAssistantRef);
+      const nextUserProfile = resolveUserProfile(swappedUserId);
+      if (nextUserProfile) {
+        applyUserProfile(nextUserProfile, options);
+        nextUserId = nextUserProfile.id;
+      }
     }
-    options.loadChatSessionForPersonality(preset.id);
+    applyPersonalityPreset(preset);
+    options.loadChatSessionForPersonality(preset.id, nextUserId);
     options.setComposerText("");
     options.clearImage();
     options.setComposerNotice("");
   };
 
   const selectUserProfile = (profileId: string) => {
-    const profile = options.userProfiles.find((item) => item.id === profileId);
+    const ref = parseProfileRefId(profileId, "user");
+    const profile = resolveUserProfile(profileId);
     if (!profile) return;
+    options.saveActiveChatSession();
+    const activeUserRef = parseProfileRefId(options.selectedUserProfileId, "user");
+    const activeAssistantRef = parseProfileRefId(options.selectedPersonalityId, "personality");
+    let nextAssistantId = options.selectedPersonalityId;
+    if (sameProfileEntity(ref, activeAssistantRef)) {
+      const swappedAssistantId = rightPanelIdFromRef(activeUserRef);
+      const nextPreset = resolvePersonalityPreset(swappedAssistantId);
+      if (nextPreset) {
+        applyPersonalityPreset(nextPreset);
+        nextAssistantId = nextPreset.id;
+      }
+    }
     applyUserProfile(profile, options);
+    options.loadChatSessionForPersonality(nextAssistantId, profile.id);
+    options.clearImage();
+    options.setComposerNotice("");
+    options.setComposerText("");
     options.setUserProfileMenuOpen(false);
   };
 
@@ -139,6 +220,7 @@ export function useProfileActions(options: UseProfileActionsOptions) {
     };
     options.setUserProfiles((prev) => [...prev, profile]);
     applyUserProfile(profile, options);
+    options.loadChatSessionForPersonality(options.selectedPersonalityId, profile.id);
     options.setUserProfileMenuOpen(false);
     options.setUserProfileOpen(true);
   };
@@ -165,9 +247,11 @@ export function useProfileActions(options: UseProfileActionsOptions) {
   };
 
   const deleteSelectedUserProfile = () => {
+    const selectedRef = parseProfileRefId(options.selectedUserProfileId, "user");
+    if (selectedRef.kind === "personality") return;
     if (options.userProfiles.length <= 1) return;
     options.setUserProfiles((prev) => {
-      const next = prev.filter((profile) => profile.id !== options.selectedUserProfileId);
+      const next = prev.filter((profile) => profile.id !== selectedRef.id);
       const fallback = next[0] ?? DEFAULT_SETTINGS.user_profiles[0];
       applyUserProfile(fallback, options);
       return next.length ? next : DEFAULT_SETTINGS.user_profiles;
@@ -203,6 +287,24 @@ export function useProfileActions(options: UseProfileActionsOptions) {
 
   const updateSelectedPersonalityPreset = async () => {
     const nextName = options.personalityNameDraft.trim() || options.selectedPersonalityPreset?.name || "Assistant";
+    const selectedRef = parseProfileRefId(options.selectedPersonalityId, "personality");
+    if (selectedRef.kind === "user") {
+      options.setUserProfiles((prev) =>
+        prev.map((profile) =>
+          profile.id === selectedRef.id
+            ? {
+                ...profile,
+                name: nextName,
+                description: options.personality,
+                avatar: options.personalityAvatar,
+                voice_path: options.selectedVoicePath,
+              }
+            : profile,
+        ),
+      );
+      options.setPersonalityNameDraft(nextName);
+      return;
+    }
     options.setPersonalityPresets((prev) =>
       prev.map((preset) =>
         preset.id === options.selectedPersonalityId
@@ -227,10 +329,12 @@ export function useProfileActions(options: UseProfileActionsOptions) {
   };
 
   const deleteSelectedPersonalityPreset = () => {
+    const selectedRef = parseProfileRefId(options.selectedPersonalityId, "personality");
+    if (selectedRef.kind === "user") return;
     if (options.personalityPresets.length <= 1) return;
-    const deletedPersonalityId = options.selectedPersonalityId;
+    const deletedPersonalityId = selectedRef.id;
     const deletedPersonalityName = options.selectedPersonalityPreset?.name || "";
-    options.deletePersonalityMemory(deletedPersonalityId).catch((error) =>
+    options.deletePersonalityMemory(deletedPersonalityId, deletedPersonalityName).catch((error) =>
       console.error("Personality memory delete error:", error),
     );
     invoke("delete_personality_chat_session", { personalityId: deletedPersonalityId }).catch((error) =>
@@ -241,14 +345,15 @@ export function useProfileActions(options: UseProfileActionsOptions) {
       name: deletedPersonalityName,
     }).catch((error) => console.error("Character folder delete error:", error));
     options.setPersonalityPresets((prev) => {
-      const next = prev.filter((preset) => preset.id !== options.selectedPersonalityId);
+      const next = prev.filter((preset) => preset.id !== selectedRef.id);
       const fallback = next[0] ?? DEFAULT_SETTINGS.personality_presets[0];
-      const remainingSessions = options.removeChatSession(deletedPersonalityId);
+      options.removeChatSession(deletedPersonalityId);
       options.setSelectedPersonalityId(fallback.id);
       options.setPersonalityNameDraft(fallback.name || "Assistant");
       options.setPersonality(fallback.prompt);
       options.setPersonalityAvatar(fallback.avatar || "");
-      options.setMessages(remainingSessions[fallback.id] ?? []);
+      options.setSelectedVoicePath(fallback.voice_path || "");
+      options.setMessages([]);
       return next.length ? next : DEFAULT_SETTINGS.personality_presets;
     });
   };

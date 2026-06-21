@@ -6,3 +6,5 @@ export * from './appCore/calendarAutomation';
 export * from './appCore/response';
 export * from './appCore/memory';
 export * from './appCore/sampling';
+export * from './appCore/theme';
+export * from './appCore/identity';

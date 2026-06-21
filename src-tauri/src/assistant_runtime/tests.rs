@@ -1,5 +1,5 @@
 use super::*;
-use crate::agent_react::{ToolResultField, ToolResultItem};
+use crate::agent_react::{ImageProposal, ToolResultField, ToolResultItem};
 #[test]
 fn telegram_formats_gmail_cards_as_rows() {
     let cards = vec![ToolResultCard {
@@ -61,15 +61,98 @@ fn telegram_reply_prefers_natural_answer_over_tool_cards() {
 }
 
 #[test]
+fn telegram_reply_keeps_image_proposal_out_of_visible_prompt_text() {
+    let result = ReactChatResult {
+        answer: "I can make that for you.".to_string(),
+        thinking: Some("hidden thinking".to_string()),
+        tool_used: Some("propose_image_generation".to_string()),
+        observation: Some("pending approval".to_string()),
+        cards: Vec::new(),
+        image_proposal: Some(ImageProposal {
+            prompt: "A cinematic beach portrait.".to_string(),
+            mode: "bot_image".to_string(),
+            mask_prompt: None,
+            reference_sources: vec!["bot_avatar".to_string()],
+        }),
+        file_preview: None,
+        action_proposal: None,
+        tool_trace: Vec::new(),
+    };
+    let parts = build_telegram_reply_parts(result);
+    assert!(parts.text.contains("I can make that for you."));
+    assert!(!parts.text.contains("cinematic beach portrait"));
+    assert_eq!(
+        parts
+            .image_proposal
+            .as_ref()
+            .map(|proposal| proposal.mode.as_str()),
+        Some("bot_image")
+    );
+}
+
+#[test]
+fn telegram_image_attachment_becomes_llm_image_content() {
+    let content = build_telegram_user_content(
+        "what do you see?",
+        &[TelegramIncomingFile {
+            local_path: "D:\\AI\\Galaxy_Bot\\assistant-runtime\\telegram-input\\photo.jpg"
+                .to_string(),
+            display_name: "photo.jpg".to_string(),
+            mime_type: "image/jpeg".to_string(),
+            size_bytes: 1234,
+            is_image: true,
+        }],
+    );
+    let parts = content.as_array().expect("telegram content parts");
+    assert!(parts
+        .iter()
+        .any(|part| part.get("type").and_then(serde_json::Value::as_str) == Some("text")));
+    let image = parts
+        .iter()
+        .find(|part| part.get("type").and_then(serde_json::Value::as_str) == Some("image_url"))
+        .expect("image part");
+    assert_eq!(
+        image
+            .get("image_url")
+            .and_then(|value| value.get("local_path"))
+            .and_then(serde_json::Value::as_str),
+        Some("D:\\AI\\Galaxy_Bot\\assistant-runtime\\telegram-input\\photo.jpg")
+    );
+}
+
+#[test]
+fn telegram_image_modes_have_expected_default_reference_sources() {
+    assert_eq!(
+        default_image_reference_sources_for_mode("text_image"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        default_image_reference_sources_for_mode("image_image"),
+        vec!["chat_image".to_string()]
+    );
+    assert_eq!(
+        default_image_reference_sources_for_mode("bot_image"),
+        vec!["bot_avatar".to_string()]
+    );
+    assert_eq!(
+        default_image_reference_sources_for_mode("user_image"),
+        vec!["user_avatar".to_string()]
+    );
+    assert_eq!(
+        default_image_reference_sources_for_mode("user_bot_image"),
+        vec!["user_avatar".to_string(), "bot_avatar".to_string()]
+    );
+}
+
+#[test]
 fn personality_memory_skips_internal_failure_artifacts() {
     let memory = compact_personality_memory(
         "",
         "please try again",
         "Validation error: decision action was not a tool \\ud83d",
     );
-    let formatted = format_personality_memory_for_prompt(&memory);
-    assert!(!formatted.contains("Validation error"));
-    assert!(!formatted.contains("\\ud83d"));
+    assert!(!memory.contains("Validation error"));
+    assert!(!memory.contains("\\ud83d"));
 }
 
 #[test]
@@ -105,6 +188,9 @@ fn telegram_speech_text_reads_lines_dates_and_units_naturally() {
     assert!(speech.contains("30 \u{0111}\u{1ed9} C\u{00ea}"));
     assert!(speech.contains("12 ki l\u{00f4} m\u{00e9}t tr\u{00ea}n gi\u{1edd}"));
     assert!(speech.contains("81 ph\u{1ea7}n tr\u{0103}m"));
+    let spaced_decimal = sanitize_telegram_speech_text("M\u{01b0}a 0. 7 mm, gi\u{00f3} 12. 5km/h.");
+    assert!(spaced_decimal.contains("0.7 mi li m\u{00e9}t"));
+    assert!(spaced_decimal.contains("12.5 ki l\u{00f4} m\u{00e9}t tr\u{00ea}n gi\u{1edd}"));
     let short_date =
         sanitize_telegram_speech_text("H\u{1eb9}n ng\u{00e0}y 08/05 (th\u{1ee9} s\u{00e1}u)");
     assert!(short_date.contains("8 th\u{00e1}ng 5"));
@@ -117,6 +203,30 @@ fn telegram_speech_text_reads_lines_dates_and_units_naturally() {
     assert!(ranges.contains("Ng\u{00e0}y 5 th\u{00e1}ng 6 n\u{0103}m 2026"));
     assert!(ranges.contains("1 \u{0111}\u{1ebf}n 10"));
     assert!(ranges.contains("1 \u{0111}\u{1ebf}n 2"));
+    let acronyms = sanitize_telegram_speech_text(
+        "AI d\u{00f9}ng GPU RTX v\u{00e0} LLM. API JSON PNG MP3. hqua hnay b\u{00e2}y h ko \u{0111}c dc \u{0111}t vs ntn uhm bb cty r j 35C.",
+    );
+    assert!(acronyms.contains("\u{00e2}y ai"));
+    assert!(acronyms.contains("GPU RTX"));
+    assert!(acronyms.contains("LLM"));
+    assert!(acronyms.contains("h\u{00f4}m qua"));
+    assert!(acronyms.contains("h\u{00f4}m nay"));
+    assert!(acronyms.contains("b\u{00e2}y gi\u{1edd}"));
+    assert!(acronyms.contains("kh\u{00f4}ng \u{0111}\u{01b0}\u{1ee3}c"));
+    assert!(acronyms.contains("\u{0111}i\u{1ec7}n tho\u{1ea1}i"));
+    assert!(acronyms.contains("v\u{1edb}i"));
+    assert!(acronyms.contains("nh\u{01b0} th\u{1ebf} n\u{00e0}o"));
+    assert!(acronyms.contains("\u{1eeb}m"));
+    assert!(acronyms.contains("bai bai"));
+    assert!(acronyms.contains("c\u{00f4}ng ty"));
+    assert!(acronyms.contains("r\u{1ed3}i"));
+    assert!(acronyms.contains("g\u{00ec}"));
+    assert!(acronyms.contains("35 \u{0111}\u{1ed9} C\u{00ea}"));
+    let english_acronyms = sanitize_telegram_speech_text("AI uses GPU RTX and LLM at 35C.");
+    assert!(english_acronyms.contains("A I"));
+    assert!(english_acronyms.contains("GPU RTX"));
+    assert!(english_acronyms.contains("LLM"));
+    assert!(english_acronyms.contains("35 degrees Celsius"));
 }
 
 #[test]
@@ -146,6 +256,39 @@ fn pause_detection_finds_last_sentence_break() {
 
     let pause = find_last_pause_start(&peaks, 10, 90, 0.01, 4);
     assert_eq!(pause, Some(70));
+}
+
+#[test]
+fn voice_sample_trim_keeps_short_samples_intact() {
+    let mut peaks = vec![0.2; 700];
+    for peak in peaks.iter_mut().take(300).skip(200) {
+        *peak = 0.0;
+    }
+
+    let end = choose_prepared_voice_sample_end(&peaks, 0, peaks.len(), 100, 0.01);
+    assert_eq!(end, peaks.len());
+}
+
+#[test]
+fn voice_sample_trim_uses_pause_between_six_and_twelve_seconds() {
+    let mut peaks = vec![0.2; 1_400];
+    for peak in peaks.iter_mut().take(760).skip(730) {
+        *peak = 0.0;
+    }
+    for peak in peaks.iter_mut().take(1_080).skip(1_040) {
+        *peak = 0.0;
+    }
+
+    let end = choose_prepared_voice_sample_end(&peaks, 0, peaks.len(), 100, 0.01);
+    assert_eq!(end, 1_045);
+}
+
+#[test]
+fn voice_sample_trim_falls_back_to_eight_seconds_without_pause() {
+    let peaks = vec![0.2; 1_400];
+
+    let end = choose_prepared_voice_sample_end(&peaks, 0, peaks.len(), 100, 0.01);
+    assert_eq!(end, 800);
 }
 
 #[test]

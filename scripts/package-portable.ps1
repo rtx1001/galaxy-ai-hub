@@ -11,7 +11,7 @@ $voiceRuntimeZipPath = Join-Path $root "release\GalaxyAIHub-voice-runtime-win64.
 
 Push-Location $root
 try {
-  npm run tauri build
+  npm run tauri -- build --no-bundle
 
   $exe = Get-ChildItem -Path $targetDir -Filter "*.exe" -File |
     Where-Object { $_.Name -notmatch "build-script|deps" } |

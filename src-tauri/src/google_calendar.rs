@@ -168,8 +168,18 @@ fn repair_latin1_utf8_mojibake(input: &str) -> String {
     if trimmed.is_empty()
         || !trimmed.chars().any(|ch| {
             matches!(
-                ch,
-                'Ã' | 'Â' | 'Ä' | 'Å' | 'Ð' | 'Ñ' | 'á' | 'à' | 'º' | '¿' | '¡'
+                ch as u32,
+                0x00C3
+                    | 0x00C2
+                    | 0x00C4
+                    | 0x00C5
+                    | 0x00D0
+                    | 0x00D1
+                    | 0x00E1
+                    | 0x00E0
+                    | 0x00BA
+                    | 0x00BF
+                    | 0x00A1
             )
         })
     {

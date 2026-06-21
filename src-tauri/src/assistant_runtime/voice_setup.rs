@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) const VOICE_RUNTIME_SCRIPT: &str = include_str!("../../python/voice_runtime.py");
-pub(super) const PREPARED_VOICE_SAMPLE_VERSION: &str = "v5-mono22050-normfade-8s-langhint";
+pub(super) const PREPARED_VOICE_SAMPLE_VERSION: &str = "v6-mono22050-normfade-6to12s-langhint";
 pub(super) const PREPARED_VOICE_SAMPLE_RATE: u32 = 22_050;
 pub(super) fn app_root_dir() -> PathBuf {
     crate::app_paths::app_root_dir()

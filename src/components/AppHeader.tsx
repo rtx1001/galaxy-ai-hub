@@ -1,4 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useEffect, useState } from "react";
 import { DownloadIcon, GearIcon, MenuIcon } from "./Icons";
 import { IconButton } from "./UI";
 import { ResourceHeader } from "./ResourceHeader";
@@ -44,11 +45,40 @@ export function AppHeader({
   topProgressPercent,
   topStatusText,
 }: AppHeaderProps) {
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastStatus, setToastStatus] = useState({
+    text: "",
+    progressActive: false,
+    progressPercent: 0,
+    brainStatus,
+  });
+
+  useEffect(() => {
+    let clearHandle: number | undefined;
+    if (topStatusText) {
+      setToastStatus({
+        text: topStatusText,
+        progressActive: topProgressActive,
+        progressPercent: topProgressPercent,
+        brainStatus,
+      });
+      setToastVisible(true);
+    } else {
+      setToastVisible(false);
+      clearHandle = window.setTimeout(() => {
+        setToastStatus((prev) => ({ ...prev, text: "" }));
+      }, 320);
+    }
+    return () => {
+      if (clearHandle) window.clearTimeout(clearHandle);
+    };
+  }, [brainStatus, topProgressActive, topProgressPercent, topStatusText]);
+
   return (
-    <header className="shrink-0 border-b border-[#282a2c] bg-[#131314] px-3 py-2">
+    <header className="relative z-30 shrink-0 overflow-visible border-b border-[#282a2c] bg-[#131314] px-3 py-2">
       <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
-        <IconButton title={leftPanelOpen ? "Close app settings" : "Open app settings"} onClick={() => setLeftPanelOpen((prev) => !prev)} size="sm" active={leftPanelOpen}>
-          <GearIcon />
+        <IconButton title={rightPanelOpen ? "Close model controls" : "Open model controls"} onClick={() => setRightPanelOpen((prev) => !prev)} size="sm" active={rightPanelOpen}>
+          <MenuIcon />
         </IconButton>
         <div className="min-w-0 overflow-hidden">
           <ResourceHeader
@@ -60,8 +90,8 @@ export function AppHeader({
             isVoiceBusy={Boolean(speakingMessageId || previewingVoicePath || isAudioPlaying)}
           />
         </div>
-        <IconButton title={rightPanelOpen ? "Close model controls" : "Open model controls"} onClick={() => setRightPanelOpen((prev) => !prev)} size="sm" active={rightPanelOpen}>
-          <MenuIcon />
+        <IconButton title={leftPanelOpen ? "Close app settings" : "Open app settings"} onClick={() => setLeftPanelOpen((prev) => !prev)} size="sm" active={leftPanelOpen}>
+          <GearIcon />
         </IconButton>
       </div>
       <div className="mt-3 text-center text-[11px] font-medium text-[#9aa0a6]">
@@ -84,20 +114,26 @@ export function AppHeader({
         </div>
       )}
 
-      {topStatusText && (
-        <div className="mt-1.5 rounded-2xl border border-[#282a2c] bg-[#1e1f20] px-3 py-1.5">
-          <div className="flex items-center justify-between gap-3 text-[11px] font-semibold text-[#c4c7c5]">
-            <span className="min-w-0 truncate">{topStatusText}</span>
-            {topProgressActive && <span className="shrink-0 text-[#9aa0a6]">{Math.round(topProgressPercent)}%</span>}
-          </div>
-          {topProgressActive && (
-            <div className="mt-1 h-1 overflow-hidden rounded-full bg-[#282a2c]">
-              <div
-                className={`h-full transition-all duration-300 ${brainStatus === "Error" ? "bg-rose-500" : ""}`}
-                style={{ width: `${topProgressPercent}%`, backgroundColor: brainStatus === "Error" ? undefined : "var(--accent-color)" }}
-              />
+      {toastStatus.text && (
+        <div className="pointer-events-none absolute left-3 right-3 top-full z-40 mt-2 flex justify-center">
+          <div
+            className={`w-full max-w-[720px] rounded-2xl border border-[#282a2c]/45 bg-[#1e1f20]/30 px-3 py-1.5 shadow-[0_10px_24px_rgba(0,0,0,0.18)] backdrop-blur-[2px] transition duration-300 ease-out ${
+              toastVisible ? "translate-y-0 scale-100 opacity-100" : "-translate-y-1.5 scale-[0.98] opacity-0"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3 text-[11px] font-semibold text-[#c4c7c5]">
+              <span className="min-w-0 truncate">{toastStatus.text}</span>
+              {toastStatus.progressActive && <span className="shrink-0 text-[#9aa0a6]">{Math.round(toastStatus.progressPercent)}%</span>}
             </div>
-          )}
+            {toastStatus.progressActive && (
+              <div className="mt-1 h-1 overflow-hidden rounded-full bg-[#282a2c]">
+                <div
+                  className={`h-full transition-all duration-300 ${toastStatus.brainStatus === "Error" ? "bg-rose-500" : ""}`}
+                  style={{ width: `${toastStatus.progressPercent}%`, backgroundColor: toastStatus.brainStatus === "Error" ? undefined : "var(--accent-color)" }}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </header>

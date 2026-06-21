@@ -190,19 +190,27 @@ export function ConversationPane({
             const firstImageCollapsed = firstImagePartKey ? Boolean(collapsedImageParts[firstImagePartKey]) : false;
             const hasImageContent = Array.isArray(message.content) && message.content.some((part) => part.type === "image_url");
             const hasApprovalContent = Array.isArray(message.content) && message.content.some((part) => part.type === "image_proposal" || part.type === "action_proposal");
-            const isTypingIndicator = message.role === "assistant" && message.content === "" && index === messages.length - 1 && isStreaming;
+            const isTypingIndicator = Boolean(message.pending) || (message.role === "assistant" && message.content === "" && index === messages.length - 1 && isStreaming);
             const isEditingUserMessage = message.role === "user" && editingMessageId === message.id;
             const canEditUserMessage = message.role === "user" && message.id === latestUserMessageId && !isStreaming;
-            const messageComplete = !isTypingIndicator && (message.role === "user" || Boolean(message.completed_at || message.duration_ms || messageText.trim() || hasImageContent || hasApprovalContent));
+            const messageComplete = !message.pending && !isTypingIndicator && (message.role === "user" || Boolean(message.completed_at || message.duration_ms || messageText.trim() || hasImageContent || hasApprovalContent));
             const bubbleTimestamp = messageComplete ? formatBubbleTimestamp(message.created_at) : "";
             const replyDuration = messageComplete && message.role === "assistant" ? formatReplyDuration(message.duration_ms) : "";
             const hasBubbleFooter = !isEditingUserMessage && Boolean(bubbleTimestamp || replyDuration || firstImagePath || firstImagePartKey || canSpeak || canEditUserMessage);
-            const hideGroupedAssistantAvatar = message.role === "assistant" && messages[index - 1]?.role === "assistant";
+            const previousMessage = messages[index - 1];
+            const sameSpeakerAsPrevious = Boolean(
+              previousMessage &&
+              (message.speaker_id || message.role) === (previousMessage.speaker_id || previousMessage.role),
+            );
+            const hideGroupedAvatar = sameSpeakerAsPrevious;
+            const avatarSideCornerStyle: React.CSSProperties = message.role === "user"
+              ? { borderTopRightRadius: 8 }
+              : { borderTopLeftRadius: 8 };
 
             return (
               <div key={message.id} data-message-id={message.id} className={`chat-message-row flex items-start gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
                 {message.role === "assistant" && (
-                  hideGroupedAssistantAvatar ? (
+                  hideGroupedAvatar ? (
                     <div className="mt-1 h-10 w-10 shrink-0" aria-hidden="true" />
                   ) : (
                     <div className="mt-1 h-10 w-10 shrink-0 overflow-hidden rounded-2xl bg-[#1e1f20] ring-1 ring-[#282a2c]">
@@ -211,10 +219,12 @@ export function ConversationPane({
                   )
                 )}
                 <div
-                  className={`chat-bubble min-w-0 max-w-[88%] ${hasApprovalContent ? "w-[88%] overflow-visible" : "overflow-hidden"} rounded-[28px] shadow-sm ring-1 ${hasImageContent ? "px-3 py-3" : isTypingIndicator ? "px-4 py-3" : "px-5 py-4"} ${
-                    message.role === "user" ? "text-[#e3e3e3]" : "bg-[#1e1f20] text-[#e3e3e3] ring-[#282a2c]"
+                  className={`chat-bubble min-w-0 max-w-[80%] ${hasApprovalContent ? "w-[80%] overflow-visible" : "overflow-hidden"} rounded-[20px] bg-[#2a2c30]/42 shadow-[0_10px_24px_rgba(0,0,0,0.18)] backdrop-blur-[5px] ${hasImageContent ? "px-3 py-3" : isTypingIndicator ? "px-4 py-3" : "px-5 py-4"} ${
+                    message.role === "user" ? "text-[#e3e3e3]" : "text-[#e3e3e3]"
                   }`}
-                  style={message.role === "user" ? { backgroundColor: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent-soft-strong)" } : undefined}
+                  style={message.role === "user"
+                    ? { ...avatarSideCornerStyle, backgroundColor: "color-mix(in srgb, var(--accent-color) 16%, rgba(42, 44, 48, 0.58))" }
+                    : avatarSideCornerStyle}
                 >
                   {message.role === "assistant" && message.thinking && (
                     <details className="mb-3 overflow-hidden rounded-2xl border border-[#282a2c] bg-[#131314] px-3 py-2 text-xs text-[#c4c7c5]">
@@ -388,15 +398,19 @@ export function ConversationPane({
                   )}
                 </div>
                 {message.role === "user" && (
-                  <button
-                    type="button"
-                    onClick={onOpenUserProfile}
-                    className="mt-1 h-10 w-10 shrink-0 overflow-hidden rounded-2xl"
-                    style={{ backgroundColor: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent-soft-strong)" }}
-                    title="Edit user profile"
-                  >
-                    <AvatarImage src={userAvatar} fallback={userName || "You"} className="h-full w-full rounded-2xl" />
-                  </button>
+                  hideGroupedAvatar ? (
+                    <div className="mt-1 h-10 w-10 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={onOpenUserProfile}
+                      className="mt-1 h-10 w-10 shrink-0 overflow-hidden rounded-2xl"
+                      style={{ backgroundColor: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent-soft-strong)" }}
+                      title="Edit user profile"
+                    >
+                      <AvatarImage src={userAvatar} fallback={userName || "You"} className="h-full w-full rounded-2xl" />
+                    </button>
+                  )
                 )}
               </div>
             );

@@ -51,7 +51,7 @@ export function SamplingSection({
               event.stopPropagation();
               onReset();
             }}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314] text-[#c4c7c5] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#282a2c] bg-[#1e1f20] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
           >
             <RefreshIcon className="h-4 w-4" />
           </button>

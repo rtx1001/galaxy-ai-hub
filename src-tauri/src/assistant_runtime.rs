@@ -17,10 +17,7 @@ use crate::agent_react::{
     self, ActionProposal, ImageProposal, ReactChatMessage, ReactChatResult, ToolResultCard,
     ToolResultItem,
 };
-use crate::agent_store::{
-    self, list_local_memory, load_personality_chat_session, remember_local_memory,
-    save_personality_chat_session,
-};
+use crate::agent_store::{self, load_personality_chat_session, save_personality_chat_session};
 use crate::character_store;
 use crate::config_store::{load_app_settings, AppSettings, PersonalityPreset};
 use crate::file_tools::{self, normalize_text};
@@ -112,6 +109,9 @@ pub struct VoiceSample {
     pub path: String,
     pub language: Option<String>,
     pub language_probability: Option<f32>,
+    pub duration_seconds: Option<f32>,
+    pub sample_rate_hz: Option<u32>,
+    pub channels: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -223,12 +223,17 @@ fn collect_voice_samples(
             .and_then(|value| value.to_str())
             .map(prettify_voice_name)
             .unwrap_or_else(|| name.clone());
+        let wav_info = inspect_wav_voice_sample(&path);
+        let language_hint = voice_language_hint_from_path(&path).map(str::to_string);
         samples.push(VoiceSample {
             name,
             label,
             path: path.to_string_lossy().to_string(),
-            language: None,
+            language: language_hint,
             language_probability: None,
+            duration_seconds: wav_info.map(|(duration, _, _)| duration),
+            sample_rate_hz: wav_info.map(|(_, sample_rate, _)| sample_rate),
+            channels: wav_info.map(|(_, _, channels)| channels),
         });
     }
 }
@@ -514,6 +519,23 @@ async fn telegram_poll_loop(
                     Err(error) => error,
                 };
                 send_telegram_message_chunked(&client, &token, chat_id, &reply).await;
+                let auto_voice = session
+                    .lock()
+                    .map(|guard| guard.auto_voice)
+                    .unwrap_or(false);
+                if auto_voice && !reply.trim().is_empty() {
+                    synthesize_and_send_telegram_voice(
+                        &client,
+                        &token,
+                        chat_id,
+                        omnivoice_state.clone(),
+                        llama_state.clone(),
+                        &reply,
+                        profile.voice_sample_path.clone(),
+                        Some(&profile.personality_name),
+                    )
+                    .await;
+                }
                 let mut history = load_personality_chat_history(&pending.personality_id);
                 history.push(ReactChatMessage {
                     role: "assistant".to_string(),
@@ -992,6 +1014,7 @@ async fn telegram_poll_loop(
                 persist_personality_chat_history(&profile.personality_id, &history);
                 let updated_memory = update_personality_memory_after_turn(
                     &profile.personality_id,
+                    &profile.personality_name,
                     &profile.personality_memory,
                     &user_log_text,
                     &reply_text,

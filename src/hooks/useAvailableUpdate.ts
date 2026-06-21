@@ -5,7 +5,7 @@ export type AvailableUpdate = {
   url: string;
 };
 
-export const CURRENT_APP_VERSION = "0.1.5";
+export const CURRENT_APP_VERSION = "0.2.0";
 const GITHUB_RELEASES_API = "https://api.github.com/repos/rtx1001/galaxy-ai-hub/releases?per_page=10";
 const GITHUB_RELEASES_PAGE = "https://github.com/rtx1001/galaxy-ai-hub/releases";
 

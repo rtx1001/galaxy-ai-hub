@@ -47,7 +47,7 @@ export function AutomationSection({
           <button
             type="button"
             onClick={onAdd}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#282a2c] bg-[#131314] text-[#e3e3e3] transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#282a2c] bg-[#1e1f20] text-[#e3e3e3] shadow-sm transition hover:bg-[#282a2c] hover:text-[var(--accent-color)]"
             title="Add automation"
           >
             <PlusIcon className="h-4.5 w-4.5" />

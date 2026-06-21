@@ -1,10 +1,55 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
+import { activateAudioVisualizer, deactivateAudioVisualizer } from "../audioVisualizer";
+import { setInternalMediaPlayback } from "../internalMediaState";
 import type { AudioSynthesisResult, PersonalityPreset, UserProfilePreset, VoiceSample } from "../appCore";
 import { sanitizeTextForSpeech } from "../appCore";
 import { CameraIcon, CloseIcon, DownloadIcon, FolderIcon, PlayIcon, SaveIcon, SpeakerIcon, StopIcon, TrashIcon } from "./Icons";
 import { AvatarImage, IconButton, NumberStepper } from "./UI";
+
+const VOICE_LANGUAGE_LABELS: Record<string, string> = {
+  en: "English",
+  eng: "English",
+  vi: "Vietnamese",
+  vn: "Vietnamese",
+  vie: "Vietnamese",
+  th: "Thai",
+  tha: "Thai",
+  ja: "Japanese",
+  jp: "Japanese",
+  jpn: "Japanese",
+  ko: "Korean",
+  kor: "Korean",
+  zh: "Chinese",
+  cn: "Chinese",
+  zho: "Chinese",
+  chi: "Chinese",
+};
+
+function voiceSampleMeta(sample: VoiceSample) {
+  const language = sample.language?.trim();
+  const languageLabel = language
+    ? VOICE_LANGUAGE_LABELS[language.toLowerCase()] || language.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : "";
+  const durationLabel =
+    typeof sample.duration_seconds === "number" && Number.isFinite(sample.duration_seconds) && sample.duration_seconds > 0
+      ? `${sample.duration_seconds.toFixed(sample.duration_seconds >= 10 ? 0 : 1)}s`
+      : "";
+  const sampleRateLabel =
+    typeof sample.sample_rate_hz === "number" && Number.isFinite(sample.sample_rate_hz) && sample.sample_rate_hz > 0
+      ? `${(sample.sample_rate_hz / 1000).toFixed(sample.sample_rate_hz % 1000 === 0 ? 0 : 1)} kHz`
+      : "";
+  const channelLabel =
+    sample.channels === 1
+      ? "mono"
+      : sample.channels === 2
+        ? "stereo"
+        : typeof sample.channels === "number" && sample.channels > 2
+          ? `${sample.channels} ch`
+          : "";
+  return [languageLabel, durationLabel, sampleRateLabel, channelLabel].filter(Boolean).join(" · ") || "Voice sample";
+}
 
 function VoiceSampleList({
   samples,
@@ -57,7 +102,7 @@ function VoiceSampleList({
                   </button>
                   <button type="button" onClick={() => onSelect(sample.path)} className="min-w-0 flex-1 text-left">
                     <div className="truncate text-[13px] font-semibold text-[#e3e3e3]">{sample.label}</div>
-                    <div className="truncate text-[10px] leading-4 text-[#9aa0a6]">Preview</div>
+                    <div className="truncate text-[10px] leading-4 text-[#9aa0a6]">{voiceSampleMeta(sample)}</div>
                   </button>
                   <span className={`h-2 w-2 shrink-0 rounded-full ${selected ? "bg-[var(--accent-color)]" : "bg-[#3a3b3d]"}`} />
                 </div>
@@ -177,6 +222,8 @@ function CharacterVoiceTestBlock({
 
   useEffect(() => () => {
     if (audioRef.current) {
+      deactivateAudioVisualizer(audioRef.current);
+      setInternalMediaPlayback("voice-test", false);
       audioRef.current.pause();
       audioRef.current = null;
     }
@@ -211,6 +258,8 @@ function CharacterVoiceTestBlock({
 
   const stopPreviousAudio = () => {
     if (audioRef.current) {
+      deactivateAudioVisualizer(audioRef.current);
+      setInternalMediaPlayback("voice-test", false);
       audioRef.current.pause();
       audioRef.current = null;
     }
@@ -231,9 +280,21 @@ function CharacterVoiceTestBlock({
     setCachedKey(currentKey);
     const audio = new Audio(nextUrl);
     audioRef.current = audio;
-    audio.addEventListener("ended", () => setPlaying(false));
-    audio.addEventListener("pause", () => setPlaying(false));
-    audio.addEventListener("play", () => setPlaying(true));
+    audio.addEventListener("ended", () => {
+      deactivateAudioVisualizer(audio);
+      setInternalMediaPlayback("voice-test", false);
+      setPlaying(false);
+    });
+    audio.addEventListener("pause", () => {
+      deactivateAudioVisualizer(audio);
+      setInternalMediaPlayback("voice-test", false);
+      setPlaying(false);
+    });
+    audio.addEventListener("play", () => {
+      activateAudioVisualizer(audio).catch(() => undefined);
+      setInternalMediaPlayback("voice-test", true);
+      setPlaying(true);
+    });
     await audio.play().catch((error) => {
       if (!isInterruptedPlayError(error)) throw error;
     });
@@ -483,6 +544,8 @@ export function CharacterProfileModal({
   fallbackAvatar,
   nameDraft,
   personality,
+  memoryPartnerId,
+  memoryPartnerName,
   profileCount,
   memorySize,
   replyLength,
@@ -511,6 +574,8 @@ export function CharacterProfileModal({
   fallbackAvatar: string;
   nameDraft: string;
   personality: string;
+  memoryPartnerId: string;
+  memoryPartnerName: string;
   profileCount: number;
   memorySize: number;
   replyLength: number;
@@ -534,8 +599,37 @@ export function CharacterProfileModal({
   onRequestClearMemory: () => void;
   onSave: () => void;
 }) {
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memoryText, setMemoryText] = useState("");
+  const [memoryLoading, setMemoryLoading] = useState(false);
+
+  const openMemory = async () => {
+    if (!preset?.id) return;
+    setMemoryOpen(true);
+    setMemoryLoading(true);
+    try {
+      const text = memoryPartnerId
+        ? await invoke<string>("load_pair_relationship_memory", {
+          firstId: memoryPartnerId,
+          firstName: memoryPartnerName || "User",
+          secondId: preset.id,
+          secondName: preset.name || "Assistant",
+        })
+        : await invoke<string>("load_character_memory", {
+        id: preset.id,
+        name: preset.name || "Assistant",
+      });
+      setMemoryText(text);
+    } catch (error) {
+      setMemoryText(error instanceof Error ? error.message : String(error));
+    } finally {
+      setMemoryLoading(false);
+    }
+  };
+
   if (!open) return null;
   return (
+    <>
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4 py-3 backdrop-blur-sm" onClick={onClose}>
       <div className="flex max-h-[calc(100vh-32px)] w-full max-w-[780px] flex-col overflow-hidden rounded-[24px] border border-[#282a2c] bg-[#1e1f20] shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#282a2c] px-5 py-3">
@@ -560,7 +654,12 @@ export function CharacterProfileModal({
             </div>
             <label className="block shrink-0">
               <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">Character name</span>
-              <input value={nameDraft} onChange={(event) => onNameChange(event.target.value)} className="h-10 w-full rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 text-sm font-semibold text-[#e3e3e3] outline-none transition focus:border-[var(--accent-color)]" placeholder="Assistant name" />
+              <div className="flex items-center gap-2">
+                <input value={nameDraft} onChange={(event) => onNameChange(event.target.value)} className="h-10 min-w-0 flex-1 rounded-2xl border border-[#282a2c] bg-[#0f1011] px-3 text-sm font-semibold text-[#e3e3e3] outline-none" placeholder="Assistant name" />
+                <button type="button" onClick={openMemory} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#282a2c] bg-[#131314] text-[var(--accent-color)] transition hover:bg-[var(--accent-soft)]" title="View character memory">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M4 19.5A2.5 2.5 0 016.5 17H20" /><path d="M4 4.5A2.5 2.5 0 016.5 2H20v20H6.5A2.5 2.5 0 014 19.5z" /></svg>
+                </button>
+              </div>
             </label>
             <label className="flex min-h-0 flex-col">
               <span className="mb-1.5 block text-xs font-semibold text-[#c4c7c5]">Personality</span>
@@ -614,6 +713,30 @@ export function CharacterProfileModal({
         </div>
       </div>
     </div>
+    {memoryOpen && (
+      <div className="fixed inset-0 z-[230] flex items-center justify-center bg-black/55 px-4 py-3 backdrop-blur-sm" onClick={() => setMemoryOpen(false)}>
+        <div className="flex max-h-[calc(100vh-48px)] w-full max-w-[560px] flex-col overflow-hidden rounded-[24px] border border-[#282a2c] bg-[#1e1f20] shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#282a2c] px-5 py-3">
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--accent-color)" }}>Character Memory</div>
+              <div className="mt-1 truncate text-lg font-bold text-[#f1f3f4]">{nameDraft || preset?.name || "Assistant"}</div>
+              {memoryPartnerName ? (
+                <div className="mt-0.5 truncate text-xs text-[#9aa0a6]">With {memoryPartnerName}</div>
+              ) : null}
+            </div>
+            <IconButton title="Close memory" onClick={() => setMemoryOpen(false)}>
+              <CloseIcon />
+            </IconButton>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <pre className="whitespace-pre-wrap break-words rounded-2xl border border-[#282a2c] bg-[#131314] p-4 font-sans text-sm leading-6 text-[#e3e3e3]">
+              {memoryLoading ? "Loading memory..." : memoryText || "Nothing important has been remembered yet."}
+            </pre>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

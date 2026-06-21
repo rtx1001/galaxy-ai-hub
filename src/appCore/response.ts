@@ -84,8 +84,45 @@ export const stripThinkBlocks = (text: string) =>
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
     .trim();
 
+export const repairDisplaySpacedDecimals = (text: string) =>
+  text.replace(
+    /\b(-?\d+)\s*([.,])\s*(\d+)\s*(mm|cm|km\/h|km|kg|g|%|\u00b0?\s*[cf]\b|usd\b|vnd\b|vn\u0111\b|\u20ab|\$|\u20ac|\u00a3)/gi,
+    (_, whole, mark, fraction, unit) => {
+      const normalizedUnit = String(unit).replace(/\s+/g, "");
+      return `${whole}${mark}${fraction}${normalizedUnit === "%" ? "%" : ` ${normalizedUnit}`}`;
+    },
+  );
+
+const stripNarrationLine = (line: string) => {
+  const trimmed = line.trim();
+  if (!trimmed) return "";
+  if (/^\*{3,}$/.test(trimmed)) return "";
+
+  const starred = trimmed.match(/^\*{1,3}\s*([\s\S]*?)\s*\*{1,3}$/);
+  if (starred && starred[1].trim().length > 6) return "";
+
+  const parenthetical = trimmed.match(/^\(([\s\S]{6,})\)$/) ?? trimmed.match(/^\[([\s\S]{6,})\]$/);
+  if (parenthetical) return "";
+
+  const quoted = trimmed.match(/^["?]([\s\S]+?)["?]$/);
+  if (quoted) return quoted[1].trim();
+
+  return line;
+};
+
+export const stripNarrationText = (text: string) =>
+  text
+    // Roleplay narration is commonly emitted as triple-star action blocks.
+    .replace(/\*{3}\s*[\s\S]{2,700}?\s*\*{3}/g, "")
+    .split(/\r?\n/)
+    .map(stripNarrationLine)
+    .filter((line, index, lines) => line.trim() || (index > 0 && index < lines.length - 1))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
 export const cleanAssistantDisplayText = (text: string) =>
-  removeStrayHanGlyphs(text)
+  stripNarrationText(repairDisplaySpacedDecimals(removeStrayHanGlyphs(text)))
     .replace(/[\uFFFD\u25A1\u25A0\u{1F972}]/gu, "")
     // Some Windows/WebView setups render emoji/pictographs as square boxes. Keep text natural by dropping them.
     .replace(/\p{Extended_Pictographic}\uFE0F?/gu, "")
@@ -94,12 +131,24 @@ export const cleanAssistantDisplayText = (text: string) =>
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 
+export const hasUnexpectedHanDrift = (text: string) => {
+  const hanMatches = text.match(/\p{Script=Han}/gu) ?? [];
+  if (!hanMatches.length) return false;
+  const hasLatin = /\p{Script=Latin}/u.test(text);
+  const hasKanaOrHangul = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
+  if (!hasLatin || hasKanaOrHangul) return false;
+  const visibleLength = Array.from(text.replace(/\s+/g, "")).length || 1;
+  return hanMatches.length / visibleLength <= 0.25;
+};
+
 export const removeStrayHanGlyphs = (text: string) => {
   const hanMatches = text.match(/\p{Script=Han}/gu) ?? [];
-  if (!hanMatches.length || hanMatches.length > 2) return text;
+  if (!hanMatches.length) return text;
   const hasLatin = /\p{Script=Latin}/u.test(text);
   const hasKanaOrHangul = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
   if (!hasLatin || hasKanaOrHangul) return text;
+  const visibleLength = Array.from(text.replace(/\s+/g, "")).length || 1;
+  if (hanMatches.length / visibleLength > 0.25) return text;
   return text.replace(/\p{Script=Han}/gu, "");
 };
 

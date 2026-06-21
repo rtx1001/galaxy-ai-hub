@@ -20,6 +20,9 @@ export function usePanelState() {
   const [googlePanelOpen, setGooglePanelOpen] = useState(
     DEFAULT_SETTINGS.ui_google_open,
   );
+  const [mediaPlayerPanelOpen, setMediaPlayerPanelOpen] = useState(
+    DEFAULT_SETTINGS.ui_media_player_open,
+  );
   const [samplingOpen, setSamplingOpen] = useState(
     DEFAULT_SETTINGS.ui_sampling_open,
   );
@@ -43,6 +46,8 @@ export function usePanelState() {
     setTelegramPanelOpen,
     googlePanelOpen,
     setGooglePanelOpen,
+    mediaPlayerPanelOpen,
+    setMediaPlayerPanelOpen,
     samplingOpen,
     setSamplingOpen,
     leftPanelOpen,

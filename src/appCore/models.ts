@@ -35,6 +35,9 @@ export type VoiceSample = {
   path: string;
   language?: string | null;
   language_probability?: number | null;
+  duration_seconds?: number | null;
+  sample_rate_hz?: number | null;
+  channels?: number | null;
 };
 
 export type SystemInfo = {
@@ -118,6 +121,22 @@ export type TelegramGuest = {
   name: string;
 };
 
+export type MediaTrackInfo = {
+  title: string;
+  artist: string;
+  artwork_url?: string | null;
+};
+
+export type MediaPlayerStatus = {
+  app_open: boolean;
+  connected: boolean;
+  playing: boolean;
+  account_name?: string | null;
+  active_app?: string | null;
+  track?: MediaTrackInfo | null;
+  message: string;
+};
+
 export type PendingShellAction = {
   id: number;
   command: string;
@@ -193,6 +212,11 @@ export type SendOptions = {
   sourceLabel?: string;
   skipLocalIntent?: boolean;
   silentUser?: boolean;
+  preInsertedUserMessageId?: string;
+  deferUntilAudioIdle?: boolean;
+  queueSpeechAfterCurrent?: boolean;
+  waitForUserSpeechStart?: boolean;
+  waitForUserFinalSpeechChunkStart?: boolean;
   autoApproveActions?: boolean;
 };
 
@@ -206,6 +230,7 @@ export type AppSettings = {
   user_longitude: number | null;
   theme_swatch_id: string;
   live_conversation: boolean;
+  user_auto_pilot: boolean;
   telegram_bot_token: string;
   telegram_owner_id: string;
   telegram_guests: TelegramGuest[];
@@ -243,6 +268,7 @@ export type AppSettings = {
   ui_automation_open: boolean;
   ui_telegram_open: boolean;
   ui_google_open: boolean;
+  ui_media_player_open: boolean;
   ui_tool_activity_open: boolean;
   ui_sampling_open: boolean;
 };
@@ -280,8 +306,42 @@ export type CharacterFiles = {
   name: string;
   folder: string;
   soul: string;
+  memory: string;
   settings: CharacterSettings;
 };
+
+export type SharedProfileKind = "user" | "personality";
+
+export const profileRefId = (kind: SharedProfileKind, id: string) => `${kind}:${id}`;
+
+export const parseProfileRefId = (
+  value: string,
+  fallbackKind: SharedProfileKind,
+): { kind: SharedProfileKind; id: string } => {
+  if (value.startsWith("user:")) return { kind: "user", id: value.slice(5) };
+  if (value.startsWith("personality:")) return { kind: "personality", id: value.slice(12) };
+  return { kind: fallbackKind, id: value };
+};
+
+export const userProfileFromPersonality = (preset: PersonalityPreset): UserProfilePreset => ({
+  id: profileRefId("personality", preset.id),
+  name: preset.name || "You",
+  description: preset.prompt || "",
+  avatar: preset.avatar || "",
+  voice_path: preset.voice_path || "",
+  location_label: "",
+  latitude: null,
+  longitude: null,
+  auto_speech: true,
+});
+
+export const personalityFromUserProfile = (profile: UserProfilePreset): PersonalityPreset => ({
+  id: profileRefId("user", profile.id),
+  name: profile.name || "Assistant",
+  prompt: profile.description || `Act as ${profile.name || "this profile"} naturally.`,
+  avatar: profile.avatar || "",
+  voice_path: profile.voice_path || "",
+});
 
 export const syncSoulCoreIdentity = (soul: string, name: string, prompt: string) => {
   const cleanName = name.trim() || "Assistant";
@@ -312,6 +372,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   user_longitude: null,
   theme_swatch_id: "blue",
   live_conversation: false,
+  user_auto_pilot: false,
   telegram_bot_token: "",
   telegram_owner_id: "",
   telegram_guests: [],
@@ -368,6 +429,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ui_automation_open: false,
   ui_telegram_open: false,
   ui_google_open: false,
+  ui_media_player_open: false,
   ui_tool_activity_open: false,
   ui_sampling_open: false,
 };

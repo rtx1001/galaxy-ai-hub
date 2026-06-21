@@ -7,6 +7,7 @@ import {
   LocalImageDataUrl,
   SendOptions,
   buildBrainMessages,
+  buildConversationIdentityBlock,
   buildRecentImageContextBlock,
   cleanAssistantDisplayText,
   buildToolAgentMessages,
@@ -18,8 +19,10 @@ import {
   findPendingActionProposal,
   findPendingImageProposal,
   formatReactThinking,
+  hasUnexpectedHanDrift,
   isExplicitApprovalText,
   modelAwareReplySampling,
+  splitAssistantMessageForChat,
   stripThinkBlocks,
 } from "../appCore";
 import { localAssetUrl } from "../utils";
@@ -137,7 +140,6 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     enrichPreviewPerception,
     executeActionProposal,
     extractSseEventText,
-    finalizeAssistantMessageById,
     googleClientId,
     googleClientSecret,
     handleGenerateImage,
@@ -164,6 +166,7 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     selectedModelPath,
     selectedPersonalityId,
     selectedUserProfile,
+    selectedUserProfileId,
     sendInFlightRef,
     setBrainStatus,
     setComposerNotice,
@@ -176,10 +179,14 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     thinkingEnabled,
     topK,
     topP,
-    updateLastAssistantMessage,
     updatePersonalityMemoryAfterTurn,
     userDescription,
     userName,
+    activeChatSessionId,
+    updateChatSessionMessages,
+    waitForConversationAudioIdle,
+    waitForMessageSpeechStart,
+    waitForFinalSpeechChunkStart,
   } = options;
   const linkedFoldersRef = useRef<string[]>(Array.isArray(linkedFolders) ? linkedFolders : []);
 
@@ -229,6 +236,42 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
     }
 
     sendInFlightRef.current = true;
+    const requestChatSessionId = activeChatSessionId;
+    const requestPairContext = {
+      userProfileId: selectedUserProfileId,
+      personalityId: selectedPersonalityId,
+    };
+    const setRequestMessages = (updater: ChatMessage[] | ((messages: ChatMessage[]) => ChatMessage[])) => {
+      if (typeof updateChatSessionMessages === "function" && requestChatSessionId) {
+        updateChatSessionMessages(requestChatSessionId, updater, requestPairContext);
+      } else {
+        setMessages(updater as any);
+      }
+    };
+    const updateRequestLastAssistantMessage = (updater: (message: ChatMessage) => ChatMessage) => {
+      setRequestMessages((prev: ChatMessage[]) => {
+        if (prev.length === 0) return prev;
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last.role !== "assistant") return prev;
+        updated[updated.length - 1] = updater(last);
+        return updated;
+      });
+    };
+    const finalizeRequestAssistantMessageById = (messageId: string, updater: (message: ChatMessage) => ChatMessage) => {
+      let splitIds: string[] = [];
+      setRequestMessages((prev: ChatMessage[]) => {
+        const index = prev.findIndex((message) => message.id === messageId && message.role === "assistant");
+        if (index < 0) return prev;
+        const next = [...prev];
+        const updated = updater(next[index]);
+        const splitMessages = splitAssistantMessageForChat(updated);
+        splitIds = splitMessages.map((message) => message.id);
+        next.splice(index, 1, ...splitMessages);
+        return next;
+      });
+      return splitIds.length ? splitIds : [messageId];
+    };
     const requestStartedAt = performance.now();
     const messageCreatedAt = Date.now();
     const requestId = activeChatRequestRef.current + 1;
@@ -255,30 +298,66 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
           ];
     }
 
+    const preInsertedUserMessageId = sendOptions.preInsertedUserMessageId?.trim();
+    const userMessageAlreadyVisible = Boolean(preInsertedUserMessageId && !sendOptions.editMessageId);
     const userMessage: ChatMessage = {
-      id: editTarget?.id ?? createMessageId(),
+      id: editTarget?.id ?? preInsertedUserMessageId ?? createMessageId(),
       role: "user",
+      speaker_id: selectedUserProfileId,
       content,
       created_at: messageCreatedAt,
     };
     const assistantMessageId = createMessageId();
 
     if (sendOptions.editMessageId && editTargetIndex >= 0) {
-      setMessages((prev: ChatMessage[]) => [
+      setRequestMessages((prev: ChatMessage[]) => [
         ...prev.slice(0, editTargetIndex),
         userMessage,
-        { id: assistantMessageId, role: "assistant", content: "", created_at: Date.now() },
+        { id: assistantMessageId, role: "assistant", speaker_id: selectedPersonalityId, content: "", created_at: Date.now() },
       ]);
-    } else if (!sendOptions.silentUser) {
-      setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
+    } else if (!sendOptions.silentUser && !userMessageAlreadyVisible) {
+      setRequestMessages((prev: ChatMessage[]) => [...prev, userMessage]);
     }
     if (!sendOptions.text) {
       setComposerText("");
     }
+    if (sendOptions.deferUntilAudioIdle && typeof waitForConversationAudioIdle === "function") {
+      const waitedMs = await waitForConversationAudioIdle();
+      if (waitedMs > 250) {
+        appLog(`chat waited for conversation audio idle ms=${waitedMs}`);
+      }
+    }
+    let userSpeechPromise: Promise<void> | null = null;
     if (!sendOptions.silentUser && liveConversationRef.current && selectedUserProfile?.auto_speech !== false && typeof content === "string" && content.trim()) {
-      void speakMessageText(userMessage.id, content, "user").catch((error: unknown) => {
+      const startedSpeechPromise = speakMessageText(userMessage.id, content, "user", {
+        queued: sendOptions.queueSpeechAfterCurrent,
+      });
+      userSpeechPromise = startedSpeechPromise;
+      void startedSpeechPromise.catch((error: unknown) => {
         console.error("Live user speech error:", error);
       });
+    }
+    if (
+      sendOptions.waitForUserSpeechStart &&
+      userSpeechPromise &&
+      typeof waitForMessageSpeechStart === "function"
+    ) {
+      const speechPromise = userSpeechPromise;
+      const waitedMs = await waitForMessageSpeechStart(userMessage.id);
+      if (waitedMs > 250) {
+        appLog(`chat waited for user speech start message=${userMessage.id} ms=${waitedMs}`);
+      }
+      void speechPromise.catch(() => undefined);
+    }
+    if (
+      sendOptions.waitForUserFinalSpeechChunkStart &&
+      userSpeechPromise &&
+      typeof waitForFinalSpeechChunkStart === "function"
+    ) {
+      const waitedMs = await waitForFinalSpeechChunkStart(userMessage.id);
+      if (waitedMs > 250) {
+        appLog(`chat waited for user final speech chunk message=${userMessage.id} ms=${waitedMs}`);
+      }
     }
 
     if (!sendOptions.editMessageId && !attachedImage && typeof content === "string" && isExplicitApprovalText(content)) {
@@ -311,9 +390,9 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
       ? [...messages.slice(0, editTargetIndex), userMessage]
       : [...messages, userMessage];
     if (!sendOptions.editMessageId) {
-      setMessages((prev: ChatMessage[]) => [
+      setRequestMessages((prev: ChatMessage[]) => [
         ...prev,
-        { id: assistantMessageId, role: "assistant", content: "", created_at: Date.now() },
+        { id: assistantMessageId, role: "assistant", speaker_id: selectedPersonalityId, content: "", created_at: Date.now() },
       ]);
     }
     if (attachedImage && !attachedImagePath && /^data:image\//i.test(attachedImage)) {
@@ -335,7 +414,7 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
         newMessages = sendOptions.editMessageId && editTargetIndex >= 0
           ? [...messages.slice(0, editTargetIndex), persistedUserMessage]
           : [...messages, persistedUserMessage];
-        setMessages((prev: ChatMessage[]) =>
+        setRequestMessages((prev: ChatMessage[]) =>
           prev.map((message) => message.id === userMessage.id ? persistedUserMessage : message),
         );
         appLog(`chat input image persisted path=${saved.path}`);
@@ -398,6 +477,69 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
       const natural = await naturalizeSystemResult(promptText, result);
       return natural.trim() || "I could not complete that yet.";
     };
+    const repairMixedScriptDrift = async (rawText: string) => {
+      const trimmed = rawText.trim();
+      if (!trimmed) return "";
+      if (!hasUnexpectedHanDrift(trimmed)) return cleanAssistantDisplayText(trimmed);
+      try {
+        const recentContext = requestMessages
+          .slice(-10)
+          .map((message) => {
+            const text = extractMessageText(message.content).replace(/\s+/g, " ").trim();
+            if (!text) return "";
+            return `${message.role === "user" ? "User" : "Assistant"}: ${text.slice(0, 260)}`;
+          })
+          .filter(Boolean)
+          .join("\n");
+        const response = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stream: false,
+            temperature: 0.25,
+            top_k: Math.max(20, Math.min(effectiveTopK || 40, 40)),
+            top_p: Math.min(effectiveTopP || 0.9, 0.9),
+            min_p: effectiveMinP,
+            repeat_last_n: Math.max(repeatLastN, 128),
+            repeat_penalty: Math.max(effectiveRepeatPenalty, 1.1),
+            max_tokens: Math.min(Math.max(160, estimateTokens(trimmed) + 80), Math.max(180, replyLength)),
+            chat_template_kwargs: {
+              enable_thinking: false,
+              thinking: false,
+            },
+            messages: [
+              {
+                role: "system",
+                content: [
+                  "Repair a mixed-script model drift in one assistant message.",
+                  "Rewrite the message in the main language of the conversation.",
+                  "Translate any unexpected foreign-script fragments into that language.",
+                  "Preserve the original meaning, tone, names, intimacy level, and relationship style.",
+                  "Do not add new events, facts, explanations, labels, or analysis.",
+                  "Output only the repaired message.",
+                ].join("\n"),
+              },
+              {
+                role: "user",
+                content: [
+                  recentContext ? `Recent conversation:\n${recentContext}` : "",
+                  `Message to repair:\n${trimmed}`,
+                ].filter(Boolean).join("\n\n"),
+              },
+            ],
+          }),
+        });
+        if (!response.ok) return cleanAssistantDisplayText(trimmed);
+        const repaired = cleanAssistantDisplayText(extractChatResponseText(await response.json()));
+        if (repaired && !hasUnexpectedHanDrift(repaired)) {
+          appLog("chat repaired mixed-script drift in assistant reply");
+          return repaired;
+        }
+      } catch (error) {
+        appLog(`chat mixed-script repair failed ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return cleanAssistantDisplayText(trimmed);
+    };
     const looksLikeBoringSystemFailure = (text: string) =>
       /^\s*(?:\[?Error:|I could not complete that action because|The chat brain returned|Model error:|Connection to the brain failed)/i.test(text);
     const resolveRuntimeLinkedFolders = async () => {
@@ -412,7 +554,7 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
         return;
       }
       lastUiFlush = now;
-      updateLastAssistantMessage((last: ChatMessage) => ({
+      updateRequestLastAssistantMessage((last: ChatMessage) => ({
         ...last,
         content: generatedText,
       }));
@@ -436,9 +578,17 @@ export function useChatRuntime(options: UseChatRuntimeOptions) {
       const runtimeLinkedFolders = await resolveRuntimeLinkedFolders();
       const activePersonality =
         personalityPresets.find((preset: { id: string }) => preset.id === selectedPersonalityId) ?? personalityPresets[0];
+      const assistantName = activePersonality?.name || "Assistant";
+      const activeUserName = userName.trim() || "User";
       const profilePrompt = [
+        buildConversationIdentityBlock({
+          assistantName,
+          userName: activeUserName,
+          userDescription,
+        }),
+        "",
         `Assistant profile:
-Name: ${activePersonality?.name || "Assistant"}
+Name: ${assistantName}
 Instructions:
 ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
         characterSoul.trim() ? `\nAdditional character context:\n${characterSoul.trim()}` : "",
@@ -446,8 +596,8 @@ ${personality || activePersonality?.prompt || "You are a helpful assistant."}`,
           ? `\nConversation memory:
 ${personalityMemory.trim()}`
           : "",
-        userName.trim() || userDescription.trim()
-          ? `\nUser profile:\nName: ${userName.trim() || "User"}\nAbout user: ${userDescription.trim() || ""}`
+        activeUserName || userDescription.trim()
+          ? `\nUser profile:\nName: ${activeUserName}\nAbout user: ${userDescription.trim() || ""}`
           : "",
         runtimeLinkedFolders.length
           ? `\nPermitted workspace folders:\n${runtimeLinkedFolders.join("\n")}`
@@ -512,7 +662,7 @@ ${personalityMemory.trim()}`
             appLog(`image preview perception skipped status=${response.status}`);
             return;
           }
-          const comment = cleanAssistantDisplayText(stripThinkBlocks(extractChatResponseText(await response.json()))
+          const comment = await repairMixedScriptDrift(stripThinkBlocks(extractChatResponseText(await response.json()))
             .replace(/\s+/g, " ")
             .replace(/[\uFFFD\u25A1\u25A0]/g, "")
             .trim());
@@ -521,12 +671,13 @@ ${personalityMemory.trim()}`
           const commentMessage: ChatMessage = {
             id: createMessageId(),
             role: "assistant",
+            speaker_id: selectedPersonalityId,
             content: comment,
             created_at: now,
             completed_at: now,
             duration_ms: Math.max(0, Math.round(performance.now() - startedAt)),
           };
-          setMessages((prev: ChatMessage[]) => {
+          setRequestMessages((prev: ChatMessage[]) => {
             const parentIndex = prev.findIndex((message) => message.id === parentMessageId);
             if (parentIndex < 0) return [...prev, commentMessage];
             return [
@@ -593,9 +744,9 @@ ${personalityMemory.trim()}`
         if (reactResult.tool_trace?.length) {
           refreshToolRuns().catch((error: unknown) => console.error("Tool activity refresh error:", error));
         }
-        generatedText = cleanAssistantDisplayText(reactResult.answer);
+        generatedText = await repairMixedScriptDrift(reactResult.answer);
         if (looksLikeBoringSystemFailure(generatedText)) {
-          generatedText = cleanAssistantDisplayText(await naturalizeFailureReply(generatedText));
+          generatedText = await repairMixedScriptDrift(await naturalizeFailureReply(generatedText));
         }
         generatedThinking = thinkingEnabled ? formatReactThinking(reactResult) : "";
         appLog(
@@ -603,8 +754,8 @@ ${personalityMemory.trim()}`
         );
         if (sendOptions.autoApproveActions && reactResult.action_proposal) {
           const rawResult = await executeActionProposal(reactResult.action_proposal);
-          generatedText = cleanAssistantDisplayText(await naturalizeSystemResult(promptText, rawResult));
-          const finalizedAssistantIds = finalizeAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
+          generatedText = await repairMixedScriptDrift(await naturalizeSystemResult(promptText, rawResult));
+          const finalizedAssistantIds = finalizeRequestAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
             ...last,
             content: generatedText,
             thinking: thinkingEnabled ? generatedThinking || last.thinking : undefined,
@@ -633,7 +784,7 @@ ${personalityMemory.trim()}`
         if (reactResult.action_proposal) {
           structuredParts.push({ type: "action_proposal", action_proposal: reactResult.action_proposal });
         }
-        const finalizedAssistantIds = finalizeAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
+        const finalizedAssistantIds = finalizeRequestAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
           ...last,
           content: structuredParts.length > 1 ? structuredParts : generatedText,
           thinking: thinkingEnabled ? generatedThinking || last.thinking : undefined,
@@ -704,9 +855,9 @@ ${personalityMemory.trim()}`
         imageReactResult?.cards?.length,
       );
       if (imageReactResult && imageReactHasStructuredResult) {
-        generatedText = cleanAssistantDisplayText(imageReactResult.answer);
+        generatedText = await repairMixedScriptDrift(imageReactResult.answer);
         if (looksLikeBoringSystemFailure(generatedText)) {
-          generatedText = cleanAssistantDisplayText(await naturalizeFailureReply(generatedText));
+          generatedText = await repairMixedScriptDrift(await naturalizeFailureReply(generatedText));
         }
         generatedThinking = thinkingEnabled ? formatReactThinking(imageReactResult) : "";
         appLog(
@@ -725,7 +876,7 @@ ${personalityMemory.trim()}`
         if (imageReactResult.action_proposal) {
           structuredParts.push({ type: "action_proposal", action_proposal: imageReactResult.action_proposal });
         }
-        const finalizedAssistantIds = finalizeAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
+        const finalizedAssistantIds = finalizeRequestAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
           ...last,
           content: structuredParts.length > 1 ? structuredParts : generatedText,
           thinking: thinkingEnabled ? generatedThinking || last.thinking : undefined,
@@ -865,10 +1016,10 @@ ${personalityMemory.trim()}`
           });
 
           if (answerResponse.ok) {
-            generatedText = cleanAssistantDisplayText(extractChatResponseText(await answerResponse.json()));
+            generatedText = await repairMixedScriptDrift(extractChatResponseText(await answerResponse.json()));
           }
           if (!generatedText.trim()) {
-          generatedText = cleanAssistantDisplayText(fallbackGeneratedText.trim());
+          generatedText = await repairMixedScriptDrift(fallbackGeneratedText.trim());
           }
         } else {
           const retryResponse = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
@@ -883,7 +1034,7 @@ ${personalityMemory.trim()}`
           }
 
           const retryData = await retryResponse.json();
-          generatedText = cleanAssistantDisplayText(extractChatResponseText(retryData));
+          generatedText = await repairMixedScriptDrift(extractChatResponseText(retryData));
         }
       }
 
@@ -894,15 +1045,15 @@ ${personalityMemory.trim()}`
         throw new Error("The brain returned no text.");
       }
       if (thinkingEnabled && generatedThinking.trim()) {
-        updateLastAssistantMessage((last: ChatMessage) => ({
+        updateRequestLastAssistantMessage((last: ChatMessage) => ({
           ...last,
           thinking: generatedThinking.trim(),
         }));
       }
       if (isRequestStale()) return;
-      generatedText = cleanAssistantDisplayText(await handleShellToolRequest(assistantMessageId, generatedText));
+      generatedText = await repairMixedScriptDrift(await handleShellToolRequest(assistantMessageId, generatedText));
       flushStreamedText(true);
-      const finalizedAssistantIds = finalizeAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
+      const finalizedAssistantIds = finalizeRequestAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
         ...last,
         content: generatedText,
         thinking: thinkingEnabled ? generatedThinking.trim() || last.thinking : undefined,
@@ -928,7 +1079,7 @@ ${personalityMemory.trim()}`
         )
         .catch(() => {});
       if (error instanceof Error && error.name === "AbortError") {
-        updateLastAssistantMessage((last: ChatMessage) =>
+        updateRequestLastAssistantMessage((last: ChatMessage) =>
           last.content === "" ? { ...last, content: "[Stopped]", ...replyTiming() } : { ...last, ...replyTiming() },
         );
         setComposerNotice("Stopped.");
@@ -937,7 +1088,7 @@ ${personalityMemory.trim()}`
       }
       const partialReply = generatedText.trim();
       if (partialReply) {
-        finalizeAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
+        finalizeRequestAssistantMessageById(assistantMessageId, (last: ChatMessage) => ({
           ...last,
           content: partialReply,
           ...replyTiming(),
@@ -951,7 +1102,7 @@ ${personalityMemory.trim()}`
       } else {
         const technicalMessage = error instanceof Error ? error.message : String(error || "Connection to the brain failed.");
         const naturalError = await naturalizeFailureReply(technicalMessage);
-        updateLastAssistantMessage((last: ChatMessage) => ({
+        updateRequestLastAssistantMessage((last: ChatMessage) => ({
           ...last,
           content: naturalError,
           ...replyTiming(),

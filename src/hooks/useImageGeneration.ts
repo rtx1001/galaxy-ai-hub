@@ -14,6 +14,7 @@ type GeneratedImageResult = {
 type UseImageGenerationOptions = {
   appLog: (message: string) => void;
   assistantAvatar: string;
+  assistantId: string;
   autoSpeechEligibleAssistantIdsRef: MutableRefObject<Set<string>>;
   clearImage: () => void;
   chatDisplayLanguage: DisplayLanguage;
@@ -127,6 +128,7 @@ export function useImageGeneration(options: UseImageGenerationOptions) {
       {
         id: assistantMessageId,
         role: "assistant",
+        speaker_id: options.assistantId,
         content: imageSendingStatusText(options.chatDisplayLanguage),
         created_at: Date.now(),
       },

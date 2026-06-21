@@ -51,7 +51,7 @@ export function useTelegramControls(options: UseTelegramControlsOptions) {
         minP: options.minP,
         repeatLastN: options.repeatLastN,
         repeatPenalty: options.repeatPenalty,
-        maxTokens: Math.min(options.replyLength, 768),
+        maxTokens: options.replyLength,
         googleClientId: options.googleClientId,
         googleClientSecret: options.googleClientSecret,
         folders: options.linkedFolders,

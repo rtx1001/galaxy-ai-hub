@@ -16,6 +16,30 @@ import { FreshChatConfirmModal, GoogleEventModals, ImageViewerOverlay } from "./
 type AppShellProps = Record<string, any>;
 
 export function AppShell(props: AppShellProps) {
+  const selectedThemeSwatch = props.selectedThemeSwatch;
+  const themeVars = React.useMemo(
+    () =>
+      selectedThemeSwatch
+        ? ({
+            "--startup-accent": selectedThemeSwatch.accent,
+            "--startup-accent-soft": selectedThemeSwatch.soft,
+            "--startup-accent-glow": `${selectedThemeSwatch.accent}44`,
+            "--accent-color": selectedThemeSwatch.accent,
+            "--accent-hover": selectedThemeSwatch.hover,
+            "--accent-soft": selectedThemeSwatch.soft,
+            "--accent-soft-strong": `${selectedThemeSwatch.accent}44`,
+          } as React.CSSProperties)
+        : ({} as React.CSSProperties),
+    [selectedThemeSwatch],
+  );
+
+  React.useEffect(() => {
+    const root = document.documentElement;
+    Object.entries(themeVars).forEach(([key, value]) => {
+      root.style.setProperty(key, String(value));
+    });
+  }, [themeVars]);
+
   if (!props.settingsLoaded) {
     return <StartupScreen />;
   }
@@ -55,10 +79,7 @@ export function AppShell(props: AppShellProps) {
         style={
           {
             background: "linear-gradient(180deg, #131314 0%, #17181a 40%, #131314 100%)",
-            "--accent-color": props.selectedThemeSwatch.accent,
-            "--accent-hover": props.selectedThemeSwatch.hover,
-            "--accent-soft": props.selectedThemeSwatch.soft,
-            "--accent-soft-strong": `${props.selectedThemeSwatch.accent}44`,
+            ...themeVars,
           } as React.CSSProperties
         }
       >
@@ -126,18 +147,13 @@ export function AppShell(props: AppShellProps) {
           onWheel={props.markUiInteraction}
         >
           <AppSidePanel
-            open={props.leftPanelOpen}
+            open={props.rightPanelOpen}
             side="left"
-            title="App Settings"
+            title="Model Controls"
             isCompactLayout={props.isCompactLayout}
-            onClose={() => props.setLeftPanelOpen(false)}
-            actions={(
-              <IconButton size="sm" title="Download models" onClick={() => props.setSetupScreenOpen(true)}>
-                <DownloadIcon />
-              </IconButton>
-            )}
+            onClose={() => props.setRightPanelOpen(false)}
           >
-            {props.leftPanelContent}
+            {props.rightPanelContent}
           </AppSidePanel>
 
           <main
@@ -320,13 +336,18 @@ export function AppShell(props: AppShellProps) {
           </main>
 
           <AppSidePanel
-            open={props.rightPanelOpen}
+            open={props.leftPanelOpen}
             side="right"
-            title="Model Controls"
+            title="App Settings"
             isCompactLayout={props.isCompactLayout}
-            onClose={() => props.setRightPanelOpen(false)}
+            onClose={() => props.setLeftPanelOpen(false)}
+            actions={(
+              <IconButton size="sm" title="Download models" onClick={() => props.setSetupScreenOpen(true)}>
+                <DownloadIcon />
+              </IconButton>
+            )}
           >
-            {props.rightPanelContent}
+            {props.leftPanelContent}
           </AppSidePanel>
         </div>
       </div>

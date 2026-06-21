@@ -22,6 +22,18 @@ const MEMORY_SCHEMA_KEYS: (keyof StructuredMemoryDocument)[] = [
   "recent_turns",
 ];
 
+const MARKDOWN_SECTION_KEYS: Record<string, keyof StructuredMemoryDocument> = {
+  "self and stable facts": "profile_facts",
+  "stable user facts": "profile_facts",
+  preferences: "preferences",
+  "relationship and communication": "relationship",
+  "relationship and communication style": "relationship",
+  "projects and recurring topics": "projects",
+  "open threads": "open_threads",
+  "open threads to remember": "open_threads",
+  "recent useful context": "recent_turns",
+};
+
 const LIMITS: Record<keyof StructuredMemoryDocument, number> = {
   profile_facts: 24,
   preferences: 24,
@@ -51,6 +63,12 @@ const cleanMemoryItem = (value: unknown) =>
     ? compactMemoryLine(value.replace(/^[-*]\s*/, ""), 420)
     : "";
 
+const isMemoryBoilerplate = (value: string) =>
+  value === "None yet." || value.startsWith("This is the character's living memory");
+
+const looksLikeMojibake = (value: string) =>
+  /(?:[\u00c2\u00c3\u00c4\u00c6]|\u00e1[\u00ba\u00bb]|\u00e2\u20ac|\u00ef\u00bf\u00bd|\ufffd|\?m l\?|Ti\u00e1|Ch\u00e1|\u00c4\u2018|kh\u00c3|nh\u00e1|g\u00e1)/.test(value);
+
 export const normalizeStructuredMemory = (value: Partial<StructuredMemoryDocument>) => {
   const next = emptyStructuredMemory();
   for (const key of MEMORY_SCHEMA_KEYS) {
@@ -59,6 +77,8 @@ export const normalizeStructuredMemory = (value: Partial<StructuredMemoryDocumen
     next[key] = items
       .map(cleanMemoryItem)
       .filter(Boolean)
+      .filter((item) => !isMemoryBoilerplate(item))
+      .filter((item) => !looksLikeMojibake(item))
       .filter((item) => {
         const normalized = item.toLocaleLowerCase();
         if (seen.has(normalized)) return false;
@@ -79,7 +99,27 @@ export const parseStructuredMemory = (raw: string): StructuredMemoryDocument => 
       return normalizeStructuredMemory(parsed as Partial<StructuredMemoryDocument>);
     }
   } catch {
-    // Fall through to legacy bullet import.
+    // Fall through to Markdown/legacy import.
+  }
+
+  if (clean.includes("## ")) {
+    const parsedMarkdown = emptyStructuredMemory();
+    let currentKey: keyof StructuredMemoryDocument | null = null;
+    for (const rawLine of clean.split("\n")) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("# ")) continue;
+      if (line.startsWith("## ")) {
+        const title = line.replace(/^##\s+/, "").trim().toLocaleLowerCase();
+        currentKey = MARKDOWN_SECTION_KEYS[title] ?? null;
+        continue;
+      }
+      if (!currentKey || !line.startsWith("-")) continue;
+      const item = compactMemoryLine(line.replace(/^[-*]\s*/, ""), 420);
+      if (item && item.toLocaleLowerCase() !== "none yet.") {
+        parsedMarkdown[currentKey].push(item);
+      }
+    }
+    return normalizeStructuredMemory(parsedMarkdown);
   }
 
   const legacyLines = clean

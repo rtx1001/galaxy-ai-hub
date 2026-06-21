@@ -1,4 +1,6 @@
 import React from "react";
+import { activateAudioVisualizer, canUseAudioVisualizerForSrc, deactivateAudioVisualizer } from "../audioVisualizer";
+import { setInternalMediaPlayback } from "../internalMediaState";
 import { loadMediaVolume, MEDIA_VOLUME_EVENT, pauseOtherMediaElements, saveMediaVolume } from "../utils";
 import { useAudioPlaybackRegistry } from "./AudioPlaybackContext";
 import { PauseIcon, PlayIcon, SpeakerIcon, SpeakerMutedIcon } from "./Icons";
@@ -39,7 +41,11 @@ export function RegisteredAudio({
     if (!audioElement || !viewElement) return;
     audioElement.volume = volume;
     audioElement.muted = volume <= 0;
-    return registerTrack({ id, title, audioElement, viewElement });
+    const unregister = registerTrack({ id, title, audioElement, viewElement });
+    return () => {
+      setInternalMediaPlayback(id, false);
+      unregister();
+    };
   }, [id, title, registerTrack]);
 
   React.useEffect(() => {
@@ -111,14 +117,21 @@ export function RegisteredAudio({
         onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
         onPlay={(event) => {
           pauseOtherMediaElements(event.currentTarget);
+          if (canUseAudioVisualizerForSrc(src)) {
+            activateAudioVisualizer(event.currentTarget).catch(() => undefined);
+          }
+          setInternalMediaPlayback(id, true);
           setIsLocalPlaying(true);
           markPlaying(id);
         }}
-        onPause={() => {
+        onPause={(event) => {
+          deactivateAudioVisualizer(event.currentTarget);
           setIsLocalPlaying(false);
           markPaused(id);
         }}
-        onEnded={() => {
+        onEnded={(event) => {
+          deactivateAudioVisualizer(event.currentTarget);
+          setInternalMediaPlayback(id, false);
           setIsLocalPlaying(false);
           markPaused(id);
         }}

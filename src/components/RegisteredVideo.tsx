@@ -1,5 +1,7 @@
 import React from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { activateAudioVisualizer, canUseAudioVisualizerForSrc, deactivateAudioVisualizer } from "../audioVisualizer";
+import { setInternalMediaPlayback } from "../internalMediaState";
 import { loadMediaVolume, MEDIA_VOLUME_EVENT, pauseOtherMediaElements, saveMediaVolume } from "../utils";
 import {
   Forward10Icon,
@@ -174,6 +176,11 @@ export function RegisteredVideo({
   }, []);
 
   React.useEffect(() => {
+    const mediaId = `video:${src}`;
+    return () => setInternalMediaPlayback(mediaId, false);
+  }, [src]);
+
+  React.useEffect(() => {
     const element = videoRef.current;
     if (!element) return;
     element.volume = volume;
@@ -257,10 +264,21 @@ export function RegisteredVideo({
           pauseOtherMediaElements(event.currentTarget);
           event.currentTarget.volume = volume;
           event.currentTarget.muted = volume <= 0;
+          if (canUseAudioVisualizerForSrc(src)) {
+            activateAudioVisualizer(event.currentTarget).catch(() => undefined);
+          }
+          setInternalMediaPlayback(`video:${src}`, true);
           setIsPlaying(true);
         }}
-        onPause={() => setIsPlaying(false)}
-        onEnded={() => setIsPlaying(false)}
+        onPause={(event) => {
+          deactivateAudioVisualizer(event.currentTarget);
+          setIsPlaying(false);
+        }}
+        onEnded={(event) => {
+          deactivateAudioVisualizer(event.currentTarget);
+          setInternalMediaPlayback(`video:${src}`, false);
+          setIsPlaying(false);
+        }}
         className={`block w-full bg-black object-contain ${
           isFullscreen
             ? "h-screen max-h-none min-h-0"

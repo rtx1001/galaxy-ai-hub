@@ -38,10 +38,79 @@ export const stripSpeechLeadingZero = (value: string) => {
   return Number.isFinite(numeric) ? String(numeric) : value;
 };
 
+export const SPEECH_ACRONYM_MAP = [
+  { pattern: /\bAI\b/g, en: "A I", vi: "\u00e2y ai" },
+] as const;
+
+export const expandSpeechAcronyms = (text: string, vi: boolean) =>
+  SPEECH_ACRONYM_MAP.reduce(
+    (current, entry) => current.replace(entry.pattern, vi ? entry.vi : entry.en),
+    text,
+  );
+
+export const VIETNAMESE_SPEECH_SHORTHAND_MAP = [
+  { pattern: /\bb\u00e2y\s+h\b/gi, replacement: "b\u00e2y gi\u1edd" },
+  { pattern: /\bhqua\b/gi, replacement: "h\u00f4m qua" },
+  { pattern: /\bhnay\b/gi, replacement: "h\u00f4m nay" },
+  { pattern: /\bsn\b/gi, replacement: "sinh nh\u1eadt" },
+  { pattern: /\bcty\b/gi, replacement: "c\u00f4ng ty" },
+  { pattern: /\bko\b/gi, replacement: "kh\u00f4ng" },
+  { pattern: /(^|[^\p{L}\p{N}_])r(?=$|[^\p{L}\p{N}_])/giu, replacement: "$1r\u1ed3i" },
+  { pattern: /\bj\b/gi, replacement: "g\u00ec" },
+  { pattern: /(^|[^\p{L}\p{N}_])\u0111c(?=$|[^\p{L}\p{N}_])/giu, replacement: "$1\u0111\u01b0\u1ee3c" },
+  { pattern: /\bdc\b/gi, replacement: "\u0111\u01b0\u1ee3c" },
+  { pattern: /(^|[^\p{L}\p{N}_])\u0111t(?=$|[^\p{L}\p{N}_])/giu, replacement: "$1\u0111i\u1ec7n tho\u1ea1i" },
+  { pattern: /\bvs\b/gi, replacement: "v\u1edbi" },
+  { pattern: /\bntn\b/gi, replacement: "nh\u01b0 th\u1ebf n\u00e0o" },
+  { pattern: /\buhm\b/gi, replacement: "\u1eebm" },
+  { pattern: /\bbb\b/gi, replacement: "bai bai" },
+  { pattern: /\btks\b/gi, replacement: "c\u1ea3m \u01a1n" },
+  { pattern: /\bthx\b/gi, replacement: "c\u1ea3m \u01a1n" },
+  { pattern: /\bokay\b/gi, replacement: "\u00f4 k\u00ea" },
+  { pattern: /\bok\b/gi, replacement: "\u00f4 k\u00ea" },
+] as const;
+
+export const expandVietnameseSpeechShorthand = (text: string, vi: boolean) =>
+  vi
+    ? VIETNAMESE_SPEECH_SHORTHAND_MAP.reduce(
+        (current, entry) => current.replace(entry.pattern, entry.replacement),
+        text,
+      )
+    : text;
+
+export const shortenVietnameseSpeechLetterRuns = (text: string, vi: boolean) =>
+  vi
+    ? [
+        [/([áàảãạăắằẳẵặâấầẩẫậ])a{2,}/giu, "$1"],
+        [/([éèẻẽẹêếềểễệ])e{2,}/giu, "$1"],
+        [/([íìỉĩị])i{2,}/giu, "$1"],
+        [/([óòỏõọôốồổỗộơớờởỡợ])o{2,}/giu, "$1"],
+        [/([úùủũụưứừửữự])u{2,}/giu, "$1"],
+        [/([ýỳỷỹỵ])y{2,}/giu, "$1"],
+      ].reduce((current, [pattern, replacement]) => current.replace(pattern, replacement as string), text)
+        .replace(/([\p{L}])\1{2,}/giu, "$1")
+    : text;
+
+export const repairSpacedSpeechDecimals = (text: string) =>
+  text
+    .replace(/\b(0)\s*([.,])\s*(\d+)\b/g, "$1$2$3")
+    .replace(
+      /\b(-?\d+)\s*([.,])\s*(\d+)(?=\s*(?:mm|cm|km\/h|km|kg|g|%|\u00b0?\s*[cf]\b|usd\b|vnd\b|vn\u0111\b|\u20ab|\$|\u20ac|\u00a3))/gi,
+      "$1$2$3",
+    );
+
 export const normalizeTextForSpeechReading = (text: string) => {
   const vi = textLooksVietnamese(text);
   const rangeWord = vi ? " \u0111\u1ebfn " : " to ";
-  return text
+  return shortenVietnameseSpeechLetterRuns(
+    expandVietnameseSpeechShorthand(expandSpeechAcronyms(repairSpacedSpeechDecimals(text), vi), vi),
+    vi,
+  )
+    .replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g, (_, hour, minute) =>
+      vi
+        ? `${stripSpeechLeadingZero(hour)} gi\u1edd ${minute === "00" ? "kh\u00f4ng kh\u00f4ng" : minute}`
+        : `${stripSpeechLeadingZero(hour)} ${minute === "00" ? "o clock" : minute}`,
+    )
     .replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g, (_, day, month, year) =>
       vi ? `${stripSpeechLeadingZero(day)} th\u00e1ng ${stripSpeechLeadingZero(month)} n\u0103m ${year}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}/${year}`,
     )
@@ -52,10 +121,16 @@ export const normalizeTextForSpeechReading = (text: string) => {
       vi ? `${stripSpeechLeadingZero(day)} th\u00e1ng ${stripSpeechLeadingZero(month)}` : `${stripSpeechLeadingZero(month)}/${stripSpeechLeadingZero(day)}`,
     )
     .replace(/(-?\d+(?:[.,]\d+)?)\s*\u00b0\s*C\b/gi, (_, value) =>
-      vi ? `${value} \u0111\u1ed9 x\u00ea` : `${value} degrees celsius`,
+      vi ? `${value} \u0111\u1ed9 C\u00ea` : `${value} degrees celsius`,
+    )
+    .replace(/(-?\d+(?:[.,]\d+)?)\s*C\b/gi, (_, value) =>
+      vi ? `${value} \u0111\u1ed9 C\u00ea` : `${value} degrees celsius`,
     )
     .replace(/(-?\d+(?:[.,]\d+)?)\s*\u00b0\s*F\b/gi, (_, value) =>
       vi ? `${value} \u0111\u1ed9 \u00e9p` : `${value} degrees fahrenheit`,
+    )
+    .replace(/(-?\d+(?:[.,]\d+)?)\s*F\b/g, (_, value) =>
+      vi ? `${value} \u0111\u1ed9 F` : `${value} degrees fahrenheit`,
     )
     .replace(/(-?\d+(?:[.,]\d+)?)\s*km\/h\b/gi, (_, value) =>
       vi ? `${value} ki l\u00f4 m\u00e9t tr\u00ean gi\u1edd` : `${value} kilometers per hour`,
@@ -85,7 +160,9 @@ export const normalizeTextForSpeechReading = (text: string) => {
     .replace(/:(?=\s*\D|$)/g, ". ");
 };
 export const sanitizeTextForSpeech = (text: string) => {
-  const speechReadyText = normalizeTextForSpeechReading(withSpeechSentenceBreaks(text));
+  const ellipsisPlaceholder = "GALAXYELLIPSISPAUSE";
+  const speechReadyText = normalizeTextForSpeechReading(withSpeechSentenceBreaks(text))
+    .replace(/(?:(?:\.\s*){3,}|\u2026)/g, ellipsisPlaceholder);
   const collapsed = speechReadyText
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`([^`]*)`/g, "$1")
@@ -99,12 +176,12 @@ export const sanitizeTextForSpeech = (text: string) => {
     .replace(/["\u201C\u201D'\u2018\u2019]/g, "")
     .replace(/[\u2022\u00B7\u00A6]/g, " ")
     .replace(/&nbsp;|&#160;/gi, " ")
-    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, " ")
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0E\uFE0F\u200D]/gu, " ")
     .replace(/(?<=\p{L})[-\u2013\u2014](?=\p{L})/gu, " ")
     .replace(/\s*[-\u2013\u2014]\s*/g, ", ")
     .replace(/\s*[\\/]\s*/g, ", ")
     .replace(/[;,]{2,}/g, ", ")
-    .replace(/[.]{4,}/g, "...")
+    .replace(/[.]{4,}/g, ellipsisPlaceholder)
     .replace(/\s+/g, " ")
     .trim();
 
@@ -114,9 +191,124 @@ export const sanitizeTextForSpeech = (text: string) => {
     .trim();
 
   return (withoutSymbolRuns || speechReadyText.trim())
+    .replace(new RegExp(ellipsisPlaceholder, "g"), "...")
+    .replace(/([.!?])\s+\./g, "$1")
+    .replace(/\.{3}(?=\p{L})/gu, "... ")
     .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/,\s*([.!?])/g, "$1")
+    .replace(/^[\s,.;:!?]+/, "")
     .trim()
     .toLocaleLowerCase();
+};
+
+const SPEECH_CHUNK_TARGET_CHARS = 520;
+const SPEECH_CHUNK_MIN_CHARS = 280;
+const SPEECH_CHUNK_HARD_MAX_CHARS = 820;
+
+const isDecimalPoint = (text: string, index: number) =>
+  text[index] === "." && /\d/.test(text[index - 1] ?? "") && /\d/.test(text[index + 1] ?? "");
+
+const splitLongSpeechUnit = (unit: string) => {
+  const parts: string[] = [];
+  let remaining = unit.trim();
+
+  while (remaining.length > SPEECH_CHUNK_HARD_MAX_CHARS) {
+    const windowText = remaining.slice(0, SPEECH_CHUNK_TARGET_CHARS);
+    const commaIndex = Math.max(windowText.lastIndexOf(","), windowText.lastIndexOf(";"), windowText.lastIndexOf(":"));
+    const spaceIndex = windowText.lastIndexOf(" ");
+    const splitIndex =
+      commaIndex >= SPEECH_CHUNK_MIN_CHARS
+        ? commaIndex + 1
+        : spaceIndex >= SPEECH_CHUNK_MIN_CHARS
+          ? spaceIndex
+          : SPEECH_CHUNK_TARGET_CHARS;
+    parts.push(remaining.slice(0, splitIndex).trim());
+    remaining = remaining.slice(splitIndex).trim();
+  }
+
+  if (remaining) {
+    parts.push(remaining);
+  }
+
+  return parts;
+};
+
+const splitSpeechIntoSentenceUnits = (text: string) => {
+  const units: string[] = [];
+  let start = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (!/[.!?]/.test(char) || isDecimalPoint(text, index)) {
+      continue;
+    }
+
+    let end = index + 1;
+    while (text[end] === "." || text[end] === "!" || text[end] === "?") {
+      end += 1;
+    }
+
+    if (end < text.length && !/\s/.test(text[end])) {
+      continue;
+    }
+
+    const unit = text.slice(start, end).trim();
+    if (unit) {
+      units.push(unit);
+    }
+    start = end;
+  }
+
+  const tail = text.slice(start).trim();
+  if (tail) {
+    units.push(tail);
+  }
+
+  return units.flatMap(splitLongSpeechUnit);
+};
+
+export const splitTextForSpeechPlayback = (text: string) => {
+  const speechText = sanitizeTextForSpeech(text).trim();
+  if (!speechText) {
+    return [];
+  }
+
+  const units = splitSpeechIntoSentenceUnits(speechText);
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const unit of units) {
+    const next = current ? `${current} ${unit}` : unit;
+    if (
+      current &&
+      (
+        next.length > SPEECH_CHUNK_TARGET_CHARS ||
+        next.length > SPEECH_CHUNK_HARD_MAX_CHARS
+      ) &&
+      current.length >= SPEECH_CHUNK_MIN_CHARS
+    ) {
+      chunks.push(current);
+      current = unit;
+    } else {
+      current = next;
+    }
+
+    if (current.length >= SPEECH_CHUNK_HARD_MAX_CHARS) {
+      chunks.push(current);
+      current = "";
+    }
+  }
+
+  if (current) {
+    if (chunks.length && current.length < SPEECH_CHUNK_MIN_CHARS) {
+      chunks[chunks.length - 1] = `${chunks[chunks.length - 1]} ${current}`.trim();
+    } else {
+      chunks.push(current);
+    }
+  }
+
+  return chunks;
 };
 
 export const formatReactThinking = (result: AgentReactResult) => {

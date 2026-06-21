@@ -154,7 +154,7 @@ export const getVietnameseLunarDate = (date: Date) => {
     const parts = formatter.formatToParts(date);
     const day = parts.find(p => p.type === 'day')?.value;
     const month = parts.find(p => p.type === 'month')?.value;
-    return `Âm lịch: ${day}/${month}`;
+    return `\u00c2m l\u1ecbch: ${day}/${month}`;
   } catch (e) {
     return "";
   }
